@@ -1,0 +1,13 @@
+# Datasets y modelos pesados
+emotions_dataset/
+*.keras
+*.h5
+*.dat
+*.whl
+
+# Entornos / IDE
+.idea/
+__pycache__/
+*.pyc
+.venv/
+venv/

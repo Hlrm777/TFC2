@@ -1,0 +1,16 @@
+# Dependencias de desarrollo y pruebas.
+#
+# Deliberadamente NO incluye "-r requirements.txt".
+#
+# telmeow_teleop/config.py y telmeow_teleop/limits.py están escritos con solo
+# biblioteca estándar, así que toda la lógica de límites articulares y de
+# resolución de configuración se puede validar con:
+#
+#     pip install -r requirements-dev.txt
+#     pytest
+#
+# sin descargar los ~600 MB de TensorFlow ni MediaPipe. Ese es el retorno
+# concreto de haber mantenido esos dos módulos libres de dependencias, y
+# funciona en cualquier versión de Python 3.10+.
+
+pytest==8.3.3

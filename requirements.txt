@@ -1,0 +1,56 @@
+# Dependencias de ejecución del pipeline de teleoperación Telmeow.
+#
+# INTÉRPRETE OBJETIVO: CPython 3.12 x64 en Windows.
+#
+#   Es el máximo común denominador: TensorFlow publica ruedas hasta cp313 y
+#   MediaPipe hasta cp312, así que 3.12 es la versión más alta que soporta a
+#   ambos. En Python 3.13/3.14 la instalación falla (no hay rueda de MediaPipe).
+#
+#   Instalación recomendada:
+#       py install 3.12
+#       py -V:3.12 -m venv .venv
+#       .venv\Scripts\activate
+#       pip install -r requirements.txt
+#
+# NOTA: dlib NO figura aquí, a propósito. El PROMPT 4 sustituye la estimación
+# de pose de cabeza por MediaPipe Face Mesh + solvePnP. dlib exigía descargar
+# shape_predictor_68_face_landmarks.dat (~100 MB, no versionable) y una rueda
+# precompilada atada a Python 3.9, lo que hacía el proyecto no reproducible.
+#
+# NOTA: en Windows TensorFlow es solo-CPU desde la versión 2.11 (el soporte de
+# GPU nativa terminó en la 2.10). Es irrelevante aquí: una CNN de 48x48
+# ejecutada a 5 Hz sobra en CPU.
+
+numpy==1.26.4
+opencv-contrib-python==4.10.0.84
+mediapipe==0.10.14
+tensorflow==2.16.1
+paho-mqtt==2.1.0
+protobuf==4.25.3
+
+# --- Por qué estos paquetes y no otros -------------------------------------
+#
+# opencv-contrib-python (y no opencv-python)
+#   MediaPipe ya depende de opencv-contrib-python. Declarar además
+#   opencv-python instala DOS distribuciones que proveen el mismo módulo cv2,
+#   y cuál gana depende del orden de instalación. El código solo usa la API
+#   core y cv2.data, que contrib incluye.
+#
+# mediapipe 0.10.x (y no la serie 1.0)
+#   Los PROMPTS 4 y 5 usan la API clásica mp.solutions.face_mesh y
+#   mp.solutions.pose. La serie 1.0 reorganizó la biblioteca alrededor de
+#   MediaPipe Tasks y podría no exponerla. Al llegar al PROMPT 4, confirmar
+#   que la versión instalada aún la expone antes de escribir código contra ella.
+#
+# tensorflow 2.16.1
+#   emotion_model.keras se guardó con Keras 3.3.3. TensorFlow 2.15 y anteriores
+#   traen Keras 2 y no podrían cargarlo. La 2.16 es la primera serie con Keras 3
+#   por defecto. keras no se ancla por separado: se deja que TensorFlow resuelva
+#   la versión que le corresponde.
+#
+# protobuf 4.25.3
+#   Anclado explícitamente para desarmar el conflicto habitual del resolvedor
+#   entre las restricciones de MediaPipe y las de TensorFlow.
+#
+# numpy 1.26.4
+#   TensorFlow 2.16 exige >=1.26,<2.0. NumPy 2 rompería TensorFlow y MediaPipe.

@@ -9,6 +9,7 @@ manual del plan maestro (levantar Mosquitto y ver si el brazo oscila).
 import json
 import time
 
+import paho.mqtt.client as mqtt
 import pytest
 
 from telmeow_teleop.config import MQTTConfig, RateConfig
@@ -22,19 +23,28 @@ CLAVES_DEL_CONTRATO = {
 POSE = dict(pan=1.0, tilt=2.0, armL=3.0, armLtw=4.0, armR=5.0, armRtw=6.0)
 
 
+class InfoPublicacion:
+    """Equivalente al MQTTMessageInfo de paho: solo interesa el código."""
+
+    def __init__(self, rc):
+        self.rc = rc
+
+
 class ClienteFalso:
     """Registra las publicaciones en vez de mandarlas a la red."""
 
-    def __init__(self):
+    def __init__(self, rc=mqtt.MQTT_ERR_SUCCESS):
         self.publicaciones = []
         self.conectado = False
         self.loop_activo = False
         self.on_connect = None
         self.on_disconnect = None
         self.retardo_reconexion = None
+        self.rc = rc  # código que devolverá publish()
 
     def publish(self, topic, payload, qos=0):
         self.publicaciones.append({"topic": topic, "payload": payload, "qos": qos})
+        return InfoPublicacion(self.rc)
 
     def connect_async(self, host, port, keepalive):
         self.conectado = True
@@ -366,6 +376,86 @@ def test_la_tasa_efectiva_decae_al_dejar_de_publicar(entorno):
 def test_connected_es_falso_antes_de_conectar(entorno):
     pub, _, _ = entorno
     assert pub.connected is False
+
+
+# --------------------------------------------------------------------------
+# Mensajes que el cliente no logra entregar
+# --------------------------------------------------------------------------
+
+
+def _publisher_que_falla(rc=mqtt.MQTT_ERR_NO_CONN):
+    cliente, reloj = ClienteFalso(rc=rc), RelojFalso()
+    pub = PosePublisher(MQTTConfig(), client_factory=lambda: cliente, clock=reloj)
+    return pub, cliente, reloj
+
+
+def test_sin_conexion_publish_devuelve_false():
+    """Regresión: publish() ignoraba el código de retorno de paho.
+
+    Con QoS 0, un mensaje publicado sin enlace establecido NO se encola: se
+    descarta. Medido contra un broker real, los primeros ~40 mensajes de una
+    sesión a 20 Hz se perdían mientras el publisher informaba haberlos enviado
+    todos. Es el peor modo de fallo posible, porque parece que funciona.
+    """
+    pub, _, _ = _publisher_que_falla()
+    assert pub.publish(**POSE) is False
+
+
+def test_sin_conexion_no_se_cuentan_como_enviados():
+    pub, _, reloj = _publisher_que_falla()
+    for _ in range(5):
+        pub.publish(**POSE)
+        reloj.avanzar(0.05)
+    assert pub.message_count == 0
+    assert pub.failed_count == 5
+
+
+def test_los_no_entregados_no_inflan_la_tasa_del_hud():
+    """El HUD debe mostrar 0 Hz cuando no llega nada al broker, no 20 Hz."""
+    pub, _, _ = _publisher_que_falla()
+    pub.publish(**POSE)
+    assert pub.effective_hz == 0.0
+
+
+def test_fallo_y_descarte_por_tasa_son_contadores_distintos():
+    pub, cliente, _ = _publisher_que_falla()
+    pub.publish(**POSE)  # llega a la red y falla ahí
+    pub.publish(**POSE)  # descartado por tasa, ni siquiera lo intenta
+    assert pub.failed_count == 1
+    assert pub.dropped_count == 1
+    assert len(cliente.publicaciones) == 1
+
+
+def test_un_cliente_sin_codigo_de_retorno_se_considera_exito():
+    """Tolerancia con dobles de prueba que devuelven None."""
+
+    class ClienteMudo(ClienteFalso):
+        def publish(self, topic, payload, qos=0):
+            self.publicaciones.append({"topic": topic, "payload": payload, "qos": qos})
+            return None
+
+    cliente = ClienteMudo()
+    pub = PosePublisher(
+        MQTTConfig(), client_factory=lambda: cliente, clock=RelojFalso()
+    )
+    assert pub.publish(**POSE) is True
+    assert pub.message_count == 1
+
+
+# --------------------------------------------------------------------------
+# Espera de conexión
+# --------------------------------------------------------------------------
+
+
+def test_wait_connected_agota_el_plazo_si_no_hay_enlace(entorno):
+    pub, _, _ = entorno
+    assert pub.wait_connected(timeout=0.05) is False
+
+
+def test_wait_connected_devuelve_true_si_ya_hay_enlace(entorno):
+    pub, _, _ = entorno
+    pub._connected = True
+    assert pub.wait_connected(timeout=0.05) is True
 
 
 # --------------------------------------------------------------------------

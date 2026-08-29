@@ -117,7 +117,14 @@ allow_anonymous true
 ```
 
 Mosquitto se descarga de [mosquitto.org/download](https://mosquitto.org/download/)
-(instalador x64 para Windows). Para lanzarlo en primer plano y ver la traza:
+(instalador x64 para Windows), o con el gestor de paquetes:
+
+```bash
+winget install --id EclipseFoundation.Mosquitto --exact
+```
+
+Requiere **privilegios de administrador**: escribe en `Program Files` y registra
+un servicio de Windows. Para lanzarlo en primer plano y ver la traza:
 
 ```bash
 mosquitto -c mosquitto.conf -v
@@ -125,6 +132,20 @@ mosquitto -c mosquitto.conf -v
 
 Debe imprimir dos líneas `Opening ipv4 listen socket on port ...`, una por cada
 puerto. Si solo aparece una, el archivo de configuración no se cargó.
+
+### Alternativa sin privilegios de administrador
+
+Si no se puede instalar Mosquitto, [`tools/dev_broker.py`](tools/dev_broker.py)
+levanta un broker equivalente en Python puro (`amqtt`) con **los mismos dos
+listeners**:
+
+```bash
+python tools/dev_broker.py
+```
+
+Sirve para desarrollar y para cerrar la verificación del enlace. **El broker
+declarado del proyecto sigue siendo Mosquitto**, y es el que debe usarse para
+las mediciones que se reporten en la tesis.
 
 ---
 
@@ -158,6 +179,15 @@ Luego abrir `http://localhost:8000/telmeow_viewer.html`.
 ```bash
 python tools/mqtt_monitor.py
 ```
+
+Verificado el 2026-08-29: `armR` recorre 18°→42° y `armRtw` 42°→58° en el visor,
+a 20-23 Hz, con el indicador de interferencia en «libre». Detalle en
+[`HALLAZGOS_PLAN_MAESTRO.md`](HALLAZGOS_PLAN_MAESTRO.md).
+
+> **Esperar el enlace antes de emitir.** `connect_async()` devuelve al instante,
+> pero el enlace tarda ~2 s en establecerse, y con QoS 0 lo que se publique
+> mientras tanto se pierde sin dejar rastro. Usar
+> `PosePublisher.wait_connected()` antes de empezar a publicar.
 
 ---
 

@@ -52,7 +52,7 @@ necesidad de que `main.py` mantenga estado.
 
 ---
 
-## H3 — El indicador `t-lat` del visor NO mide latencia
+## H3 — El «proxy de latencia» del visor no puede variar con la latencia
 
 **Dice el plan** (§0.3): «Latencia objetivo declarada: **< 150 ms**». La Parte 5
 anticipa preguntas del jurado sobre validación.
@@ -64,14 +64,24 @@ const now=performance.now();
 if(lastMsg){ document.getElementById('t-lat').textContent=(now-lastMsg).toFixed(0)+' ms';
 ```
 
-`now - lastMsg` es el **intervalo entre mensajes consecutivos**, no el retardo
-extremo a extremo. A 20 Hz mostrará ~50 ms de forma constante, aunque la
-latencia real fuera de 800 ms. El indicador no puede subir por encima del
-periodo de publicación, así que **nunca podría delatar un problema de latencia**.
+**Crédito donde toca:** el visor **no** presenta esto como una latencia medida.
+Su propia nota al pie dice, textualmente: «Latencia = intervalo entre mensajes
+recibidos del broker (proxy del retardo extremo a extremo del pipeline de visión
+→ MQTT → render). Objetivo de diseño < 150 ms.» Está etiquetado con honestidad.
 
-**Riesgo de defensa:** es una cifra declarada en el documento que el indicador
-visible no sustenta. Un jurado que pregunte «¿cómo midió esos 150 ms?» encuentra
-que se midió otra cosa.
+**La objeción, entonces, es más fina:** el intervalo entre mensajes **no es un
+proxy válido** de la latencia extremo a extremo, porque está acotado por arriba
+por el periodo de publicación. Si el pipeline de visión tardara 500 ms por
+frame pero publicara con cadencia regular a 20 Hz, `t-lat` seguiría marcando
+50 ms. Una magnitud que **no puede variar con aquello que dice aproximar** no lo
+aproxima: mide la regularidad del emisor, no su retardo.
+
+Medido hoy contra el broker local: `t-lat` marcó 49-51 ms de forma estable, que
+es exactamente el periodo de 20 Hz — no una medida de latencia.
+
+**Riesgo de defensa:** si el jurado pregunta «¿cómo midió esos 150 ms?», la
+respuesta honesta hoy es que no se midieron. Conviene resolverlo antes, no en la
+sala.
 
 **Cambio propuesto:** una de dos.
 
@@ -266,6 +276,65 @@ junto a H3 — es el mismo tema visto desde el lado del visor.
 
 ---
 
+## H12 — `publish()` informaba de envíos que nunca salieron
+
+Hallazgo del PROMPT 2, detectado al verificar el enlace contra un broker real.
+
+**Síntoma:** el publisher declaraba 41 mensajes enviados y al suscriptor solo
+llegaron 9 — **y eran los últimos 9**. Los 32 primeros se perdieron sin que
+nada lo señalara.
+
+**Causa:** `publish()` ignoraba el código de retorno de paho. Cuando el enlace
+todavía no está establecido, paho devuelve `MQTT_ERR_NO_CONN` y, con QoS 0,
+**descarta el mensaje sin encolarlo**. Al no mirar ese código, el publisher los
+contaba como enviados.
+
+**Por qué es el peor modo de fallo posible:** el HUD del PROMPT 7 habría
+mostrado «20 Hz publicando» mientras al broker no llegaba absolutamente nada.
+Un fallo que se anuncia como éxito cuesta mucho más de diagnosticar que uno que
+se cae.
+
+**Corregido:** `publish()` comprueba el código y devuelve `False` si el mensaje
+no salió. Contador `failed_count` separado del de descartes por tasa, porque son
+cosas distintas: uno es «no quise enviarlo», el otro «no pude».
+
+**Cambio propuesto:** el HUD del PROMPT 7 debe mostrar los tres contadores
+—enviados, descartados por tasa, sin entregar— y no solo la tasa.
+
+---
+
+## H13 — El enlace MQTT tarda ~2 s en establecerse
+
+**Se encontró:** `connect_async()` devuelve de inmediato, pero el enlace real
+tarda. Medido contra un broker local: **2058 ms**. Con QoS 0, todo lo publicado
+en esa ventana se pierde (ver H12): a 20 Hz son unos 40 mensajes.
+
+**Corregido:** se añadió `PosePublisher.wait_connected(timeout)`. Con la espera,
+la verificación pasó de 9 mensajes recibidos de 41 a **40 de 40**.
+
+**Relevante para los PROMPT 7 y 10:** tanto `main.py` como el panel del operador
+deben esperar el enlace antes de empezar a emitir. Si no, los primeros dos
+segundos de cada sesión se pierden en silencio — y como son justo los del
+arranque, es cuando el operador está mirando si «funciona».
+
+---
+
+## H14 — Los identificadores de los sliders no son los que documenta la skill
+
+**Dice la skill del visor:** `s-armL`, `s-armLtw`, `s-armR`, `s-armRtw`.
+
+**Se encontró** en el DOM real: `s-arL`, `s-arLtw`, `s-arR`, `s-arRtw` — sin la
+`m`. Los indicadores de valor son `v-arL`, `v-arLtw`, `v-arR`, `v-arRtw`.
+
+Sin consecuencias para el pipeline de Python (esos IDs son internos del visor),
+pero cualquier automatización o prueba que los use fallará con los nombres
+documentados. Lo descubrí porque una consulta al DOM devolvió `null`.
+
+**Cambio propuesto:** corregir la tabla de la sección «6 Grados de Libertad» de
+la skill.
+
+---
+
 ## Resumen de cambios propuestos al plan maestro
 
 | # | Sección | Acción |
@@ -281,6 +350,38 @@ junto a H3 — es el mismo tema visto desde el lado del visor.
 | H9 | skill del visor | Precisar el alcance de la nota sobre cdnjs |
 | H10 | §0.4 | Anotar que manda la tabla 2D |
 | H11 | Parte 0 / §0.3 | Nota metodológica: medir con `perf_counter`, no `monotonic` |
+| H12 | PROMPT 7 | El HUD debe mostrar enviados / descartados / sin entregar |
+| H13 | PROMPT 7 y 10 | Esperar el enlace MQTT antes de emitir |
+| H14 | skill del visor | Corregir los IDs de sliders: `s-arR`, no `s-armR` |
 
 **Sigue abierta** la decisión §3.2.3: ganancia de mapeo operador → robot (¿1:1 o
 amplificado?). Se necesita antes del PROMPT 4.
+
+---
+
+## Punto de control del PROMPT 2 — CERRADO
+
+El plan maestro exige, antes de seguir: «Abrir el viewer, conectar a
+`ws://localhost:9001`, y confirmar que el brazo se mueve. Si esto funciona, el
+transporte está resuelto y cualquier fallo posterior es de visión.»
+
+Verificado el 2026-08-29, con `tools/dev_broker.py` (Mosquitto necesita
+privilegios de administrador que el entorno no concede; ver la nota de abajo):
+
+| Comprobación | Resultado |
+|---|---|
+| Broker con los dos listeners | 1883 TCP y 9001 WS a la escucha |
+| Publisher → broker (TCP) | 60/60 mensajes, 0 descartados, 0 sin entregar |
+| Ida y vuelta con suscriptor | 40 recibidos de 40 publicados |
+| Visor conectado por WebSocket | «Conectado · telmeow/teleop/pose», origen `MQTT` |
+| **Brazo oscilando en el visor** | `armR` 18→42 (recorrido 24.0°, esperado 30±12) |
+| | `armRtw` 42→58 (recorrido 16.0°, esperado 50±8) |
+| Tasa en el visor | 20–23 Hz |
+| Recorte por colisión | «libre» — la pose publicada no viola la geometría |
+
+**El transporte está resuelto.** Cualquier fallo posterior es de visión.
+
+Salvedad: la verificación se hizo con `amqtt`, no con Mosquitto. El protocolo
+MQTT 3.1.1 y el transporte WebSocket son los mismos, y el visor no distingue,
+pero conviene repetirla una vez con Mosquitto instalado antes de tomar
+mediciones para el documento.

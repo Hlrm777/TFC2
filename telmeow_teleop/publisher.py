@@ -128,6 +128,7 @@ class PosePublisher:
         self._last_publish: float | None = None
         self._sent = 0
         self._dropped = 0
+        self._failed = 0
         self._recent: deque[float] = deque()
         self._connected = False
 
@@ -171,6 +172,23 @@ class PosePublisher:
         self._client.loop_start()
         return self
 
+    def wait_connected(self, timeout: float = 5.0) -> bool:
+        """Espera hasta que el enlace esté establecido. Devuelve si lo logró.
+
+        HAY QUE LLAMARLA ANTES DE EMPEZAR A EMITIR. ``connect_async`` devuelve
+        de inmediato, pero el enlace tarda en levantarse: medido contra un
+        broker local, **~2 s**. Con QoS 0 los mensajes publicados en esa ventana
+        no se encolan, se descartan — así que sin esta espera los primeros ~40
+        mensajes de una sesión a 20 Hz se pierden sin dejar rastro.
+        """
+        # Usa el reloj real, no el inyectado: esto es una espera de pared, no
+        # una medición de intervalos. Con el reloj falso de las pruebas (que no
+        # avanza solo) el bucle no terminaría nunca.
+        deadline = time.perf_counter() + timeout
+        while not self._connected and time.perf_counter() < deadline:
+            time.sleep(0.01)
+        return self._connected
+
     def disconnect(self) -> None:
         self._client.disconnect()
         self._client.loop_stop()
@@ -197,6 +215,15 @@ class PosePublisher:
     def dropped_count(self) -> int:
         """Llamadas descartadas por exceder la tasa."""
         return self._dropped
+
+    @property
+    def failed_count(self) -> int:
+        """Mensajes que el cliente MQTT no pudo entregar a la red.
+
+        Casi siempre significa «todavía no hay conexión». Con QoS 0 esos
+        mensajes se pierden: no se encolan para reenviar.
+        """
+        return self._failed
 
     @property
     def effective_hz(self) -> float:
@@ -275,11 +302,22 @@ class PosePublisher:
             payload["t"] = int(time.time() * 1000)
 
         # QoS 0 y sin wait_for_publish(): no se bloquea ni se espera ack.
-        self._client.publish(
+        info = self._client.publish(
             self.config.topic_pose,
             json.dumps(payload, separators=(",", ":")),
             qos=self.config.qos,
         )
+
+        # Hay que MIRAR el código de retorno. Si el enlace todavía no está
+        # arriba, paho devuelve MQTT_ERR_NO_CONN y con QoS 0 tira el mensaje
+        # sin encolarlo. Contarlo como enviado hace que el HUD informe 20 Hz
+        # mientras al broker no llega absolutamente nada, que es el peor modo
+        # de fallo posible: parece que funciona.
+        rc = getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS)
+        if rc != mqtt.MQTT_ERR_SUCCESS:
+            self._failed += 1
+            self._last_publish = now
+            return False
 
         self._last_publish = now
         self._sent += 1
@@ -316,6 +354,12 @@ def _demo(duration: float = 10.0) -> None:
     )
 
     with PosePublisher(config, rates) as pub:
+        # Sin esta espera los primeros ~2 s de mensajes se pierden en silencio
+        # (ver wait_connected), y quien mire el visor no vería nada moverse
+        # durante la quinta parte de la demostración.
+        if not pub.wait_connected(timeout=5.0):
+            print("  aviso: sin conexión tras 5 s; se emite igualmente")
+
         start = time.perf_counter()
         # Cadencia por fecha límite, no por sleep(periodo): dormir el periodo
         # completo DESPUÉS de hacer el trabajo arrastra el tiempo de ese
@@ -353,7 +397,8 @@ def _demo(duration: float = 10.0) -> None:
         finally:
             print(
                 f"Enviados {pub.message_count} mensajes, "
-                f"{pub.dropped_count} descartados, "
+                f"{pub.dropped_count} descartados por tasa, "
+                f"{pub.failed_count} sin entregar, "
                 f"tasa final {pub.effective_hz:g} Hz, "
                 f"conectado={pub.connected}"
             )

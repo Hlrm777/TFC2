@@ -14,3 +14,16 @@
 # funciona en cualquier versión de Python 3.10+.
 
 pytest==8.3.3
+
+# Cliente MQTT, necesario para las pruebas del publisher.
+paho-mqtt==2.1.0
+
+# Broker MQTT en Python puro (tools/dev_broker.py). Levanta los mismos dos
+# listeners que mosquitto.conf (1883 TCP + 9001 WebSocket) sin requerir
+# privilegios de administrador.
+#
+# El broker DECLARADO del proyecto sigue siendo Mosquitto, y es el que debe
+# usarse para las mediciones que se reporten en la tesis. Esto es una
+# herramienta de desarrollo para poder verificar el enlace en máquinas donde no
+# se puede instalar Mosquitto.
+amqtt==0.12.0

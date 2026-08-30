@@ -335,6 +335,79 @@ la skill.
 
 ---
 
+## H15 — El servicio de Mosquitto y una instancia manual se reparten el 1883
+
+Hallazgo del 2026-08-30, al repetir la verificación con Mosquitto ya instalado.
+**Es la trampa más cara de todas las de esta lista**, porque todos los
+indicadores quedan en verde mientras no funciona nada.
+
+**Qué pasa.** El instalador de Mosquitto en Windows registra un **servicio con
+arranque automático**. Ese servicio usa `C:\Program Files\mosquitto\mosquitto.conf`,
+que viene entero comentado, así que arranca con los valores por defecto: escucha
+en **127.0.0.1:1883** y **no abre ningún listener WebSocket**.
+
+Al lanzar después `mosquitto -c mosquitto.conf -v` desde el repositorio, la
+instancia manual **arranca sin error**: se enlaza a `0.0.0.0:1883` y
+`0.0.0.0:9001`. Windows lo permite porque el servicio ocupa la dirección
+específica de loopback y la instancia manual la comodín — no colisionan.
+
+El resultado son **dos brokers distintos**:
+
+| Extremo | Se conecta a | Llega a |
+|---|---|---|
+| Pipeline de Python | `localhost:1883` | El **servicio** (gana el enlace más específico) |
+| Visor 3D | `ws://localhost:9001` | La **instancia manual** |
+
+No hay ningún camino entre ambos. Los mensajes no pasan.
+
+**Por qué es tan difícil de diagnosticar:** todo informa de éxito.
+
+- Mosquitto imprime `Opening ipv4 listen socket on port 1883` y `...9001`.
+- El visor muestra «Conectado · telmeow/teleop/pose».
+- El publisher informa `conectado=True`, **500 mensajes enviados, 0 sin entregar**.
+- Y el visor recibe **0.0 Hz**, con el origen todavía en `manual`.
+
+Medido: 500 mensajes publicados, cero recibidos. Apuntando el publisher a la IP
+de red de la máquina (`192.168.9.104:1883`), que solo puede servir la instancia
+comodín, el brazo oscila de inmediato: `armR` 18→42, `armRtw` 42→58, 21 Hz.
+
+**Cómo detectarlo en dos segundos:**
+
+```bash
+netstat -ano | findstr ":1883"
+```
+
+Si aparecen **dos PID distintos** en el 1883, hay dos brokers. Uno solo escuchará
+también en 9001.
+
+**Solución recomendada** — un único broker, con la configuración versionada en
+el repositorio (que es lo reproducible para la defensa). Requiere privilegios de
+administrador una sola vez:
+
+```
+Stop-Service mosquitto
+Set-Service mosquitto -StartupType Manual
+```
+
+y a partir de ahí, lanzarlo a mano desde el repositorio:
+
+```
+mosquitto -c mosquitto.conf -v
+```
+
+**Alternativa** — dejar el servicio y darle la configuración correcta: añadir a
+`C:\Program Files\mosquitto\mosquitto.conf` los dos listeners y
+`allow_anonymous true`, luego `Restart-Service mosquitto`. También requiere
+administrador, y tiene el inconveniente de que la configuración vive fuera del
+repositorio.
+
+**Cambio propuesto:** añadirlo a la Parte 4 del plan como paso de verificación
+del broker, antes de intentar nada con el visor. Y anotar en el capítulo de
+resultados que la instalación por defecto de Mosquitto **no** sirve para este
+proyecto: sin el listener WebSocket, el visor no puede conectarse.
+
+---
+
 ## Resumen de cambios propuestos al plan maestro
 
 | # | Sección | Acción |
@@ -353,6 +426,7 @@ la skill.
 | H12 | PROMPT 7 | El HUD debe mostrar enviados / descartados / sin entregar |
 | H13 | PROMPT 7 y 10 | Esperar el enlace MQTT antes de emitir |
 | H14 | skill del visor | Corregir los IDs de sliders: `s-arR`, no `s-armR` |
+| H15 | Parte 4 | Comprobar que hay **un solo** broker en el 1883 antes de nada |
 
 **Sigue abierta** la decisión §3.2.3: ganancia de mapeo operador → robot (¿1:1 o
 amplificado?). Se necesita antes del PROMPT 4.
@@ -365,8 +439,15 @@ El plan maestro exige, antes de seguir: «Abrir el viewer, conectar a
 `ws://localhost:9001`, y confirmar que el brazo se mueve. Si esto funciona, el
 transporte está resuelto y cualquier fallo posterior es de visión.»
 
-Verificado el 2026-08-29, con `tools/dev_broker.py` (Mosquitto necesita
-privilegios de administrador que el entorno no concede; ver la nota de abajo):
+Verificado **dos veces**: el 2026-08-29 con `tools/dev_broker.py`, y el
+2026-08-30 con **Mosquitto 2.1.2** ya instalado. Ambos dan el mismo resultado,
+lo que confirma que el pipeline no depende del broker concreto.
+
+Con Mosquitto hubo que sortear H15 (el servicio se repartía el 1883 con la
+instancia manual). Resultado con Mosquitto: `armR` 18→42, `armRtw` 42→58,
+21 Hz, `col` en «libre».
+
+Detalle de la primera verificación, con el broker en Python puro:
 
 | Comprobación | Resultado |
 |---|---|
@@ -380,8 +461,3 @@ privilegios de administrador que el entorno no concede; ver la nota de abajo):
 | Recorte por colisión | «libre» — la pose publicada no viola la geometría |
 
 **El transporte está resuelto.** Cualquier fallo posterior es de visión.
-
-Salvedad: la verificación se hizo con `amqtt`, no con Mosquitto. El protocolo
-MQTT 3.1.1 y el transporte WebSocket son los mismos, y el visor no distingue,
-pero conviene repetirla una vez con Mosquitto instalado antes de tomar
-mediciones para el documento.

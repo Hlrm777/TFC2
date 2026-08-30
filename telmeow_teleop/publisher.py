@@ -343,10 +343,13 @@ def _demo(duration: float = 10.0) -> None:
     """
     import math
 
+    from .config import AppConfig
     from .limits import Side, clamp_arm
 
-    config = MQTTConfig()
-    rates = RateConfig()
+    # Desde el entorno, para poder apuntar a otro broker sin tocar el código:
+    #     TELMEOW_MQTT_HOST=192.168.1.50 python -m telmeow_teleop.publisher
+    app = AppConfig.from_env()
+    config, rates = app.mqtt, app.rates
     print(
         f"Publicando en {config.host}:{config.port} "
         f"topic '{config.topic_pose}' a {rates.publish_hz:g} Hz "

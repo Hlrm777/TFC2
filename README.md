@@ -133,6 +133,32 @@ mosquitto -c mosquitto.conf -v
 Debe imprimir dos líneas `Opening ipv4 listen socket on port ...`, una por cada
 puerto. Si solo aparece una, el archivo de configuración no se cargó.
 
+> ### ⚠️ Antes de nada: comprobar que hay UN SOLO broker
+>
+> El instalador de Windows registra un **servicio con arranque automático** que
+> usa su propia configuración: escucha en `127.0.0.1:1883` y **no abre ningún
+> listener WebSocket**. Si además se lanza la instancia manual del repositorio,
+> Windows permite que convivan —el servicio ocupa la dirección de loopback y la
+> manual la comodín `0.0.0.0`— y quedan **dos brokers sin conexión entre ellos**:
+> Python habla con uno y el visor con el otro.
+>
+> Es el fallo más difícil de diagnosticar del proyecto, porque **todo informa de
+> éxito**: Mosquitto abre los dos puertos, el visor dice «Conectado» y el
+> publisher informa de 500 mensajes enviados y 0 sin entregar… mientras el visor
+> marca 0.0 Hz.
+>
+> ```bash
+> netstat -ano | findstr ":1883"
+> ```
+>
+> **Dos PID distintos en el 1883 = dos brokers.** La solución (una sola vez, con
+> privilegios de administrador) es dejar solo la instancia manual, cuya
+> configuración vive versionada en este repositorio:
+>
+> ```bash
+> Stop-Service mosquitto; Set-Service mosquitto -StartupType Manual
+> ```
+
 ### Alternativa sin privilegios de administrador
 
 Si no se puede instalar Mosquitto, [`tools/dev_broker.py`](tools/dev_broker.py)
@@ -180,9 +206,16 @@ Luego abrir `http://localhost:8000/telmeow_viewer.html`.
 python tools/mqtt_monitor.py
 ```
 
-Verificado el 2026-08-29: `armR` recorre 18°→42° y `armRtw` 42°→58° en el visor,
-a 20-23 Hz, con el indicador de interferencia en «libre». Detalle en
-[`HALLAZGOS_PLAN_MAESTRO.md`](HALLAZGOS_PLAN_MAESTRO.md).
+Verificado con Mosquitto 2.1.2 (2026-08-30) y con el broker en Python puro
+(2026-08-29), con idéntico resultado: `armR` recorre 18°→42° y `armRtw` 42°→58°
+en el visor, a 20-23 Hz, con el indicador de interferencia en «libre». Detalle
+en [`HALLAZGOS_PLAN_MAESTRO.md`](HALLAZGOS_PLAN_MAESTRO.md).
+
+El demo respeta las variables de entorno, útil para apuntar a otro broker:
+
+```bash
+TELMEOW_MQTT_HOST=192.168.1.50 python -m telmeow_teleop.publisher
+```
 
 > **Esperar el enlace antes de emitir.** `connect_async()` devuelve al instante,
 > pero el enlace tarda ~2 s en establecerse, y con QoS 0 lo que se publique

@@ -124,14 +124,25 @@ winget install --id EclipseFoundation.Mosquitto --exact
 ```
 
 Requiere **privilegios de administrador**: escribe en `Program Files` y registra
-un servicio de Windows. Para lanzarlo en primer plano y ver la traza:
+un servicio de Windows.
+
+El instalador **no añade Mosquitto al PATH**, así que hay que invocarlo por ruta
+completa. Para lanzarlo en primer plano y ver la traza, desde esta carpeta:
 
 ```bash
-mosquitto -c mosquitto.conf -v
+& "C:\Program Files\mosquitto\mosquitto.exe" -c mosquitto.conf -v
 ```
 
-Debe imprimir dos líneas `Opening ipv4 listen socket on port ...`, una por cada
-puerto. Si solo aparece una, el archivo de configuración no se cargó.
+Debe imprimir cuatro líneas `Opening ipv4/ipv6 listen socket on port ...`, dos por
+cada puerto. Si solo aparecen las del 1883, el archivo de configuración no se
+cargó.
+
+Para no repetir la ruta en cada sesión, se puede añadir al PATH del usuario (no
+requiere administrador; hay que reabrir la terminal después):
+
+```bash
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\Program Files\mosquitto", "User")
+```
 
 > ### ⚠️ Antes de nada: comprobar que hay UN SOLO broker
 >
@@ -151,13 +162,20 @@ puerto. Si solo aparece una, el archivo de configuración no se cargó.
 > netstat -ano | findstr ":1883"
 > ```
 >
-> **Dos PID distintos en el 1883 = dos brokers.** La solución (una sola vez, con
-> privilegios de administrador) es dejar solo la instancia manual, cuya
-> configuración vive versionada en este repositorio:
+> **Dos PID distintos en el 1883 = dos brokers.** La solución (una sola vez) es
+> dejar solo la instancia manual, cuya configuración vive versionada en este
+> repositorio. Requiere una terminal **abierta como administrador** — con una
+> normal falla con «Access is denied»:
 >
 > ```bash
 > Stop-Service mosquitto; Set-Service mosquitto -StartupType Manual
 > ```
+>
+> Si se prefiere no tocar el servicio, la alternativa sin administrador es dejar
+> que el servicio conserve el 1883 y levantar la instancia del repositorio en
+> otro puerto TCP, apuntando el pipeline con `TELMEOW_MQTT_PORT`. El visor sigue
+> usando el 9001 de la instancia manual, y ambos extremos quedan en el mismo
+> broker.
 
 ### Alternativa sin privilegios de administrador
 
@@ -273,6 +291,9 @@ por segundo cuando solo le interesa uno cada varios segundos.
 └── requirements.txt / requirements-dev.txt
 ```
 
-Ver [`HALLAZGOS_PLAN_MAESTRO.md`](HALLAZGOS_PLAN_MAESTRO.md) para las
-discrepancias encontradas entre el plan de implementación y el estado real del
-visor.
+Dos documentos acompañan al plan de implementación:
+
+- [`HALLAZGOS_PLAN_MAESTRO.md`](HALLAZGOS_PLAN_MAESTRO.md) — discrepancias entre
+  lo que el plan dice y lo que el código realmente hace, con archivo y línea.
+- [`ANEXO_PLAN_MAESTRO.md`](ANEXO_PLAN_MAESTRO.md) — qué implican esos hallazgos
+  para los pasos que faltan, organizado por prompt.

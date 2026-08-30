@@ -188,19 +188,27 @@ def test_el_cascade_por_defecto_es_el_de_opencv():
     """None significa 'usa cv2.data.haarcascades', que es el que usaron los tres
     scripts legacy.
 
-    El haarcascade_frontalface_default.xml de la raíz del repositorio NO es el
-    mismo archivo (963.441 bytes frente a 930.127) y no lo usa ningún script. Si
-    se tomara como predeterminado cambiaría el recorte de rostros respecto al
-    entrenamiento, y con él las métricas que el PROMPT 9 debe reproducir.
+    La copia que había en la raíz del repositorio NO es el mismo archivo
+    (963.441 bytes frente a 930.127) y no la usaba ningún script. Si se tomara
+    como predeterminada cambiaría el recorte de rostros respecto al
+    entrenamiento, y con él las métricas que el PROMPT 9 debe reproducir. Está
+    en legacy/ por eso.
     """
     assert PathConfig().face_cascade is None
 
 
-def test_el_cascade_del_repo_se_puede_forzar():
+def test_el_cascade_legacy_se_puede_forzar():
     cfg = AppConfig.from_env(
-        {"TELMEOW_CASCADE_PATH": "haarcascade_frontalface_default.xml"}
+        {"TELMEOW_CASCADE_PATH": "legacy/haarcascade_frontalface_default.xml"}
     )
-    assert cfg.paths.face_cascade == PROJECT_ROOT / "haarcascade_frontalface_default.xml"
+    esperado = PROJECT_ROOT / "legacy" / "haarcascade_frontalface_default.xml"
+    assert cfg.paths.face_cascade == esperado
+
+
+def test_el_cascade_huerfano_esta_en_legacy():
+    """Fija dónde vive, para que nadie lo devuelva a la raíz por descuido."""
+    assert (PROJECT_ROOT / "legacy" / "haarcascade_frontalface_default.xml").is_file()
+    assert not (PROJECT_ROOT / "haarcascade_frontalface_default.xml").exists()
 
 
 def test_ruta_relativa_se_resuelve_contra_la_raiz_no_contra_el_cwd():

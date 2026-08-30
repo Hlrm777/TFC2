@@ -6,7 +6,10 @@ encontradas durante los PROMPT 1 y 2. Cada entrada indica **qué dice el plan**,
 
 Todo se verificó leyendo el código directamente, no la documentación.
 
-Última actualización: 2026-08-29 · tras el PROMPT 2.
+Última actualización: 2026-08-30 · tras cerrar el PROMPT 2 y montar el entorno.
+
+Documento hermano: [`ANEXO_PLAN_MAESTRO.md`](ANEXO_PLAN_MAESTRO.md), que mira
+hacia adelante — qué implican estos hallazgos para los PROMPT 3 al 11.
 
 ---
 
@@ -156,19 +159,24 @@ no son instrumentación: operan en vivo como filtro (ver H5).
 
 ---
 
-## H7 — Mosquitto no está instalado
+## H7 — Mosquitto es un prerrequisito, y no queda en el PATH
 
-No hay `mosquitto.exe` ni `mosquitto_sub` en el PATH, ni carpeta en
-`C:\Program Files\mosquitto`, ni servicio de Windows registrado.
+El plan da por sentado que Mosquitto está disponible. No lo estaba, y hubo que
+instalarlo (Mosquitto 2.1.2, ya resuelto el 2026-08-30) para poder cerrar el
+punto de verificación obligatorio del PROMPT 2.
 
-**Impacto:** el punto de verificación obligatorio posterior al PROMPT 2 («abrir
-el viewer, conectar a `ws://localhost:9001`, confirmar que el brazo se mueve»)
-no se puede ejecutar hasta instalarlo. Se descarga de
-[mosquitto.org/download](https://mosquitto.org/download/), instalador x64.
+Dos detalles que conviene dejar escritos, porque cuestan tiempo:
+
+1. **El instalador no añade Mosquitto al PATH.** `mosquitto -c mosquitto.conf -v`
+   falla con «is not recognized». Hay que invocarlo por ruta completa:
+   `& "C:\Program Files\mosquitto\mosquitto.exe" -c mosquitto.conf -v`, o añadir
+   `C:\Program Files\mosquitto` al PATH del usuario.
+2. **Instalarlo no basta**, ver H15: su configuración por defecto no abre el
+   listener WebSocket, sin el cual el visor no puede conectarse.
 
 **Cambio propuesto:** añadirlo como prerrequisito explícito en la Parte 4, antes
-del paso 1. El repositorio ya incluye [`mosquitto.conf`](mosquitto.conf) con los
-dos listeners.
+del paso 1, con ambas advertencias. El repositorio ya incluye
+[`mosquitto.conf`](mosquitto.conf) con los dos listeners.
 
 ---
 
@@ -408,6 +416,39 @@ proyecto: sin el listener WebSocket, el visor no puede conectarse.
 
 ---
 
+## H16 — Había dos cascades Haar distintos, y el bueno no era el del repositorio
+
+**Se encontró** al instalar el entorno y poder compararlos por fin:
+
+| Archivo | Tamaño | Lo usa |
+|---|---|---|
+| Copia en la raíz del repositorio | 963.441 bytes | **nadie** |
+| `cv2.data.haarcascades` (OpenCV 4.10) | 930.127 bytes | los tres scripts legacy |
+
+Son **dos versiones distintas** del mismo cascade, con hashes y tamaños
+diferentes. La copia del repositorio estaba huérfana: ni
+`Creation_of_dataset.py`, ni `Training Emotion Recognition.py`, ni
+`Emotion Recognition.py` la abren — los tres usan `cv2.data.haarcascades`.
+
+**Por qué importa:** el modelo de emociones se entrenó sobre los rostros que
+recortaba el cascade de OpenCV. Tomar el otro cambia el preprocesamiento y con
+él las métricas que el PROMPT 9 debe reproducir en sus configuraciones A y B.
+
+En el PROMPT 1 puse la copia del repositorio como predeterminada en `config.py`,
+razonando que al estar versionada en git era lo reproducible. **Era el criterio
+equivocado**: la reproducibilidad que importa aquí es respecto al entrenamiento,
+no respecto al control de versiones.
+
+**Corregido:** `PathConfig.face_cascade` vale `None`, que significa «el que trae
+OpenCV», y el archivo huérfano se movió a `legacy/` junto al resto del material
+histórico. Sigue accesible con `TELMEOW_CASCADE_PATH` por si hace falta
+compararlos.
+
+**Cambio propuesto:** anotar en el PROMPT 6 que el cascade sale de OpenCV, y en
+el capítulo de metodología que existe esa segunda versión pero no se usa.
+
+---
+
 ## Resumen de cambios propuestos al plan maestro
 
 | # | Sección | Acción |
@@ -418,7 +459,7 @@ proyecto: sin el listener WebSocket, el visor no puede conectarse.
 | H4 | §3.3.6 | Corregir −35° → **−30°**, margen 9° |
 | H5 | §3.2.2 | Cerrar: el visor ya clampa lo recibido |
 | H6 | §3.2.1 | Cerrar: barridos retirados, BVH activo |
-| H7 | Parte 4 | Añadir Mosquitto como prerrequisito |
+| H7 | Parte 4 | Mosquitto como prerrequisito; no queda en el PATH |
 | H8 | Parte 0 | Fijar CPython 3.12 x64 |
 | H9 | skill del visor | Precisar el alcance de la nota sobre cdnjs |
 | H10 | §0.4 | Anotar que manda la tabla 2D |
@@ -427,6 +468,7 @@ proyecto: sin el listener WebSocket, el visor no puede conectarse.
 | H13 | PROMPT 7 y 10 | Esperar el enlace MQTT antes de emitir |
 | H14 | skill del visor | Corregir los IDs de sliders: `s-arR`, no `s-armR` |
 | H15 | Parte 4 | Comprobar que hay **un solo** broker en el 1883 antes de nada |
+| H16 | PROMPT 6 / metodología | El cascade sale de OpenCV, no del repositorio |
 
 **Sigue abierta** la decisión §3.2.3: ganancia de mapeo operador → robot (¿1:1 o
 amplificado?). Se necesita antes del PROMPT 4.

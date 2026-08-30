@@ -274,15 +274,16 @@ class PathConfig:
     cascade que trae OpenCV** (``cv2.data.haarcascades``). No es un descuido:
 
     Los tres scripts legacy -- el de captura del dataset, el de entrenamiento y
-    el de inferencia -- usan ``cv2.data.haarcascades``. El archivo
-    ``haarcascade_frontalface_default.xml`` que está en la raíz del repositorio
-    NO lo usa ninguno, y además **no es el mismo archivo**: 963.441 bytes frente
-    a los 930.127 del que distribuye OpenCV 4.10. Son dos versiones distintas
-    del cascade.
+    el de inferencia -- usan ``cv2.data.haarcascades``. Había además una copia
+    de ``haarcascade_frontalface_default.xml`` en la raíz del repositorio que no
+    usaba ninguno de ellos, y que **no es el mismo archivo**: 963.441 bytes
+    frente a los 930.127 del que distribuye OpenCV 4.10. Son dos versiones
+    distintas del cascade. Esa copia se movió a ``legacy/`` para que no se tome
+    por buena.
 
     Como el modelo de emociones se entrenó con los rostros que recortaba el
-    cascade de OpenCV, usar el del repositorio cambiaría el preprocesamiento y
-    con él las métricas -- justo lo que el PROMPT 9 necesita poder reproducir.
+    cascade de OpenCV, usar el otro cambiaría el preprocesamiento y con él las
+    métricas -- justo lo que el PROMPT 9 necesita poder reproducir.
 
     Se deja como ``None`` en vez de resolverlo aquí para que este módulo siga
     sin importar cv2. Quien lo consuma hace::
@@ -290,7 +291,8 @@ class PathConfig:
         ruta = cfg.paths.face_cascade or (
             Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
 
-    Con ``TELMEOW_CASCADE_PATH`` se puede forzar el del repositorio y comparar.
+    ``TELMEOW_CASCADE_PATH`` permite apuntar a otro archivo -- por ejemplo el de
+    ``legacy/`` -- si alguna vez hace falta comparar.
     """
 
     emotion_model: Path = field(

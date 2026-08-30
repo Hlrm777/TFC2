@@ -167,12 +167,12 @@ no era la que yo había supuesto.**
 
 | Archivo | Tamaño | Lo usa |
 |---|---|---|
-| `haarcascade_frontalface_default.xml` (raíz del repo) | 963.441 bytes | **nadie** |
+| `legacy/haarcascade_frontalface_default.xml` | 963.441 bytes | **nadie** |
 | `cv2.data.haarcascades + ...` (OpenCV 4.10) | 930.127 bytes | los tres scripts legacy |
 
 **No son el mismo archivo**: son dos versiones distintas del cascade, con
-hashes y tamaños diferentes. El del repositorio está huérfano — ningún script
-legacy lo abre.
+hashes y tamaños diferentes. El primero estaba en la raíz del repositorio y
+estaba huérfano — ningún script legacy lo abre.
 
 Importa porque el modelo de emociones se entrenó sobre los rostros que recortaba
 **el cascade de OpenCV**. Usar el otro cambiaría el preprocesamiento y, con él,
@@ -181,13 +181,13 @@ las métricas que el PROMPT 9 tiene que reproducir (configuraciones A y B).
 Yo había puesto el del repositorio como predeterminado en `config.py`, razonando
 que al estar versionado en git era lo reproducible. **Era la elección
 equivocada**: la reproducibilidad que importa aquí es respecto al entrenamiento,
-no respecto al control de versiones. Corregido — `PathConfig.face_cascade` vale
-ahora `None`, que significa «el que trae OpenCV», y el del repositorio se puede
-forzar con `TELMEOW_CASCADE_PATH` para comparar.
+no respecto al control de versiones.
 
-Queda una decisión menor para el PROMPT 6: si se conserva el archivo huérfano del
-repositorio (como constancia de lo que había) o se elimina para que nadie vuelva
-a tomarlo por el bueno.
+**Resuelto.** `PathConfig.face_cascade` vale `None`, que significa «el que trae
+OpenCV», y el archivo huérfano se movió a **`legacy/`**, junto al resto del
+material histórico, para que nadie vuelva a tomarlo por el bueno. Sigue
+accesible vía `TELMEOW_CASCADE_PATH` si alguna vez hace falta comparar. Dos
+pruebas fijan ambas cosas.
 
 ### C.3 Confirmado: el orden de preprocesamiento y de clases es coherente
 
@@ -381,7 +381,7 @@ CPython 3.12.1. Los pines que estaban sin comprobar quedan validados:
 | **3** — filtros | A.1: `perf_counter` para los timestamps y guarda de `dt <= 0` |
 | **4** — cabeza | Sin bloqueos: B.5 verificado. Ver B.1 y B.2 |
 | **5** — brazos | B.1 (objetos), B.2 (NaN), B.4 (convención de signos) |
-| **6** — emoción | C.1 (cascade por frame), C.2 (**son dos archivos distintos**), C.4 |
+| **6** — emoción | C.1 (cascade por frame), C.2 (usar el de OpenCV, no el de `legacy/`), C.4 |
 | **7** — integración | D.1 (esperar enlace), D.2 (tres contadores), D.3 (cadencia) |
 | **8** — FER-2013 | C.4: el modelo nuevo también debe cargar con Keras 3 |
 | **9** — evaluación | C.1 (ruta a fuego), C.2 (cascade), E.1 (`t-col`), E.2 (`perf_counter`) |

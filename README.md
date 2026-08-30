@@ -282,6 +282,7 @@ por segundo cuando solo le interesa uno cada varios segundos.
 ├── telmeow_teleop/
 │   ├── config.py       # broker, topics, tasas, rutas · defaults < entorno < CLI
 │   ├── limits.py       # límites articulares + recorte 2D (solo stdlib)
+│   ├── filters.py      # One Euro, EMA, histéresis de clase (solo stdlib)
 │   └── publisher.py    # MQTT, JSON único, QoS 0, limitación por descarte
 ├── tools/
 │   └── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/#

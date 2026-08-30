@@ -178,11 +178,29 @@ def test_argumentos_ajenos_no_rompen_la_resolucion():
 # --------------------------------------------------------------------------
 
 
-def test_rutas_por_defecto_son_absolutas():
+def test_ruta_del_modelo_por_defecto_es_absoluta():
     paths = PathConfig()
     assert paths.emotion_model.is_absolute()
     assert paths.emotion_model == PROJECT_ROOT / "emotion_model.keras"
-    assert paths.face_cascade == PROJECT_ROOT / "haarcascade_frontalface_default.xml"
+
+
+def test_el_cascade_por_defecto_es_el_de_opencv():
+    """None significa 'usa cv2.data.haarcascades', que es el que usaron los tres
+    scripts legacy.
+
+    El haarcascade_frontalface_default.xml de la raíz del repositorio NO es el
+    mismo archivo (963.441 bytes frente a 930.127) y no lo usa ningún script. Si
+    se tomara como predeterminado cambiaría el recorte de rostros respecto al
+    entrenamiento, y con él las métricas que el PROMPT 9 debe reproducir.
+    """
+    assert PathConfig().face_cascade is None
+
+
+def test_el_cascade_del_repo_se_puede_forzar():
+    cfg = AppConfig.from_env(
+        {"TELMEOW_CASCADE_PATH": "haarcascade_frontalface_default.xml"}
+    )
+    assert cfg.paths.face_cascade == PROJECT_ROOT / "haarcascade_frontalface_default.xml"
 
 
 def test_ruta_relativa_se_resuelve_contra_la_raiz_no_contra_el_cwd():

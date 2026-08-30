@@ -268,26 +268,49 @@ class CameraConfig:
 @dataclass(frozen=True)
 class PathConfig:
     """Rutas de modelos y recursos. Las relativas se resuelven contra
-    ``PROJECT_ROOT``."""
+    ``PROJECT_ROOT``.
+
+    ``face_cascade`` vale ``None`` por defecto, y eso significa **usar el
+    cascade que trae OpenCV** (``cv2.data.haarcascades``). No es un descuido:
+
+    Los tres scripts legacy -- el de captura del dataset, el de entrenamiento y
+    el de inferencia -- usan ``cv2.data.haarcascades``. El archivo
+    ``haarcascade_frontalface_default.xml`` que está en la raíz del repositorio
+    NO lo usa ninguno, y además **no es el mismo archivo**: 963.441 bytes frente
+    a los 930.127 del que distribuye OpenCV 4.10. Son dos versiones distintas
+    del cascade.
+
+    Como el modelo de emociones se entrenó con los rostros que recortaba el
+    cascade de OpenCV, usar el del repositorio cambiaría el preprocesamiento y
+    con él las métricas -- justo lo que el PROMPT 9 necesita poder reproducir.
+
+    Se deja como ``None`` en vez de resolverlo aquí para que este módulo siga
+    sin importar cv2. Quien lo consuma hace::
+
+        ruta = cfg.paths.face_cascade or (
+            Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
+
+    Con ``TELMEOW_CASCADE_PATH`` se puede forzar el del repositorio y comparar.
+    """
 
     emotion_model: Path = field(
         default_factory=lambda: PROJECT_ROOT / "emotion_model.keras"
     )
-    face_cascade: Path = field(
-        default_factory=lambda: PROJECT_ROOT / "haarcascade_frontalface_default.xml"
-    )
+    face_cascade: Path | None = None
 
     def __post_init__(self) -> None:
         # Frozen: hay que saltarse el __setattr__ bloqueado para normalizar.
         object.__setattr__(self, "emotion_model", _resolve(Path(self.emotion_model)))
-        object.__setattr__(self, "face_cascade", _resolve(Path(self.face_cascade)))
+        if self.face_cascade is not None:
+            object.__setattr__(self, "face_cascade", _resolve(Path(self.face_cascade)))
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "PathConfig":
         default = cls()
+        cascade = env.get(ENV_PREFIX + "CASCADE_PATH")
         return cls(
             emotion_model=_env_path(env, "MODEL_PATH", default.emotion_model),
-            face_cascade=_env_path(env, "CASCADE_PATH", default.face_cascade),
+            face_cascade=Path(cascade) if cascade else None,
         )
 
 

@@ -113,22 +113,25 @@ brazos del robot se moverán al revés que los del operador. Conviene verificarl
 mirando el visor con el pipeline en vivo, que es barato ahora que el transporte
 está resuelto.
 
-### B.5 Riesgo abierto: la versión de MediaPipe
+### B.5 La versión de MediaPipe — RESUELTO
 
-`requirements.txt` fija `mediapipe==0.10.14` porque los PROMPT 4 y 5 asumen la API
-clásica `mp.solutions.face_mesh` y `mp.solutions.pose`. La serie 1.0 reorganizó la
-biblioteca en torno a MediaPipe Tasks y **podría no exponerla**.
+Era el riesgo abierto más serio para los PROMPT 4 y 5: `requirements.txt` fija
+`mediapipe==0.10.14` porque ambos asumen la API clásica `mp.solutions`, y la
+serie 1.0 reorganizó la biblioteca en torno a MediaPipe Tasks.
 
-**Antes de escribir una línea del PROMPT 4** hay que instalar y comprobar:
+**Comprobado el 2026-08-30 en el entorno real** (`.venv`, CPython 3.12.1):
 
-```python
-import mediapipe as mp
-mp.solutions.face_mesh, mp.solutions.pose
+```
+mediapipe 0.10.14
+  mp.solutions.face_mesh      OK
+  mp.solutions.pose           OK
+  mp.solutions.drawing_utils  OK
+  FaceMesh(refine_landmarks=True, max_num_faces=1) -> se instancia OK
+  Pose() -> se instancia OK
 ```
 
-Si la API ya no existe en la versión que instale, los PROMPT 4 y 5 cambian de
-forma sustancial (otra API, otro modelo de inicialización) y hay que replantearlos
-antes, no a mitad.
+La API existe y los dos estimadores se construyen con los parámetros que el plan
+pide. **Los PROMPT 4 y 5 pueden ejecutarse tal como están planteados.**
 
 ---
 
@@ -157,28 +160,34 @@ cual aquí**, lo que afecta directamente a las configuraciones A y B del PROMPT 
 que necesitan reproducir el entrenamiento original. Hay que parametrizar la ruta
 (o copiarla a `config.py`) antes de intentar esa comparación.
 
-### C.2 Punto abierto: de dónde sale el cascade
+### C.2 Hay DOS cascades distintos, y el bueno no es el del repositorio
 
-Hay una divergencia que aún **no está resuelta**:
+Punto que estaba abierto y quedó resuelto al instalar el entorno. **La respuesta
+no era la que yo había supuesto.**
 
-| Fuente | Usa |
-|---|---|
-| `legacy/Emotion Recognition.py:13` | `cv2.data.haarcascades + '...'` (el que trae OpenCV) |
-| `telmeow_teleop/config.py` | la copia versionada en el repositorio |
+| Archivo | Tamaño | Lo usa |
+|---|---|---|
+| `haarcascade_frontalface_default.xml` (raíz del repo) | 963.441 bytes | **nadie** |
+| `cv2.data.haarcascades + ...` (OpenCV 4.10) | 930.127 bytes | los tres scripts legacy |
 
-Elegí la copia del repositorio porque está trackeada en git y hace el
-preprocesamiento reproducible. **Pero no he podido comprobar si los dos archivos
-son idénticos**, porque `cv2` todavía no está instalado. Si difieren, la detección
-de rostros cambia y con ella las métricas del PROMPT 9.
+**No son el mismo archivo**: son dos versiones distintas del cascade, con
+hashes y tamaños diferentes. El del repositorio está huérfano — ningún script
+legacy lo abre.
 
-Comprobación pendiente, en cuanto se instale `requirements.txt`:
+Importa porque el modelo de emociones se entrenó sobre los rostros que recortaba
+**el cascade de OpenCV**. Usar el otro cambiaría el preprocesamiento y, con él,
+las métricas que el PROMPT 9 tiene que reproducir (configuraciones A y B).
 
-```python
-import cv2, hashlib, pathlib
-a = pathlib.Path("haarcascade_frontalface_default.xml").read_bytes()
-b = pathlib.Path(cv2.data.haarcascades + "haarcascade_frontalface_default.xml").read_bytes()
-print("IDENTICOS" if a == b else "DIFERENTES")
-```
+Yo había puesto el del repositorio como predeterminado en `config.py`, razonando
+que al estar versionado en git era lo reproducible. **Era la elección
+equivocada**: la reproducibilidad que importa aquí es respecto al entrenamiento,
+no respecto al control de versiones. Corregido — `PathConfig.face_cascade` vale
+ahora `None`, que significa «el que trae OpenCV», y el del repositorio se puede
+forzar con `TELMEOW_CASCADE_PATH` para comparar.
+
+Queda una decisión menor para el PROMPT 6: si se conserva el archivo huérfano del
+repositorio (como constancia de lo que había) o se elimina para que nadie vuelva
+a tomarlo por el bueno.
 
 ### C.3 Confirmado: el orden de preprocesamiento y de clases es coherente
 
@@ -194,12 +203,31 @@ Verificado leyendo los tres scripts legacy:
   redimensionar), pero al ser el mismo en ambos lados es correcto. El PROMPT 6
   pide conservarlo tal cual: confirmado que hay que hacerlo.
 
-### C.4 La versión de TensorFlow la fija el modelo, no la preferencia
+### C.4 La versión de TensorFlow la fija el modelo — VERIFICADO
 
 `emotion_model.keras` se guardó con **Keras 3.3.3**. TensorFlow 2.15 y anteriores
 traen Keras 2 y **no podrían cargarlo**. De ahí el `tensorflow==2.16.1` de
 `requirements.txt`. No es una elección estética; cambiarla rompe el modelo
 existente.
+
+Comprobado el 2026-08-30 en el entorno real:
+
+```
+tensorflow 2.16.1 | keras 3.15.1
+  cargado OK desde emotion_model.keras
+  entrada (None, 48, 48, 1)  salida (None, 5)
+  inferencia model(x, training=False) -> forma (1, 5)
+  suma softmax = 1.0000
+```
+
+Nota: TensorFlow 2.16.1 arrastra **Keras 3.15.1**, no la 3.3.3 con la que se
+guardó el modelo. Carga igualmente — Keras 3 lee hacia adelante dentro de su
+propia serie mayor. Por eso `keras` no se ancla por separado en
+`requirements.txt`: basta con dejar que TensorFlow resuelva la suya.
+
+También confirma que la llamada `model(x, training=False)` que pide el PROMPT 6
+(en vez de `model.predict()`, para evitar el retracing) funciona sobre este
+modelo.
 
 ---
 
@@ -315,7 +343,9 @@ en la misma máquina.
 Los tres bloquean trabajo y ninguno estaba contemplado:
 
 1. **CPython 3.12 x64.** TensorFlow publica ruedas hasta cp313 y MediaPipe hasta
-   cp312. En 3.13 y 3.14 la instalación falla. *(Resuelto: instalado.)*
+   cp312. En 3.13 y 3.14 la instalación falla. *(Resuelto: instalado, y todo
+   `requirements.txt` instala limpio en un `.venv` de 3.12 — ver el cuadro de
+   abajo.)*
 2. **Mosquitto no basta con instalarlo.** Su configuración por defecto escucha
    solo en loopback y **no abre listener WebSocket**, sin el cual el visor no
    puede conectarse. Y si conviven el servicio y una instancia manual, se
@@ -326,15 +356,33 @@ Los tres bloquean trabajo y ninguno estaba contemplado:
 
 ---
 
+## H. Entorno verificado (2026-08-30)
+
+`requirements.txt` y `requirements-dev.txt` instalan limpio en un `.venv` de
+CPython 3.12.1. Los pines que estaban sin comprobar quedan validados:
+
+| Paquete | Versión | Comprobado |
+|---|---|---|
+| opencv-contrib-python | 4.10.0 | importa; expone `cv2.data.haarcascades` |
+| mediapipe | 0.10.14 | `mp.solutions.face_mesh` / `.pose` existen y se instancian |
+| tensorflow | 2.16.1 | carga el `.keras` y ejecuta `model(x, training=False)` |
+| keras | 3.15.1 | resuelto por TensorFlow; lee el modelo de Keras 3.3.3 |
+| numpy | 1.26.4 | exigido por TensorFlow 2.16 (`>=1.26,<2.0`) |
+| paho-mqtt | 2.1.0 | verificado contra Mosquitto en el PROMPT 2 |
+
+293 pruebas en verde dentro del entorno.
+
+---
+
 ## Resumen: qué mirar antes de cada prompt
 
 | Prompt | Antes de empezar, revisar |
 |---|---|
 | **3** — filtros | A.1: `perf_counter` para los timestamps y guarda de `dt <= 0` |
-| **4** — cabeza | B.5: **confirmar que `mp.solutions` existe** en la versión instalada |
+| **4** — cabeza | Sin bloqueos: B.5 verificado. Ver B.1 y B.2 |
 | **5** — brazos | B.1 (objetos), B.2 (NaN), B.4 (convención de signos) |
-| **6** — emoción | C.1 (cascade por frame), C.2 (qué cascade), C.4 (TF 2.16) |
+| **6** — emoción | C.1 (cascade por frame), C.2 (**son dos archivos distintos**), C.4 |
 | **7** — integración | D.1 (esperar enlace), D.2 (tres contadores), D.3 (cadencia) |
 | **8** — FER-2013 | C.4: el modelo nuevo también debe cargar con Keras 3 |
-| **9** — evaluación | C.1 (ruta a fuego), E.1 (`t-col` como métrica), E.2 (`perf_counter`) |
+| **9** — evaluación | C.1 (ruta a fuego), C.2 (cascade), E.1 (`t-col`), E.2 (`perf_counter`) |
 | **10 / 11** | F: topics, eventos discretos, esperar enlace, −30° |

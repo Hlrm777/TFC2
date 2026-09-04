@@ -227,7 +227,7 @@ python tools/mqtt_monitor.py
 Verificado con Mosquitto 2.1.2 (2026-08-30) y con el broker en Python puro
 (2026-08-29), con idéntico resultado: `armR` recorre 18°→42° y `armRtw` 42°→58°
 en el visor, a 20-23 Hz, con el indicador de interferencia en «libre». Detalle
-en [`HALLAZGOS_PLAN_MAESTRO.md`](HALLAZGOS_PLAN_MAESTRO.md).
+en [`TELMEOW_PLAN_MAESTRO.md`](TELMEOW_PLAN_MAESTRO.md).
 
 El demo respeta las variables de entorno, útil para apuntar a otro broker:
 
@@ -292,9 +292,8 @@ por segundo cuando solo le interesa uno cada varios segundos.
 └── requirements.txt / requirements-dev.txt
 ```
 
-Dos documentos acompañan al plan de implementación:
-
-- [`HALLAZGOS_PLAN_MAESTRO.md`](HALLAZGOS_PLAN_MAESTRO.md) — discrepancias entre
-  lo que el plan dice y lo que el código realmente hace, con archivo y línea.
-- [`ANEXO_PLAN_MAESTRO.md`](ANEXO_PLAN_MAESTRO.md) — qué implican esos hallazgos
-  para los pasos que faltan, organizado por prompt.
+El plan de implementación completo está en
+[`TELMEOW_PLAN_MAESTRO.md`](TELMEOW_PLAN_MAESTRO.md): estado de cada paso, los
+prompts pendientes con las consideraciones ya incorporadas, la API construida
+hasta ahora, y el registro de hallazgos con su evidencia. Es la única fuente
+vigente.

@@ -36,6 +36,7 @@ __all__ = [
     "RateConfig",
     "CameraConfig",
     "PathConfig",
+    "HeadConfig",
     "AppConfig",
     "add_cli_args",
     "load",
@@ -266,6 +267,46 @@ class CameraConfig:
 
 
 @dataclass(frozen=True)
+class HeadConfig:
+    """Mapeo de la cabeza del operador a la del robot.
+
+    Las **ganancias** son el multiplicador entre cuánto gira el operador y
+    cuánto gira el robot: con 1.0 lo copia, con 2.0 lo exagera, con 0.5 lo
+    atenúa. Van separadas por eje porque los rangos no se parecen y porque la
+    estimación no tiene la misma sensibilidad en los dos.
+
+    ``gain_tilt`` suele necesitar ser mayor que 1: el cabeceo se estima a partir
+    de la profundidad de los landmarks, que MediaPipe entrega comprimida, así
+    que el ángulo sale corto y el operador tiene que forzar el cuello para
+    alcanzar el rango del robot. El demo del head tracker calcula en vivo la
+    ganancia que haría falta — ver ``python -m telmeow_teleop.head_tracker``.
+
+    Amplificar tiene un precio: multiplica también el ruido de la estimación y
+    hace llegar antes al tope mecánico.
+    """
+
+    method: str = "mesh"
+    gain_pan: float = 1.15
+    gain_tilt: float = 1.0
+    invert_pan: bool = False
+    invert_tilt: bool = False
+    min_cutoff: float = 0.5
+    beta: float = 0.5
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str]) -> "HeadConfig":
+        return cls(
+            method=_env_str(env, "HEAD_METHOD", cls.method),
+            gain_pan=_env_float(env, "HEAD_GAIN_PAN", cls.gain_pan),
+            gain_tilt=_env_float(env, "HEAD_GAIN_TILT", cls.gain_tilt),
+            invert_pan=_env_bool(env, "HEAD_INVERT_PAN", cls.invert_pan),
+            invert_tilt=_env_bool(env, "HEAD_INVERT_TILT", cls.invert_tilt),
+            min_cutoff=_env_float(env, "HEAD_MIN_CUTOFF", cls.min_cutoff),
+            beta=_env_float(env, "HEAD_BETA", cls.beta),
+        )
+
+
+@dataclass(frozen=True)
 class PathConfig:
     """Rutas de modelos y recursos. Las relativas se resuelven contra
     ``PROJECT_ROOT``.
@@ -324,6 +365,7 @@ class AppConfig:
     rates: RateConfig = field(default_factory=RateConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
     paths: PathConfig = field(default_factory=PathConfig)
+    head: HeadConfig = field(default_factory=HeadConfig)
     log_level: str = "INFO"
     balanceo_policy: str = "table"
 
@@ -340,6 +382,7 @@ class AppConfig:
             rates=RateConfig.from_env(env),
             camera=CameraConfig.from_env(env),
             paths=PathConfig.from_env(env),
+            head=HeadConfig.from_env(env),
             log_level=_env_str(env, "LOG_LEVEL", cls.log_level),
             balanceo_policy=_env_str(env, "BALANCEO_POLICY", cls.balanceo_policy),
         )

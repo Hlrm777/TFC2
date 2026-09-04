@@ -18,6 +18,7 @@ from telmeow_teleop.config import (
     AppConfig,
     CameraConfig,
     ConfigError,
+    HeadConfig,
     MQTTConfig,
     PathConfig,
     RateConfig,
@@ -67,6 +68,26 @@ def test_defaults_camara():
     assert camera.index == 0
     assert (camera.width, camera.height) == (640, 480)
     assert camera.flip is True
+
+
+def test_defaults_cabeza():
+    """gain_pan 1.15 sale de una prueba con el operador real: con 1.0 el giro
+    lateral se quedaba algo corto."""
+    head = HeadConfig()
+    assert head.method == "mesh"
+    assert head.gain_pan == 1.15
+    assert head.gain_tilt == 1.0
+    assert head.invert_pan is False
+
+
+def test_las_ganancias_se_pueden_ajustar_por_entorno():
+    """Calibrar no debe requerir tocar código."""
+    cfg = AppConfig.from_env(
+        {"TELMEOW_HEAD_GAIN_TILT": "1.8", "TELMEOW_HEAD_INVERT_PAN": "true"}
+    )
+    assert cfg.head.gain_tilt == 1.8
+    assert cfg.head.invert_pan is True
+    assert cfg.head.gain_pan == 1.15  # sin tocar
 
 
 def test_orden_de_emociones_es_el_del_entrenamiento():

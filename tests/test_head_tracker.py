@@ -449,6 +449,61 @@ def test_kabsch_exige_nubes_del_mismo_tamano():
 
 
 # --------------------------------------------------------------------------
+# Ayuda a la calibración de la ganancia
+# --------------------------------------------------------------------------
+
+
+def test_sin_movimiento_no_hay_ganancia_que_sugerir():
+    t = tracker_con()
+    try:
+        assert t.suggested_gains() == {"pan": None, "tilt": None}
+    finally:
+        t.close()
+
+
+def test_la_ganancia_sugerida_hace_que_el_recorrido_comodo_cubra_el_robot():
+    """Si el operador solo alcanza 20° cómodamente y el robot llega a 42°, hace
+    falta una ganancia de 2.1 para que ese recorrido cubra todo el rango."""
+    t = tracker_con()
+    try:
+        t._extremos["tilt"] = [-19.5, 20.0]  # −39/−19.5 = 2.0 ; 42/20 = 2.1
+        # Se toma el MENOR de los dos, para no dejar corto ningún lado.
+        assert t.suggested_gains()["tilt"] == pytest.approx(2.0, abs=0.01)
+    finally:
+        t.close()
+
+
+def test_aplicar_la_ganancia_sugerida_lleva_justo_al_tope():
+    """Comprobación de extremo a extremo del procedimiento de calibración."""
+    t = tracker_con()
+    try:
+        t._extremos["tilt"] = [-20.0, 20.0]
+        sugerida = t.suggested_gains()["tilt"]
+        t.gain_tilt = sugerida
+        _, tilt = t.map_to_robot(0.0, -20.0, timestamp=0.0)
+        assert tilt == pytest.approx(HEAD_TILT_RANGE[0], abs=0.5)
+        assert t.last_clamp.clamped is False  # llega al tope sin pasarse
+    finally:
+        t.close()
+
+
+def test_los_extremos_se_registran_y_se_reinician():
+    t = tracker_con()
+    try:
+        t._extremos["pan"] = [-30.0, 25.0]
+        assert t.raw_extremes["pan"] == (-30.0, 25.0)
+        t.reset_extremes()
+        assert t.raw_extremes["pan"] == (0.0, 0.0)
+    finally:
+        t.close()
+
+
+def test_method_invalido_se_rechaza():
+    with pytest.raises(ValueError):
+        HeadTracker(method="otro")
+
+
+# --------------------------------------------------------------------------
 # Robustez
 # --------------------------------------------------------------------------
 

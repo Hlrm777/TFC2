@@ -22,30 +22,40 @@ dónde aparecen sus puntos en la imagen, ¿qué rotación de la cabeza explica e
 proyección? Eso es exactamente lo que responde ``cv2.solvePnP`` (Perspective-n-
 Point), y es defendible ante un jurado.
 
+DOS MÉTODOS DE ESTIMACIÓN
+-------------------------
+``method="mesh"`` (por defecto)
+    Compara la nube de **cientos** de landmarks del rostro con la capturada en
+    la postura neutra, y obtiene la rotación con el algoritmo de Kabsch. Al
+    promediar sobre todos los puntos a la vez, el ruido de cada landmark pesa
+    poco. No proyecta, así que no sufre las ambigüedades de perspectiva de PnP
+    ni necesita conocer la distancia focal.
+
+``method="pnp"``
+    El planteamiento clásico: seis puntos y ``cv2.solvePnP``. Se conserva como
+    término de comparación para el capítulo de resultados. Es notablemente más
+    inestable con el mismo nivel de ruido, y hay una prueba que lo cuantifica.
+
 CONVENCIÓN DE SIGNOS
 --------------------
-Lo que el módulo calcula, verificado con datos sintéticos (ver las pruebas):
+Medido sobre una cara **real** mirando a la cámara (ver ``FRONTAL_ROTATION``:
+hacerlo sobre la identidad da resultados invertidos y fue fuente de dos errores
+seguidos):
 
-- ``yaw`` positivo  → la cara mira hacia la **derecha de la imagen**.
+- ``yaw`` positivo  → la cara mira hacia la **izquierda de la imagen**.
 - ``pitch`` positivo → la cara mira hacia **arriba**.
 
-Traducirlo a «izquierda del operador» **depende del espejo**, y conviene tenerlo
-escrito porque es una fuente clásica de confusión:
+Con la imagen **espejada** que usa el pipeline (``cv2.flip``, para que el
+operador se vea como en un espejo), la izquierda del operador cae en la
+izquierda de la imagen. Por tanto:
 
-- Sin espejar, al operador se le ve de frente como a otra persona, así que su
-  izquierda cae en la **derecha** de la imagen. Gira a su izquierda → yaw **+**.
-- Espejado (``cv2.flip``, que es lo que hace el pipeline para que el operador se
-  vea como en un espejo), su izquierda cae en la **izquierda** de la imagen.
-  Gira a su izquierda → yaw **−**.
+    el operador gira la cabeza a SU izquierda  →  ``pan`` positivo
+    el operador levanta la barbilla            →  ``tilt`` positivo
 
-El pitch no se ve afectado: el volteo solo invierte el eje horizontal. Así que
-``tilt`` positivo = el operador levanta la barbilla, con espejo o sin él, y eso
-coincide con el robot, cuyo gesto de página inclina la cabeza hacia abajo con
-``tilt = -30``.
-
-Para el **pan queda por confirmar en el visor** hacia qué lado debe girar el
-robot cuando el operador gira a su izquierda: si sale al revés, se corrige con
-``invert_pan=True`` sin tocar el código.
+El ``tilt`` coincide con el robot, cuyo gesto de página inclina la cabeza hacia
+abajo con ``tilt = -30``. Para el ``pan`` **queda por confirmar en el visor**
+hacia qué lado debe girar el robot; si sale al revés, ``invert_pan=True`` lo
+corrige sin tocar código.
 """
 
 from __future__ import annotations
@@ -61,7 +71,15 @@ from .config import AppConfig
 from .filters import OneEuroFilter
 from .limits import HeadClamp, clamp_head
 
-__all__ = ["HeadTracker", "estimate_head_pose", "MODEL_POINTS_3D", "LANDMARK_IDS"]
+__all__ = [
+    "HeadTracker",
+    "estimate_head_pose",
+    "rotation_between_clouds",
+    "landmarks_to_cloud",
+    "MODEL_POINTS_3D",
+    "LANDMARK_IDS",
+    "FRONTAL_ROTATION",
+]
 
 
 #: Modelo 3D canónico de rostro, en milímetros y con la punta de la nariz en el
@@ -87,6 +105,25 @@ MODEL_POINTS_3D = np.array(
 #: Si este orden se descuadra, solvePnP devuelve una pose sin sentido pero no da
 #: ningún error: es un fallo silencioso, así que hay una prueba que lo fija.
 LANDMARK_IDS = (1, 152, 33, 263, 61, 291)
+
+#: Rotación de una cara que MIRA A LA CÁMARA, en el sistema de la cámara.
+#:
+#: No es la identidad, y ese detalle causó un bug real. El modelo 3D tiene la
+#: nariz apuntando hacia +Z; la cámara de OpenCV tiene su +Z apuntando hacia la
+#: escena. Así que una cara que mira al objetivo está girada ~180° respecto a la
+#: identidad — la identidad correspondería a una cara mirando *al revés*, que es
+#: físicamente imposible de trackear.
+#:
+#: Al extraer ángulos de Euler directamente de esa rotación, salían valores
+#: cercanos a ±180°, y ahí ``atan2`` da saltos de 360° ante el menor ruido:
+#: medido, el cabeceo pasaba de +175° a −180° justo en la posición frontal, que
+#: es donde el operador está casi todo el tiempo. Eso producía temblor, saltos
+#: bruscos y valores clavados en los topes del robot.
+#:
+#: La solución es medir la pose **respecto a esta referencia** y no respecto a
+#: la identidad: ``R_rel = FRONTAL⁻¹ · R``. Así una cara frontal da 0° y los
+#: ángulos varían de forma continua alrededor de ese punto.
+FRONTAL_ROTATION = cv2.Rodrigues(np.array([0.0, math.pi, 0.0]))[0]
 
 
 def _euler_from_rotation(rotation: np.ndarray) -> tuple[float, float, float]:
@@ -163,8 +200,70 @@ def estimate_head_pose(
         return None
 
     rotation, _ = cv2.Rodrigues(rotation_vector)
-    yaw, pitch, roll = _euler_from_rotation(rotation)
+    # Respecto a la pose frontal, NO respecto a la identidad. Ver
+    # FRONTAL_ROTATION: medirlo contra la identidad ponía los ángulos cerca de
+    # ±180°, donde saltan 360° ante el menor ruido.
+    relative = FRONTAL_ROTATION.T @ rotation
+    yaw, pitch, roll = _euler_from_rotation(relative)
     return math.degrees(yaw), math.degrees(pitch), math.degrees(roll)
+
+
+def rotation_between_clouds(
+    reference: np.ndarray, current: np.ndarray
+) -> np.ndarray:
+    """Rotación rígida que lleva una nube de puntos a otra (algoritmo de Kabsch).
+
+    Ambas nubes deben tener los MISMOS puntos en el MISMO orden. Devuelve la
+    matriz de rotación 3x3 que mejor explica el cambio, en el sentido de mínimos
+    cuadrados sobre todos los puntos a la vez.
+
+    Por qué esto estabiliza tanto
+    -----------------------------
+    ``solvePnP`` resuelve la pose con **seis** puntos: el ruido de cada uno pesa
+    mucho, y en ángulos grandes la solución se vuelve ambigua (hay poses
+    distintas que proyectan casi igual, y el solver salta entre ellas — eso es
+    lo que hace que los ejes dibujados se estiren y bailen).
+
+    Kabsch usa **cientos** de puntos y promedia su ruido con una única
+    descomposición SVD. No hay ambigüedad de perspectiva porque no proyecta:
+    compara dos nubes 3D directamente. Tampoco necesita conocer la distancia
+    focal de la cámara, que aquí está sin calibrar.
+
+    A cambio, mide la rotación **respecto a la nube de referencia**, no respecto
+    a un sistema absoluto. Para teleoperación eso no es una limitación sino lo
+    que se quiere: la referencia es la postura neutra del operador, que es
+    justamente el origen desde el que hay que medir.
+    """
+    if reference.shape != current.shape or reference.ndim != 2:
+        raise ValueError(
+            f"las nubes deben tener la misma forma (N, 3); "
+            f"se recibió {reference.shape} y {current.shape}"
+        )
+
+    # Centrar: la traslación no interesa, solo la rotación.
+    p = reference - reference.mean(axis=0)
+    q = current - current.mean(axis=0)
+
+    u, _, vt = np.linalg.svd(p.T @ q)
+    # Corrección de reflexión: sin esto, el SVD puede devolver una matriz con
+    # determinante −1, que es una reflexión y no una rotación física.
+    d = np.sign(np.linalg.det(vt.T @ u.T))
+    return vt.T @ np.diag([1.0, 1.0, d]) @ u.T
+
+
+def landmarks_to_cloud(landmarks, width: int, height: int) -> np.ndarray:
+    """Convierte los landmarks de Face Mesh en una nube de puntos coherente.
+
+    MediaPipe entrega ``x`` e ``y`` normalizados por el ANCHO y el ALTO
+    respectivamente, y ``z`` en una escala «parecida a la de x». Si se usaran
+    tal cual, con una imagen no cuadrada los tres ejes tendrían escalas
+    distintas y la rotación saldría deformada. Aquí se llevan los tres a
+    píxeles usando el ancho para x y z, y el alto para y.
+    """
+    return np.array(
+        [(lm.x * width, lm.y * height, lm.z * width) for lm in landmarks],
+        dtype=np.float64,
+    )
 
 
 class HeadTracker:
@@ -214,6 +313,7 @@ class HeadTracker:
         gain_pan: float = 1.0,
         gain_tilt: float = 1.0,
         *,
+        method: str = "mesh",
         invert_pan: bool = False,
         invert_tilt: bool = False,
         min_cutoff: float = 0.5,
@@ -222,9 +322,12 @@ class HeadTracker:
     ) -> None:
         if gain_pan <= 0.0 or gain_tilt <= 0.0:
             raise ValueError("las ganancias deben ser positivas")
+        if method not in ("mesh", "pnp"):
+            raise ValueError(f"method debe ser 'mesh' o 'pnp', se recibió {method!r}")
 
         self.gain_pan = float(gain_pan)
         self.gain_tilt = float(gain_tilt)
+        self.method = method
         self.invert_pan = invert_pan
         self.invert_tilt = invert_tilt
         self._clock = clock
@@ -244,6 +347,10 @@ class HeadTracker:
         self._raw: tuple[float, float] | None = None
         self._last: HeadClamp | None = None
         self._frames_sin_rostro = 0
+        # Estado del método 'mesh': la nube de referencia es la postura neutra.
+        self._reference_cloud: np.ndarray | None = None
+        self._last_cloud: np.ndarray | None = None
+        self._last_points_2d: np.ndarray | None = None
 
     # -- estado, para el HUD ----------------------------------------------
 
@@ -286,16 +393,26 @@ class HeadTracker:
         Sin esto, la postura natural del operador se traduce en un sesgo
         constante del robot: si trabaja con la cabeza ligeramente girada, el
         robot se queda permanentemente girado.
+
+        En el método ``mesh`` esto vuelve a capturar la nube de referencia, que
+        es más que un origen numérico: pasa a ser el molde del rostro concreto
+        del operador contra el que se compara todo lo demás.
         """
-        if self._raw is None:
-            return False
-        self._neutral = self._raw
+        if self.method == "mesh":
+            if self._last_cloud is None:
+                return False
+            self._reference_cloud = self._last_cloud
+        else:
+            if self._raw is None:
+                return False
+            self._neutral = self._raw
         self._filter_pan.reset()
         self._filter_tilt.reset()
         return True
 
     def clear_neutral(self) -> None:
         self._neutral = None
+        self._reference_cloud = None
         self._filter_pan.reset()
         self._filter_tilt.reset()
 
@@ -317,17 +434,30 @@ class HeadTracker:
             return None
 
         landmarks = resultado.multi_face_landmarks[0].landmark
-        puntos = np.array(
+        self._last_points_2d = np.array(
             [(landmarks[i].x * width, landmarks[i].y * height) for i in LANDMARK_IDS],
             dtype=np.float64,
         )
 
-        pose = estimate_head_pose(puntos, (width, height))
-        if pose is None:
-            self._frames_sin_rostro += 1
-            return None
+        if self.method == "mesh":
+            nube = landmarks_to_cloud(landmarks, width, height)
+            self._last_cloud = nube
+            if self._reference_cloud is None:
+                # Autocalibración: la primera cara vista pasa a ser la
+                # referencia, para que el modo funcione sin pedir nada. Se puede
+                # recapturar en cualquier momento con set_neutral().
+                self._reference_cloud = nube
+            rotacion = rotation_between_clouds(self._reference_cloud, nube)
+            yaw, pitch, _roll = (
+                math.degrees(a) for a in _euler_from_rotation(rotacion)
+            )
+        else:
+            pose = estimate_head_pose(self._last_points_2d, (width, height))
+            if pose is None:
+                self._frames_sin_rostro += 1
+                return None
+            yaw, pitch, _roll = pose
 
-        yaw, pitch, _roll = pose
         if not (math.isfinite(yaw) and math.isfinite(pitch)):
             self._frames_sin_rostro += 1
             return None
@@ -393,32 +523,31 @@ class HeadTracker:
 # --------------------------------------------------------------------------
 
 
-def _dibujar_ejes(frame_bgr, puntos, image_size) -> None:
-    """Dibuja la terna de la cabeza sobre el rostro.
+def _dibujar_orientacion(frame_bgr, origen, pan: float, tilt: float, largo=90.0) -> None:
+    """Dibuja la terna de orientación a partir de la pose YA FILTRADA.
 
-    Es la comprobación visual de que solvePnP converge a algo con sentido: los
-    ejes deben quedar clavados en la cara y girar con ella.
+    Deliberadamente NO se recalcula la pose aquí. La primera versión de este
+    demo volvía a llamar a ``solvePnP`` sobre los puntos crudos para dibujar,
+    saltándose el filtro: los ejes temblaban mucho más que los números que
+    mostraba al lado, y además podían estirarse cuando el solver saltaba entre
+    soluciones ambiguas.
+
+    Ahora se dibuja exactamente lo que se le envía al robot, que es lo único que
+    importa comprobar.
     """
-    width, height = image_size
-    ok, rvec, tvec = cv2.solvePnP(
-        MODEL_POINTS_3D,
-        puntos,
-        camera_matrix(width, height),
-        np.zeros((4, 1)),
-        flags=cv2.SOLVEPNP_ITERATIVE,
+    yaw, pitch = math.radians(pan), math.radians(tilt)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    rotacion = np.array(
+        [[cy, sy * sp, sy * cp], [0.0, cp, -sp], [-sy, cy * sp, cy * cp]]
     )
-    if not ok:
-        return
-    ejes = np.array(
-        [(200.0, 0.0, 0.0), (0.0, 200.0, 0.0), (0.0, 0.0, 200.0)], dtype=np.float64
-    )
-    proyectados, _ = cv2.projectPoints(
-        ejes, rvec, tvec, camera_matrix(width, height), np.zeros((4, 1))
-    )
-    origen = tuple(int(v) for v in puntos[0])
+    ejes = np.eye(3) * largo
     colores = ((0, 0, 255), (0, 255, 0), (255, 0, 0))  # X rojo, Y verde, Z azul
-    for punto, color in zip(proyectados.reshape(-1, 2), colores):
-        cv2.line(frame_bgr, origen, tuple(int(v) for v in punto), color, 2)
+    ox, oy = int(origen[0]), int(origen[1])
+    for columna, color in zip((rotacion @ ejes).T, colores):
+        # Proyección ortográfica: basta para ver la orientación, y no introduce
+        # la deformación por perspectiva que hacía "estirarse" a los ejes.
+        cv2.line(frame_bgr, (ox, oy), (ox + int(columna[0]), oy - int(columna[1])), color, 2)
 
 
 def _demo() -> int:
@@ -433,8 +562,10 @@ def _demo() -> int:
         return 1
 
     print(
-        "c = calibrar neutro · x = quitar neutro · q = salir\n"
-        "Los ejes deben quedar clavados en la cara y girar con ella."
+        "c = recalibrar la postura neutra · x = borrarla\n"
+        "t = alternar metodo (mesh <-> pnp)  ·  q = salir\n\n"
+        "'mesh' compara cientos de puntos del rostro con tu postura de reposo.\n"
+        "'pnp'  resuelve la geometria con solo 6 puntos. Compara el temblor."
     )
 
     tracker = HeadTracker()
@@ -448,30 +579,31 @@ def _demo() -> int:
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pose = tracker.process(rgb)
+            height, width = frame.shape[:2]
 
             if pose is not None:
-                height, width = frame.shape[:2]
-                res = tracker._face_mesh.process(rgb)
-                if res.multi_face_landmarks:
-                    lm = res.multi_face_landmarks[0].landmark
-                    puntos = np.array(
-                        [(lm[i].x * width, lm[i].y * height) for i in LANDMARK_IDS],
-                        dtype=np.float64,
-                    )
-                    _dibujar_ejes(frame, puntos, (width, height))
+                origen = (
+                    tracker._last_points_2d[0]
+                    if tracker._last_points_2d is not None
+                    else (width / 2, height / 2)
+                )
+                _dibujar_orientacion(frame, origen, pose[0], pose[1])
 
                 recorte = tracker.last_clamp
-                texto = f"pan {pose[0]:+7.2f}  tilt {pose[1]:+7.2f}"
                 color = (0, 0, 255) if recorte and recorte.clamped else (0, 255, 0)
                 cv2.putText(
-                    frame, texto, (10, 30),
+                    frame, f"pan {pose[0]:+7.2f}   tilt {pose[1]:+7.2f}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2,
                 )
+                if recorte and recorte.clamped:
+                    cv2.putText(
+                        frame, "TOPE DEL ROBOT", (10, 115),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2,
+                    )
                 if tracker.raw_angles:
                     cv2.putText(
                         frame,
-                        f"crudo {tracker.raw_angles[0]:+7.2f} {tracker.raw_angles[1]:+7.2f}"
-                        f"   neutro: {'si' if tracker.neutral else 'no'}",
+                        f"crudo {tracker.raw_angles[0]:+7.2f} {tracker.raw_angles[1]:+7.2f}",
                         (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1,
                     )
             else:
@@ -480,15 +612,24 @@ def _demo() -> int:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2,
                 )
 
+            cv2.putText(
+                frame, f"metodo: {tracker.method}", (10, 88),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2,
+            )
+
             cv2.imshow("Telmeow - head tracker", frame)
             tecla = cv2.waitKey(1) & 0xFF
             if tecla == ord("q"):
                 break
             if tecla == ord("c"):
-                print("neutro calibrado" if tracker.set_neutral() else "sin pose que calibrar")
+                print("neutro recalibrado" if tracker.set_neutral() else "sin pose que calibrar")
             if tecla == ord("x"):
                 tracker.clear_neutral()
-                print("neutro eliminado")
+                print("neutro borrado")
+            if tecla == ord("t"):
+                tracker.method = "pnp" if tracker.method == "mesh" else "mesh"
+                tracker.clear_neutral()
+                print(f"metodo: {tracker.method}")
     finally:
         tracker.close()
         cap.release()

@@ -32,8 +32,8 @@ cambia respecto al plan original.
 | **P1** — Estructura y parámetros | ✅ **hecho** | `66440a5` |
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
-| **P4** — Head tracker | ⬜ siguiente | |
-| P5 — Arm tracker | ⬜ | |
+| **P4** — Head tracker | ✅ **hecho** ⚠️ falta confirmar el sentido del pan en el visor | |
+| P5 — Arm tracker | ⬜ **siguiente** | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -77,7 +77,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── limits.py             ✅ límites articulares + clamp 2D · solo stdlib
 │   ├── filters.py            ✅ One Euro, EMA, histéresis · solo stdlib
 │   ├── publisher.py          ✅ MQTT, JSON único, QoS 0
-│   ├── head_tracker.py       ⬜ P4
+│   ├── head_tracker.py       ✅ Face Mesh + solvePnP
 │   ├── arm_tracker.py        ⬜ P5
 │   ├── emotion_classifier.py ⬜ P6
 │   ├── control_panel.py      ⬜ P10
@@ -201,8 +201,8 @@ tesis.
 | 1 | **P1** | Estructura del paquete + límites articulares | ✅ |
 | 2 | **P2** | Capa MQTT compatible con el viewer | ✅ · punto de control superado |
 | 3 | **P3** | Filtros temporales (One Euro, histéresis) | ✅ |
-| 4 | **P4** | Head tracker (Face Mesh + solvePnP, sin dlib) | ⬜ **siguiente** |
-| 5 | **P5** | Arm tracker corregido (bugs 1–4) | ⬜ |
+| 4 | **P4** | Head tracker (Face Mesh + solvePnP, sin dlib) | ✅ |
+| 5 | **P5** | Arm tracker corregido (bugs 1–4) | ⬜ **siguiente** |
 | 6 | **P6** | Clasificador de emoción con backends intercambiables | ⬜ |
 | 7 | **P8** | Entrenamiento con FER-2013 | ⬜ ⚠️ revisar accuracy |
 | 8 | **P7** | Integración: captura única + HUD | ⬜ |
@@ -250,7 +250,26 @@ El One Euro gana **en los dos ejes a la vez**. Cifra citable en la tesis.
 
 ---
 
-## PROMPT 4 — Head tracker ⬜ SIGUIENTE
+## PROMPT 4 — Head tracker ✅ HECHO
+
+`head_tracker.py`: Face Mesh + `solvePnP` sobre un modelo 3D canónico de 6
+puntos, sin dlib. Cadena: solvePnP → restar neutro → ganancia → One Euro →
+`clamp_head`. Ganancias `gain_pan` / `gain_tilt` separadas, ambas 1.0 por
+defecto, más `invert_pan` / `invert_tilt`.
+
+**Verificado con datos sintéticos** (proyectar el modelo con una rotación
+conocida y recuperarla): error **0.00° en ±40°**, sin contaminación entre ejes.
+Signos medidos: `yaw+` = la cara mira a la derecha de la imagen; `pitch+` = mira
+hacia arriba.
+
+⚠️ **Pendiente de confirmar con el visor:** con la imagen espejada que usa el
+pipeline, el operador girando a *su* izquierda produce `yaw` **negativo**. Falta
+ver en el visor hacia qué lado debe girar el robot y, si sale al revés, poner
+`invert_pan=True`. No requiere tocar código.
+
+### Enunciado original
+
+
 
 ```
 Crea `telmeow_teleop/head_tracker.py` reemplazando legacy/Face Tracking.py.
@@ -1049,6 +1068,23 @@ f.reset()
 h = ClassHysteresis(n_frames=5, min_confidence=0.6, initial="neutral")
 h.update(etiqueta, confianza) -> etiqueta estabilizada
 h.current ; h.window
+```
+
+## `head_tracker.py`
+
+```python
+from telmeow_teleop.head_tracker import HeadTracker, estimate_head_pose
+
+t = HeadTracker(gain_pan=1.0, gain_tilt=1.0, invert_pan=False, invert_tilt=False)
+t.process(frame_rgb) -> (pan, tilt) | None   # None = sin rostro o pose inválida
+t.map_to_robot(yaw, pitch, timestamp=None)   # la cadena, sin cámara: testeable
+t.set_neutral() / t.clear_neutral()
+t.last_clamp        # HeadClamp, con lower/upper/fraction/clamped para el HUD
+t.raw_angles        # ángulos crudos de solvePnP, antes de todo
+t.frames_sin_rostro ; t.degenerate_dt_count
+t.close()           # o usarlo como gestor de contexto
+
+estimate_head_pose(puntos_2d, (ancho, alto)) -> (yaw, pitch, roll) | None
 ```
 
 ## `publisher.py`

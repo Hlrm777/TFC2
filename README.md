@@ -285,7 +285,9 @@ por segundo cuando solo le interesa uno cada varios segundos.
 │   ├── filters.py      # One Euro, EMA, histéresis de clase (solo stdlib)
 │   └── publisher.py    # MQTT, JSON único, QoS 0, limitación por descarte
 ├── tools/
-│   └── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/#
+│   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/#
+│   ├── dev_broker.py   # broker MQTT sin privilegios de administrador
+│   └── list_cameras.py # qué cámaras hay y qué resoluciones admiten
 ├── tests/              # pytest, sin broker ni cámara
 ├── legacy/             # los scripts originales, intactos
 ├── mosquitto.conf

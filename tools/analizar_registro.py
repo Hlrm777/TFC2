@@ -104,6 +104,9 @@ def resumen_bloque(nombre: str, filas: list[dict]) -> None:
     print(f"    tilt mediana {mediana_tilt:+7.2f}   recorrido "
           f"[{min(crudo_tilt):+7.2f},{max(crudo_tilt):+7.2f}]"
           f"   TEMBLOR {fmt(temblor_tilt)}")
+    if temblor_pan_f is not None or temblor_tilt_f is not None:
+        print(f"    tras el filtro One Euro:  pan {fmt(temblor_pan_f)}"
+              f"   tilt {fmt(temblor_tilt_f)}")
     escalas = [f["escala_cara"] for f in filas if f["escala_cara"] == f["escala_cara"]]
     if escalas:
         dispersion = max(escalas) - min(escalas)

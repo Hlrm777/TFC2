@@ -15,6 +15,12 @@
 
 pytest==8.3.3
 
+# Análisis estático. Es la ÚNICA red que cubre el código de los modos demo, que
+# solo corre con una cámara o un broker delante y por tanto ninguna prueba
+# ejecuta. Un `deque` sin importar pasó 400 pruebas y reventó al arrancar el
+# demo; pyflakes lo detecta sin ejecutar nada. Ver tests/test_estatico.py.
+pyflakes==3.2.0
+
 # Cliente MQTT, necesario para las pruebas del publisher.
 paho-mqtt==2.1.0
 

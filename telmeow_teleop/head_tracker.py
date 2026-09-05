@@ -62,12 +62,13 @@ from __future__ import annotations
 
 import math
 import time
+from collections import deque
 
 import cv2
 import mediapipe as mp
 import numpy as np
 
-from .config import AppConfig, HeadConfig
+from .config import AppConfig
 from .filters import OneEuroFilter
 from .limits import HEAD_PAN_RANGE, HEAD_TILT_RANGE, HeadClamp, clamp_head
 

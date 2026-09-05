@@ -247,13 +247,25 @@ class CameraConfig:
 
     ``flip`` voltea la imagen horizontalmente para que el operador se vea como
     en un espejo.
+
+
+    ``fourcc`` es el formato en que la cámara entrega los frames, y **no es un
+    detalle**: por USB, muchas webcams solo dan 30 fps a 1280x720 si comprimen
+    en MJPG. Sin comprimir (YUY2, el formato por defecto de DirectShow) esa
+    resolución ocupa demasiado ancho de banda y la cámara baja a 10 fps sin
+    avisar de nada. Medido en este proyecto: exactamente 10.0 fps a 1280x720
+    antes de pedir MJPG.
+
+    Cadena vacía deja el formato que elija el backend.
     """
 
     index: int = 0
     width: int = 640
     height: int = 480
+    fps: int = 30
     flip: bool = True
     backend: str = "dshow"
+    fourcc: str = "MJPG"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "CameraConfig":
@@ -261,8 +273,10 @@ class CameraConfig:
             index=_env_int(env, "CAMERA_INDEX", cls.index),
             width=_env_int(env, "CAMERA_WIDTH", cls.width),
             height=_env_int(env, "CAMERA_HEIGHT", cls.height),
+            fps=_env_int(env, "CAMERA_FPS", cls.fps),
             flip=_env_bool(env, "CAMERA_FLIP", cls.flip),
             backend=_env_str(env, "CAMERA_BACKEND", cls.backend),
+            fourcc=_env_str(env, "CAMERA_FOURCC", cls.fourcc),
         )
 
 

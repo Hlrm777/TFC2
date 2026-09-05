@@ -40,6 +40,34 @@ def cargar(ruta: Path) -> list[dict]:
     return filas
 
 
+def temblor(valores: list[float], tiempos: list[float], ventana=1.0) -> float | None:
+    """Temblor de alta frecuencia: mediana de la desviación en ventanas cortas.
+
+    La desviación sobre un tramo entero solo mide el temblor si el operador se
+    quedó PERFECTAMENTE quieto, y eso no ocurre: hay deriva lenta, se respira,
+    se cambia de postura. Esa desviación global mezcla temblor con movimiento
+    real y sale inflada.
+
+    Trocear en ventanas de un segundo y quedarse con la mediana de sus
+    desviaciones separa las dos cosas: dentro de un segundo el movimiento
+    voluntario apenas avanza, así que lo que queda es el ruido del estimador.
+    La mediana descarta además las ventanas en las que sí hubo movimiento.
+
+    Es la cifra que sirve como REPETIBILIDAD para la tesis.
+    """
+    if len(valores) < 10:
+        return None
+    desviaciones = []
+    inicio = 0
+    for i, t in enumerate(tiempos):
+        if t - tiempos[inicio] >= ventana:
+            trozo = valores[inicio:i]
+            if len(trozo) >= 5:
+                desviaciones.append(statistics.stdev(trozo))
+            inicio = i
+    return statistics.median(desviaciones) if desviaciones else None
+
+
 def resumen_bloque(nombre: str, filas: list[dict]) -> None:
     if len(filas) < 2:
         print(f"  {nombre}: solo {len(filas)} muestras, se omite")
@@ -53,16 +81,21 @@ def resumen_bloque(nombre: str, filas: list[dict]) -> None:
     sal_tilt = [f["tilt"] for f in filas]
     recortados = sum(f["recortado"] for f in filas)
 
+    tiempos = [f["t"] for f in filas]
+    temblor_pan = temblor(crudo_pan, tiempos)
+    temblor_tilt = temblor(crudo_tilt, tiempos)
+    temblor_pan_f = temblor(sal_pan, tiempos)
+    temblor_tilt_f = temblor(sal_tilt, tiempos)
+
+    def fmt(v):
+        return f"{v:5.3f}" if v is not None else "  -- "
+
     print(f"  {nombre}")
     print(f"    {len(filas):5d} muestras en {duracion:5.1f} s  ->  {fps:5.1f} fps")
-    print(f"    pan  crudo [{min(crudo_pan):+7.2f},{max(crudo_pan):+7.2f}]  "
-          f"desv {statistics.stdev(crudo_pan):6.3f}   "
-          f"salida [{min(sal_pan):+7.2f},{max(sal_pan):+7.2f}]  "
-          f"desv {statistics.stdev(sal_pan):6.3f}")
-    print(f"    tilt crudo [{min(crudo_tilt):+7.2f},{max(crudo_tilt):+7.2f}]  "
-          f"desv {statistics.stdev(crudo_tilt):6.3f}   "
-          f"salida [{min(sal_tilt):+7.2f},{max(sal_tilt):+7.2f}]  "
-          f"desv {statistics.stdev(sal_tilt):6.3f}")
+    print(f"    pan  recorrido [{min(crudo_pan):+7.2f},{max(crudo_pan):+7.2f}]"
+          f"   TEMBLOR crudo {fmt(temblor_pan)}  filtrado {fmt(temblor_pan_f)}")
+    print(f"    tilt recorrido [{min(crudo_tilt):+7.2f},{max(crudo_tilt):+7.2f}]"
+          f"   TEMBLOR crudo {fmt(temblor_tilt)}  filtrado {fmt(temblor_tilt_f)}")
     escalas = [f["escala_cara"] for f in filas if f["escala_cara"] == f["escala_cara"]]
     if escalas:
         dispersion = max(escalas) - min(escalas)

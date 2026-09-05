@@ -662,11 +662,22 @@ def _demo(argv: list[str] | None = None) -> int:
     cfg = AppConfig.from_env()
     backends = {"dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF, "any": cv2.CAP_ANY}
     cap = cv2.VideoCapture(cfg.camera.index, backends[cfg.camera.backend])
+    # El formato ANTES que la resolución: pedirlo después no siempre se aplica.
+    if cfg.camera.fourcc:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*cfg.camera.fourcc))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.camera.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.camera.height)
+    cap.set(cv2.CAP_PROP_FPS, cfg.camera.fps)
     if not cap.isOpened():
         print(f"No se pudo abrir la cámara {cfg.camera.index}.")
         return 1
+    print(
+        f"Camara {cfg.camera.index}: "
+        f"{int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
+        f"{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))} "
+        f"@ {cap.get(cv2.CAP_PROP_FPS):.0f} fps nominales, "
+        f"formato {cfg.camera.fourcc or 'por defecto'}\n"
+    )
 
     print(
         "CALIBRACION DE GANANCIA\n"
@@ -711,6 +722,7 @@ def _demo(argv: list[str] | None = None) -> int:
         print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
 
     t0 = time.perf_counter()
+    marcas_fps: deque[float] = deque(maxlen=30)
     try:
         while True:
             ok, frame = cap.read()
@@ -718,6 +730,13 @@ def _demo(argv: list[str] | None = None) -> int:
                 break
             if cfg.camera.flip:
                 frame = cv2.flip(frame, 1)
+
+            marcas_fps.append(time.perf_counter())
+            fps_real = (
+                (len(marcas_fps) - 1) / (marcas_fps[-1] - marcas_fps[0])
+                if len(marcas_fps) > 1 and marcas_fps[-1] > marcas_fps[0]
+                else 0.0
+            )
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pose = tracker.process(rgb)
@@ -757,8 +776,10 @@ def _demo(argv: list[str] | None = None) -> int:
             cv2.putText(
                 frame,
                 f"{tracker.method}  pan {tracker.gain_pan:.2f}  "
-                f"tilt ^{tracker.gain_tilt_up:.2f} v{tracker.gain_tilt_down:.2f}",
-                (10, 88), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2,
+                f"tilt ^{tracker.gain_tilt_up:.2f} v{tracker.gain_tilt_down:.2f}"
+                f"   {fps_real:4.1f} fps",
+                (10, 88), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                (255, 255, 0) if fps_real >= 20 else (0, 165, 255), 2,
             )
 
             # Ayuda de calibración: extremos alcanzados y la ganancia que haría

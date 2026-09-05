@@ -456,33 +456,63 @@ def test_kabsch_exige_nubes_del_mismo_tamano():
 def test_sin_movimiento_no_hay_ganancia_que_sugerir():
     t = tracker_con()
     try:
-        assert t.suggested_gains() == {"pan": None, "tilt": None}
+        assert t.suggested_gains() == {"pan": None, "tilt_up": None, "tilt_down": None}
     finally:
         t.close()
 
 
-def test_la_ganancia_sugerida_hace_que_el_recorrido_comodo_cubra_el_robot():
-    """Si el operador solo alcanza 20° cómodamente y el robot llega a 42°, hace
-    falta una ganancia de 2.1 para que ese recorrido cubra todo el rango."""
+def test_el_tilt_propone_una_ganancia_por_sentido():
+    """Si el operador alcanza 20° hacia arriba y solo 12° hacia abajo, las dos
+    ganancias tienen que ser distintas: 42/20 = 2.1 y 39/12 = 3.25."""
     t = tracker_con()
     try:
-        t._extremos["tilt"] = [-19.5, 20.0]  # −39/−19.5 = 2.0 ; 42/20 = 2.1
-        # Se toma el MENOR de los dos, para no dejar corto ningún lado.
-        assert t.suggested_gains()["tilt"] == pytest.approx(2.0, abs=0.01)
+        t._extremos["tilt"] = [-12.0, 20.0]
+        sugeridas = t.suggested_gains()
+        assert sugeridas["tilt_up"] == pytest.approx(2.1, abs=0.01)
+        assert sugeridas["tilt_down"] == pytest.approx(3.25, abs=0.01)
     finally:
         t.close()
 
 
-def test_aplicar_la_ganancia_sugerida_lleva_justo_al_tope():
-    """Comprobación de extremo a extremo del procedimiento de calibración."""
+def test_el_pan_usa_una_sola_ganancia_por_ser_simetrico():
+    """Su rango es ±90°, así que se toma el lado de menor recorrido."""
     t = tracker_con()
     try:
-        t._extremos["tilt"] = [-20.0, 20.0]
-        sugerida = t.suggested_gains()["tilt"]
-        t.gain_tilt = sugerida
-        _, tilt = t.map_to_robot(0.0, -20.0, timestamp=0.0)
-        assert tilt == pytest.approx(HEAD_TILT_RANGE[0], abs=0.5)
-        assert t.last_clamp.clamped is False  # llega al tope sin pasarse
+        t._extremos["pan"] = [-45.0, 30.0]  # 90/45 = 2.0 ; 90/30 = 3.0
+        assert t.suggested_gains()["pan"] == pytest.approx(2.0, abs=0.01)
+    finally:
+        t.close()
+
+
+def test_aplicar_las_ganancias_sugeridas_lleva_justo_a_cada_tope():
+    """Comprobación de extremo a extremo del procedimiento de calibración, en
+    los dos sentidos y con recorridos asimétricos del operador."""
+    t = tracker_con()
+    try:
+        t._extremos["tilt"] = [-12.0, 20.0]
+        sugeridas = t.suggested_gains()
+        t.gain_tilt_up = sugeridas["tilt_up"]
+        t.gain_tilt_down = sugeridas["tilt_down"]
+
+        _, arriba = t.map_to_robot(0.0, 20.0, timestamp=0.0)
+        assert arriba == pytest.approx(HEAD_TILT_RANGE[1], abs=0.5)
+        assert t.last_clamp.clamped is False
+
+        _, abajo = t.map_to_robot(0.0, -12.0, timestamp=1.0)
+        assert abajo == pytest.approx(HEAD_TILT_RANGE[0], abs=0.5)
+        assert t.last_clamp.clamped is False
+    finally:
+        t.close()
+
+
+def test_la_ganancia_del_tilt_es_continua_al_cruzar_el_cero():
+    """Dos ganancias distintas podrían introducir un salto en el punto donde se
+    cambia de una a otra. No lo hacen porque ambas ramas valen 0 en 0."""
+    t = tracker_con(gain_tilt_up=1.0, gain_tilt_down=3.0)
+    try:
+        antes = t.map_to_robot(0.0, -0.001, timestamp=0.0)[1]
+        despues = t.map_to_robot(0.0, +0.001, timestamp=1.0)[1]
+        assert abs(despues - antes) < 0.01
     finally:
         t.close()
 

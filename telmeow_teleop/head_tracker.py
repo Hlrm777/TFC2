@@ -313,6 +313,8 @@ class HeadTracker:
         gain_pan: float = 1.0,
         gain_tilt: float = 1.0,
         *,
+        gain_tilt_up: float | None = None,
+        gain_tilt_down: float | None = None,
         method: str = "mesh",
         invert_pan: bool = False,
         invert_tilt: bool = False,
@@ -320,14 +322,17 @@ class HeadTracker:
         beta: float = 0.5,
         clock=time.perf_counter,
     ) -> None:
-        if gain_pan <= 0.0 or gain_tilt <= 0.0:
+        arriba = gain_tilt if gain_tilt_up is None else gain_tilt_up
+        abajo = gain_tilt if gain_tilt_down is None else gain_tilt_down
+        if min(gain_pan, arriba, abajo) <= 0.0:
             raise ValueError("las ganancias deben ser positivas")
         if method not in ("mesh", "pnp"):
             raise ValueError(f"method debe ser 'mesh' o 'pnp', se recibió {method!r}")
         self._extremos = {"pan": [0.0, 0.0], "tilt": [0.0, 0.0]}
 
         self.gain_pan = float(gain_pan)
-        self.gain_tilt = float(gain_tilt)
+        self.gain_tilt_up = float(arriba)
+        self.gain_tilt_down = float(abajo)
         self.method = method
         self.invert_pan = invert_pan
         self.invert_tilt = invert_tilt
@@ -375,26 +380,39 @@ class HeadTracker:
         self._extremos = {"pan": [0.0, 0.0], "tilt": [0.0, 0.0]}
 
     def suggested_gains(self) -> dict[str, float | None]:
-        """Ganancia que haría falta para alcanzar el tope del robot.
+        """Ganancias que harían falta para alcanzar el tope del robot.
 
         Procedimiento de calibración: calibrar el neutro, llevar la cabeza hasta
-        donde resulte CÓMODO en cada sentido, y leer este valor. Es la ganancia
-        con la que ese recorrido cómodo cubre justo el rango del robot.
+        donde resulte CÓMODO en cada sentido, y leer estos valores. Son las
+        ganancias con las que ese recorrido cómodo cubre justo el rango del
+        robot.
 
-        Se toma el extremo de menor recorrido de cada eje, para que la ganancia
-        resultante no deje un lado corto — es preferible llegar al tope antes
-        por un lado que no llegar nunca por el otro.
+        El tilt se propone **por separado hacia arriba y hacia abajo**, porque
+        las dos asimetrías se suman: el robot llega menos hacia abajo (−39°
+        frente a +42°) y la estimación también se queda más corta hacia abajo.
+        Con un único valor habría que elegir entre pasarse por arriba o no
+        llegar nunca por abajo.
+
+        El pan sí usa un solo valor, tomando el lado de menor recorrido: su
+        rango es simétrico (±90°) y no hay razón para diferenciarlo.
         """
-        sugeridas: dict[str, float | None] = {}
-        for eje, rango in (("pan", HEAD_PAN_RANGE), ("tilt", HEAD_TILT_RANGE)):
-            minimo, maximo = self._extremos[eje]
-            propuestas = []
-            if minimo < -1e-6:
-                propuestas.append(abs(rango[0] / minimo))
-            if maximo > 1e-6:
-                propuestas.append(abs(rango[1] / maximo))
-            sugeridas[eje] = min(propuestas) if propuestas else None
-        return sugeridas
+        minimo_pan, maximo_pan = self._extremos["pan"]
+        propuestas_pan = []
+        if minimo_pan < -1e-6:
+            propuestas_pan.append(abs(HEAD_PAN_RANGE[0] / minimo_pan))
+        if maximo_pan > 1e-6:
+            propuestas_pan.append(abs(HEAD_PAN_RANGE[1] / maximo_pan))
+
+        minimo_tilt, maximo_tilt = self._extremos["tilt"]
+        return {
+            "pan": min(propuestas_pan) if propuestas_pan else None,
+            "tilt_up": (
+                abs(HEAD_TILT_RANGE[1] / maximo_tilt) if maximo_tilt > 1e-6 else None
+            ),
+            "tilt_down": (
+                abs(HEAD_TILT_RANGE[0] / minimo_tilt) if minimo_tilt < -1e-6 else None
+            ),
+        }
 
     @property
     def neutral(self) -> tuple[float, float] | None:
@@ -525,8 +543,19 @@ class HeadTracker:
             yaw -= self._neutral[0]
             pitch -= self._neutral[1]
 
+        # Ganancia de tilt distinta según el sentido. Se elige por el signo del
+        # movimiento DEL OPERADOR (antes de invertir), porque las ganancias se
+        # calibran contra lo que él alcanza cómodamente, no contra lo que acabe
+        # haciendo el robot.
+        #
+        # Bajar la barbilla es el caso peor: además de que el robot llega menos
+        # (−39° frente a +42°), la estimación se queda más corta hacia abajo.
+        # Con una sola ganancia hay que elegir entre pasarse arriba o no llegar
+        # abajo. La función es continua en 0, así que no hay salto al cruzar.
+        ganancia_tilt = self.gain_tilt_up if pitch >= 0.0 else self.gain_tilt_down
+
         pan = yaw * self.gain_pan * (-1.0 if self.invert_pan else 1.0)
-        tilt = pitch * self.gain_tilt * (-1.0 if self.invert_tilt else 1.0)
+        tilt = pitch * ganancia_tilt * (-1.0 if self.invert_tilt else 1.0)
 
         ahora = self._clock() if timestamp is None else timestamp
         pan = self._filter_pan(pan, ahora)
@@ -599,8 +628,21 @@ def _dibujar_orientacion(frame_bgr, origen, pan: float, tilt: float, largo=90.0)
 ALTO_TEXTO = 145
 
 
-def _demo() -> int:
+def _demo(argv: list[str] | None = None) -> int:
     """`python -m telmeow_teleop.head_tracker`"""
+    import argparse
+    import csv
+
+    parser = argparse.ArgumentParser(prog="head_tracker")
+    parser.add_argument(
+        "--record",
+        metavar="CSV",
+        help="Registra cada frame en un CSV, para analizar los datos después "
+             "en vez de juzgar a ojo. La tecla ESPACIO cambia de etiqueta, "
+             "para separar las fases de la prueba.",
+    )
+    args = parser.parse_args(argv)
+
     cfg = AppConfig.from_env()
     backends = {"dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF, "any": cv2.CAP_ANY}
     cap = cv2.VideoCapture(cfg.camera.index, backends[cfg.camera.backend])
@@ -619,20 +661,40 @@ def _demo() -> int:
         "     comodo cubra todo el rango del robot.\n"
         "  4. Lee 'sugerida' en pantalla y ajusta con las teclas.\n\n"
         "TECLAS\n"
-        "  c = calibrar neutro   x = borrarlo   r = reiniciar extremos\n"
-        "  z/Z = ganancia tilt -/+     a/A = ganancia pan -/+\n"
-        "  t = alternar metodo (mesh <-> pnp)   q = salir\n"
+        "  c = calibrar neutro    n = borrarlo    r = reiniciar extremos\n"
+        "  z/Z = ganancia tilt ARRIBA -/+\n"
+        "  v/V = ganancia tilt ABAJO  -/+\n"
+        "  a/A = ganancia pan         -/+\n"
+        "  t = alternar metodo (mesh <-> pnp)\n"
+        "  ESPACIO = cambiar de etiqueta (solo con --record)\n"
+        "  q = salir\n"
     )
 
     tracker = HeadTracker(
         gain_pan=cfg.head.gain_pan,
-        gain_tilt=cfg.head.gain_tilt,
+        gain_tilt_up=cfg.head.gain_tilt_up,
+        gain_tilt_down=cfg.head.gain_tilt_down,
         method=cfg.head.method,
         invert_pan=cfg.head.invert_pan,
         invert_tilt=cfg.head.invert_tilt,
         min_cutoff=cfg.head.min_cutoff,
         beta=cfg.head.beta,
     )
+
+    registro = None
+    escritor = None
+    etiqueta = 0
+    if args.record:
+        registro = open(args.record, "w", newline="", encoding="utf-8")
+        escritor = csv.writer(registro)
+        escritor.writerow(
+            ["t", "etiqueta", "metodo", "raw_pan", "raw_tilt",
+             "pan", "tilt", "gain_pan", "gain_tilt_up", "gain_tilt_down",
+             "recortado", "ancho", "alto"]
+        )
+        print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
+
+    t0 = time.perf_counter()
     try:
         while True:
             ok, frame = cap.read()
@@ -678,8 +740,8 @@ def _demo() -> int:
 
             cv2.putText(
                 frame,
-                f"metodo: {tracker.method}   ganancia pan {tracker.gain_pan:.2f}"
-                f"  tilt {tracker.gain_tilt:.2f}",
+                f"{tracker.method}  pan {tracker.gain_pan:.2f}  "
+                f"tilt ^{tracker.gain_tilt_up:.2f} v{tracker.gain_tilt_down:.2f}",
                 (10, 88), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2,
             )
 
@@ -687,42 +749,72 @@ def _demo() -> int:
             # falta para que ese recorrido cubra justo el rango del robot.
             extremos = tracker.raw_extremes
             sugeridas = tracker.suggested_gains()
-            for fila, (eje, rango) in enumerate(
-                (("pan", HEAD_PAN_RANGE), ("tilt", HEAD_TILT_RANGE))
-            ):
-                lo, hi = extremos[eje]
-                sug = sugeridas[eje]
-                texto_sug = f"sugerida {sug:.2f}" if sug else "sugerida --"
+            filas = (
+                ("pan", extremos["pan"], HEAD_PAN_RANGE, sugeridas["pan"], None),
+                ("tilt", extremos["tilt"], HEAD_TILT_RANGE,
+                 sugeridas["tilt_down"], sugeridas["tilt_up"]),
+            )
+            for fila, (eje, (lo, hi), rango, sug_a, sug_b) in enumerate(filas):
+                if sug_b is None:
+                    texto = f"sugerida {sug_a:.2f}" if sug_a else "sugerida --"
+                else:
+                    abajo = f"{sug_a:.2f}" if sug_a else "--"
+                    arriba = f"{sug_b:.2f}" if sug_b else "--"
+                    texto = f"sugeridas v{abajo} ^{arriba}"
                 cv2.putText(
                     frame,
                     f"{eje:>4s} crudo [{lo:+6.1f},{hi:+6.1f}]  robot "
-                    f"[{rango[0]:+.0f},{rango[1]:+.0f}]  {texto_sug}",
+                    f"[{rango[0]:+.0f},{rango[1]:+.0f}]  {texto}",
                     (10, ALTO_TEXTO + fila * 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 255, 180), 1,
                 )
+
+            if escritor is not None and pose is not None:
+                crudo = tracker.raw_angles or (float("nan"), float("nan"))
+                recorte = tracker.last_clamp
+                escritor.writerow([
+                    f"{time.perf_counter() - t0:.4f}", etiqueta, tracker.method,
+                    f"{crudo[0]:.4f}", f"{crudo[1]:.4f}",
+                    f"{pose[0]:.4f}", f"{pose[1]:.4f}",
+                    f"{tracker.gain_pan:.2f}",
+                    f"{tracker.gain_tilt_up:.2f}", f"{tracker.gain_tilt_down:.2f}",
+                    int(bool(recorte and recorte.clamped)), width, height,
+                ])
+
+            cv2.putText(
+                frame, f"etiqueta {etiqueta}" if escritor else "", (10, 200),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 100), 2,
+            )
 
             cv2.imshow("Telmeow - head tracker", frame)
             tecla = cv2.waitKey(1) & 0xFF
             if tecla == ord("q"):
                 break
-            if tecla == ord("c"):
+            if tecla == ord(" "):
+                etiqueta += 1
+                print(f"--- etiqueta {etiqueta} ---")
+            elif tecla == ord("c"):
                 print("neutro recalibrado" if tracker.set_neutral() else "sin pose que calibrar")
-            if tecla == ord("x"):
+            elif tecla == ord("n"):
                 tracker.clear_neutral()
                 print("neutro borrado")
-            if tecla == ord("r"):
+            elif tecla == ord("r"):
                 tracker.reset_extremes()
                 print("extremos reiniciados")
-            if tecla == ord("t"):
+            elif tecla == ord("t"):
                 tracker.method = "pnp" if tracker.method == "mesh" else "mesh"
                 tracker.clear_neutral()
                 tracker.reset_extremes()
                 print(f"metodo: {tracker.method}")
-            if tecla in (ord("z"), ord("Z")):
+            elif tecla in (ord("z"), ord("Z")):
                 paso = 0.05 if tecla == ord("Z") else -0.05
-                tracker.gain_tilt = max(0.05, round(tracker.gain_tilt + paso, 2))
-                print(f"ganancia tilt = {tracker.gain_tilt:.2f}")
-            if tecla in (ord("a"), ord("A")):
+                tracker.gain_tilt_up = max(0.05, round(tracker.gain_tilt_up + paso, 2))
+                print(f"ganancia tilt ARRIBA = {tracker.gain_tilt_up:.2f}")
+            elif tecla in (ord("v"), ord("V")):
+                paso = 0.05 if tecla == ord("V") else -0.05
+                tracker.gain_tilt_down = max(0.05, round(tracker.gain_tilt_down + paso, 2))
+                print(f"ganancia tilt ABAJO = {tracker.gain_tilt_down:.2f}")
+            elif tecla in (ord("a"), ord("A")):
                 paso = 0.05 if tecla == ord("A") else -0.05
                 tracker.gain_pan = max(0.05, round(tracker.gain_pan + paso, 2))
                 print(f"ganancia pan = {tracker.gain_pan:.2f}")
@@ -730,6 +822,9 @@ def _demo() -> int:
         tracker.close()
         cap.release()
         cv2.destroyAllWindows()
+        if registro is not None:
+            registro.close()
+            print(f"\nRegistro guardado en {args.record}")
     return 0
 
 

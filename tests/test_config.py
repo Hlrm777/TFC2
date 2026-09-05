@@ -76,16 +76,27 @@ def test_defaults_cabeza():
     head = HeadConfig()
     assert head.method == "mesh"
     assert head.gain_pan == 1.15
-    assert head.gain_tilt == 1.0
+    assert head.gain_tilt_up == 1.0
+    assert head.gain_tilt_down == 1.0
     assert head.invert_pan is False
+
+
+def test_el_tilt_tiene_una_ganancia_por_sentido():
+    """Dos asimetrías se suman: el robot llega menos hacia abajo (−39 frente a
+    +42) y la estimación también se queda más corta hacia abajo."""
+    cfg = AppConfig.from_env(
+        {"TELMEOW_HEAD_GAIN_TILT_UP": "1.4", "TELMEOW_HEAD_GAIN_TILT_DOWN": "2.2"}
+    )
+    assert cfg.head.gain_tilt_up == 1.4
+    assert cfg.head.gain_tilt_down == 2.2
 
 
 def test_las_ganancias_se_pueden_ajustar_por_entorno():
     """Calibrar no debe requerir tocar código."""
     cfg = AppConfig.from_env(
-        {"TELMEOW_HEAD_GAIN_TILT": "1.8", "TELMEOW_HEAD_INVERT_PAN": "true"}
+        {"TELMEOW_HEAD_GAIN_TILT_DOWN": "1.8", "TELMEOW_HEAD_INVERT_PAN": "true"}
     )
-    assert cfg.head.gain_tilt == 1.8
+    assert cfg.head.gain_tilt_down == 1.8
     assert cfg.head.invert_pan is True
     assert cfg.head.gain_pan == 1.15  # sin tocar
 

@@ -275,11 +275,16 @@ class HeadConfig:
     atenúa. Van separadas por eje porque los rangos no se parecen y porque la
     estimación no tiene la misma sensibilidad en los dos.
 
-    ``gain_tilt`` suele necesitar ser mayor que 1: el cabeceo se estima a partir
-    de la profundidad de los landmarks, que MediaPipe entrega comprimida, así
-    que el ángulo sale corto y el operador tiene que forzar el cuello para
-    alcanzar el rango del robot. El demo del head tracker calcula en vivo la
-    ganancia que haría falta — ver ``python -m telmeow_teleop.head_tracker``.
+    El tilt lleva **dos ganancias, una por sentido**, porque hay dos asimetrías
+    que se suman: el robot llega menos hacia abajo (−39° frente a +42°) y la
+    estimación también se queda más corta hacia abajo. Con un único valor habría
+    que elegir entre pasarse por arriba o no llegar nunca por abajo — bajar la
+    barbilla resultaba casi imposible de alcanzar en la prueba con el operador.
+
+    Ambas suelen necesitar ser mayores que 1: el cabeceo se estima a partir de
+    la profundidad de los landmarks, que MediaPipe entrega comprimida. El demo
+    del head tracker calcula en vivo las ganancias que harían falta — ver
+    ``python -m telmeow_teleop.head_tracker``.
 
     Amplificar tiene un precio: multiplica también el ruido de la estimación y
     hace llegar antes al tope mecánico.
@@ -287,7 +292,8 @@ class HeadConfig:
 
     method: str = "mesh"
     gain_pan: float = 1.15
-    gain_tilt: float = 1.0
+    gain_tilt_up: float = 1.0
+    gain_tilt_down: float = 1.0
     invert_pan: bool = False
     invert_tilt: bool = False
     min_cutoff: float = 0.5
@@ -298,7 +304,8 @@ class HeadConfig:
         return cls(
             method=_env_str(env, "HEAD_METHOD", cls.method),
             gain_pan=_env_float(env, "HEAD_GAIN_PAN", cls.gain_pan),
-            gain_tilt=_env_float(env, "HEAD_GAIN_TILT", cls.gain_tilt),
+            gain_tilt_up=_env_float(env, "HEAD_GAIN_TILT_UP", cls.gain_tilt_up),
+            gain_tilt_down=_env_float(env, "HEAD_GAIN_TILT_DOWN", cls.gain_tilt_down),
             invert_pan=_env_bool(env, "HEAD_INVERT_PAN", cls.invert_pan),
             invert_tilt=_env_bool(env, "HEAD_INVERT_TILT", cls.invert_tilt),
             min_cutoff=_env_float(env, "HEAD_MIN_CUTOFF", cls.min_cutoff),

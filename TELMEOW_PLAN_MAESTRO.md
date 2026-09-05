@@ -262,10 +262,54 @@ conocida y recuperarla): error **0.00° en ±40°**, sin contaminación entre ej
 Signos medidos: `yaw+` = la cara mira a la derecha de la imagen; `pitch+` = mira
 hacia arriba.
 
+### Resultados medidos con el operador real (2026-09-05)
+
+Sesión grabada con `--record` y analizada con `tools/analizar_registro.py`.
+1962 muestras, cámara externa a 1280x720.
+
+**Repetibilidad (temblor), medida como la mediana de la desviación en ventanas
+de 1 s.** Es la cifra que sustituye a la exactitud absoluta, que no se puede
+medir sin captura de movimiento (§3.3.2):
+
+| Método | Temblor en pan | Temblor en tilt |
+|---|---|---|
+| **mesh** | **0.19°** | 0.31° |
+| pnp | 1.47° | 0.30° |
+
+**El método `mesh` tiene 7.7× menos temblor en el giro lateral**, y empatan en
+cabeceo. La ventaja se concentra donde PnP con 6 puntos tiene sus soluciones
+ambiguas. El filtro One Euro reduce además el temblor de 0.31° a 0.17°.
+
+**Efecto de la distancia** — mucho menor de lo esperado:
+
+| Cara (px entre ojos) | Temblor tilt |
+|---|---|
+| 236 (cerca) | 0.281° |
+| 180 (normal) | 0.313° |
+| 140 (lejos) | 0.319° |
+
+Alejarse un 40 % solo empeora un 14 %. El operador no necesita trabajar
+incómodamente cerca.
+
+**Recorrido alcanzado:** pan ±55.5°, tilt +33.3° / −40.2°. Hacia abajo **ya
+supera** el tope del robot (−39°), lo que descarta la queja inicial de que
+bajar la cabeza no llegaba: aquello venía de la cámara integrada mirando desde
+abajo, no del estimador. Cambiar a una cámara externa a la altura de los ojos lo
+resolvió.
+
+**Otras confirmaciones medidas:**
+
+- El ladeo de cabeza «de perro» (roll), que el robot no puede reproducir, deja
+  pan y tilt en 0.00 y **no degrada** su medida: con 45° de ladeo, un giro real
+  de 20° se sigue midiendo como 20.00.
+- MediaPipe arrastra **TensorFlow entero** (2289 módulos) al importarse. De ahí
+  el arranque lento y los avisos de oneDNN. Es dependencia suya, no nuestra, pero
+  hay que tenerlo en cuenta para la Raspberry Pi del PROMPT 11.
+
 ⚠️ **Pendiente de confirmar con el visor:** con la imagen espejada que usa el
-pipeline, el operador girando a *su* izquierda produce `yaw` **negativo**. Falta
-ver en el visor hacia qué lado debe girar el robot y, si sale al revés, poner
-`invert_pan=True`. No requiere tocar código.
+pipeline, el operador girando a *su* izquierda produce `pan` **positivo**
+(confirmado por el operador). Falta ver en el visor hacia qué lado debe girar el
+robot y, si sale al revés, poner `invert_pan=True`. No requiere tocar código.
 
 ### Enunciado original
 
@@ -837,10 +881,31 @@ especializada en rostros de adultos mayores**. Debe declararse (§3.3).
 
 Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
 
-1. **Ganancia de mapeo operador → robot.** ¿Un operador que gira la cabeza 30°
-   mueve el robot 30° o 60°? **La necesita el PROMPT 4.** Recomendación:
-   implementarla configurable con 1.0 por defecto y calibrarla con una persona
-   real; no fijarla en el código.
+1. **Ganancia de mapeo operador → robot.** Implementada y configurable
+   (`HeadConfig`), con dos valores para el tilt porque las asimetrías del robot
+   y del estimador se suman. **Falta fijar los números definitivos**, y el
+   criterio no es el que parecía:
+
+   **El límite real no es el cuello del operador, es la PANTALLA.** El
+   teleoperador tiene que seguir viendo lo que ve el robot en su monitor. Si
+   para girar el robot tuviera que girar mucho la cabeza, dejaría de ver la
+   pantalla — justo cuando más necesita mirarla. Sin gafas de realidad virtual,
+   **el recorrido útil del operador lo acota su campo de visión sobre el
+   monitor**, no su anatomía ni el rango mecánico del robot.
+
+   Consecuencias:
+   - La ganancia **tiene que ser mayor que 1**, y probablemente bastante:
+     amplifica un gesto pequeño y cómodo hasta el recorrido del robot.
+   - No hace falta cubrir los ±90° mecánicos del pan. El operador estima que con
+     **±50° de robot** basta para la mediación de lectura.
+   - Falta medir a qué ángulo de cabeza pierde la pantalla de vista. Con ese
+     dato: `ganancia = 50 / ese ángulo`.
+
+   Es una limitación de **diseño de interacción**, no de visión, y merece
+   declararse como tal en el documento: el ancho del campo visual del operador
+   sobre su monitor acota el mapeo, y la ganancia es el mecanismo que lo
+   compensa. Precio: amplificar multiplica también el temblor (0.19° × 2.5 =
+   0.48°, todavía pequeño) y hace el control más sensible.
 
 2. **Cómo tratar la latencia declarada.** El «< 150 ms» del documento no está
    medido: el indicador del visor mide el intervalo entre mensajes, que no puede
@@ -927,6 +992,33 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    - **Instalarlo no basta:** ver 4.1.
 
 3. **UN SOLO BROKER en el 1883.** ⬜ pendiente, requiere administrador.
+
+4. **La cámara debe entregar MJPG.** Por USB, muchas webcams solo dan 30 fps a
+   1280x720 si comprimen. Sin comprimir (YUY2, el formato por defecto de
+   DirectShow) la cámara baja a **10 fps sin avisar de nada** — medido
+   exactamente eso en la primera sesión de prueba. Ya se pide MJPG antes de
+   fijar la resolución (`TELMEOW_CAMERA_FOURCC`).
+
+   Importa porque el pipeline publica a 20 Hz: a 10 fps la mitad de los mensajes
+   serían repeticiones del mismo dato, y la teleoperación se vería a tirones sin
+   que ningún indicador lo delatara.
+
+5. **El índice de cámara CAMBIA entre sesiones.** Windows enumera por orden de
+   aparición del dispositivo: al reconectar o reiniciar, la integrada y la
+   externa se intercambian. Conviene ejecutar `tools/list_cameras.py` al
+   empezar. El PROMPT 10 debería seleccionar por **nombre**, no por número.
+
+6. **Avisos de arranque que NO hay que arreglar.** Todos vienen de dentro de
+   MediaPipe o de protobuf, no del código del proyecto. MediaPipe además
+   arrastra TensorFlow entero (2289 módulos) al importarse, de ahí el arranque
+   lento; tenerlo en cuenta para la Raspberry Pi del PROMPT 11.
+
+   | Aviso | Qué es | Acción |
+   |---|---|---|
+   | `oneDNN custom operations are on` | Informa de que las optimizaciones **ya están activas** | ninguna |
+   | `XNNPACK delegate for CPU` | MediaPipe usando la ruta rápida de CPU | ninguna, es buena señal |
+   | `Feedback manager requires…` | Interno del grafo de MediaPipe | no es corregible desde fuera |
+   | `SymbolDatabase.GetPrototype() is deprecated` | Código generado de MediaPipe contra protobuf | **no tocar**: subir a protobuf 5.x rompería MediaPipe, y el pin `protobuf==4.25.3` ya protege |
 
 ## 4.1 La trampa del doble broker
 

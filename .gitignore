@@ -15,4 +15,7 @@ venv/
 
 # Pytest
 .pytest_cache/
-limites.csv
+
+# Los CSV de --record NO se ignoran a proposito: son la evidencia de las
+# mediciones que se reportan en la tesis (repetibilidad, temblor, recorrido
+# del operador). Pesan poco y sin ellos las cifras no serian reproducibles.

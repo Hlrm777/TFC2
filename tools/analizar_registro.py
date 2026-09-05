@@ -32,8 +32,9 @@ def cargar(ruta: Path) -> list[dict]:
         filas = list(csv.DictReader(f))
     for fila in filas:
         for clave in ("t", "raw_pan", "raw_tilt", "pan", "tilt",
-                      "gain_pan", "gain_tilt_up", "gain_tilt_down"):
-            fila[clave] = float(fila[clave])
+                      "gain_pan", "gain_tilt_up", "gain_tilt_down",
+                      "escala_cara"):
+            fila[clave] = float(fila.get(clave, "nan"))
         fila["etiqueta"] = int(fila["etiqueta"])
         fila["recortado"] = int(fila["recortado"])
     return filas
@@ -62,6 +63,15 @@ def resumen_bloque(nombre: str, filas: list[dict]) -> None:
           f"desv {statistics.stdev(crudo_tilt):6.3f}   "
           f"salida [{min(sal_tilt):+7.2f},{max(sal_tilt):+7.2f}]  "
           f"desv {statistics.stdev(sal_tilt):6.3f}")
+    escalas = [f["escala_cara"] for f in filas if f["escala_cara"] == f["escala_cara"]]
+    if escalas:
+        dispersion = max(escalas) - min(escalas)
+        aviso = ""
+        if dispersion > 0.15 * statistics.mean(escalas):
+            aviso = "  <-- la distancia varió: el 'temblor' incluye ese movimiento"
+        print(f"    cara  {statistics.mean(escalas):6.1f} px entre ojos "
+              f"(min {min(escalas):.0f}, max {max(escalas):.0f}){aviso}")
+
     if recortados:
         print(f"    recortado por el tope del robot en {recortados} de "
               f"{len(filas)} muestras ({100 * recortados / len(filas):.0f} %)")

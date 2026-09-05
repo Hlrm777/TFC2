@@ -372,6 +372,22 @@ class HeadTracker:
         return self._raw
 
     @property
+    def face_scale(self) -> float | None:
+        """Distancia en píxeles entre las comisuras externas de los ojos.
+
+        Es un indicador de cuán grande se ve el rostro, y por tanto de a qué
+        distancia está el operador. Importa porque cuantos menos píxeles ocupa
+        la cara, más ruidosos son los landmarks: permite cruzar el temblor
+        medido con la distancia de trabajo en vez de discutirlo a ojo.
+        """
+        if self._last_points_2d is None:
+            return None
+        # Índices 2 y 3 de LANDMARK_IDS: los dos extremos de los ojos.
+        return float(
+            np.linalg.norm(self._last_points_2d[2] - self._last_points_2d[3])
+        )
+
+    @property
     def raw_extremes(self) -> dict[str, tuple[float, float]]:
         """Mínimo y máximo crudos observados, por eje. Para calibrar."""
         return {k: (v[0], v[1]) for k, v in self._extremos.items()}
@@ -690,7 +706,7 @@ def _demo(argv: list[str] | None = None) -> int:
         escritor.writerow(
             ["t", "etiqueta", "metodo", "raw_pan", "raw_tilt",
              "pan", "tilt", "gain_pan", "gain_tilt_up", "gain_tilt_down",
-             "recortado", "ancho", "alto"]
+             "recortado", "escala_cara", "ancho", "alto"]
         )
         print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
 
@@ -778,7 +794,8 @@ def _demo(argv: list[str] | None = None) -> int:
                     f"{pose[0]:.4f}", f"{pose[1]:.4f}",
                     f"{tracker.gain_pan:.2f}",
                     f"{tracker.gain_tilt_up:.2f}", f"{tracker.gain_tilt_down:.2f}",
-                    int(bool(recorte and recorte.clamped)), width, height,
+                    int(bool(recorte and recorte.clamped)),
+                    f"{tracker.face_scale or float('nan'):.2f}", width, height,
                 ])
 
             cv2.putText(

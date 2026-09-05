@@ -90,12 +90,20 @@ def resumen_bloque(nombre: str, filas: list[dict]) -> None:
     def fmt(v):
         return f"{v:5.3f}" if v is not None else "  -- "
 
+    # La mediana es lo que vale en un tramo SOSTENIDO (mantener una postura):
+    # resiste los instantes de entrada y salida de la posición, que el mínimo y
+    # el máximo sí recogen.
+    mediana_pan = statistics.median(crudo_pan)
+    mediana_tilt = statistics.median(crudo_tilt)
+
     print(f"  {nombre}")
     print(f"    {len(filas):5d} muestras en {duracion:5.1f} s  ->  {fps:5.1f} fps")
-    print(f"    pan  recorrido [{min(crudo_pan):+7.2f},{max(crudo_pan):+7.2f}]"
-          f"   TEMBLOR crudo {fmt(temblor_pan)}  filtrado {fmt(temblor_pan_f)}")
-    print(f"    tilt recorrido [{min(crudo_tilt):+7.2f},{max(crudo_tilt):+7.2f}]"
-          f"   TEMBLOR crudo {fmt(temblor_tilt)}  filtrado {fmt(temblor_tilt_f)}")
+    print(f"    pan  mediana {mediana_pan:+7.2f}   recorrido "
+          f"[{min(crudo_pan):+7.2f},{max(crudo_pan):+7.2f}]"
+          f"   TEMBLOR {fmt(temblor_pan)}")
+    print(f"    tilt mediana {mediana_tilt:+7.2f}   recorrido "
+          f"[{min(crudo_tilt):+7.2f},{max(crudo_tilt):+7.2f}]"
+          f"   TEMBLOR {fmt(temblor_tilt)}")
     escalas = [f["escala_cara"] for f in filas if f["escala_cara"] == f["escala_cara"]]
     if escalas:
         dispersion = max(escalas) - min(escalas)

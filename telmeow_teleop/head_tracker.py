@@ -418,10 +418,10 @@ class HeadTracker:
         justo el objetivo.
 
         El tilt se propone **por separado hacia arriba y hacia abajo**, porque
-        las dos asimetrías se suman: el robot llega menos hacia abajo (−39°
-        frente a +42°) y la estimación también se queda más corta hacia abajo.
-        Con un único valor habría que elegir entre pasarse por arriba o no
-        llegar nunca por abajo.
+        las asimetrías del robot y del operador no coinciden: el robot llega
+        menos hacia abajo (−39° frente a +42°), mientras que el operador se
+        queda más corto hacia arriba. Con un único valor habría que elegir entre
+        pasarse por un lado o no llegar nunca por el otro.
 
         El pan sí usa un solo valor, tomando el lado de menor recorrido: su
         objetivo es simétrico (±50°) y no hay razón para diferenciarlo.
@@ -585,10 +585,11 @@ class HeadTracker:
         # calibran contra lo que él alcanza cómodamente, no contra lo que acabe
         # haciendo el robot.
         #
-        # Bajar la barbilla es el caso peor: además de que el robot llega menos
-        # (−39° frente a +42°), la estimación se queda más corta hacia abajo.
-        # Con una sola ganancia hay que elegir entre pasarse arriba o no llegar
-        # abajo. La función es continua en 0, así que no hay salto al cruzar.
+        # Los dos sentidos son asimétricos y por motivos distintos: el robot
+        # llega menos hacia abajo (−39° frente a +42°) y el operador se queda
+        # más corto hacia arriba. Con una sola ganancia hay que elegir entre
+        # pasarse por un lado o no llegar por el otro. La función es continua
+        # en 0, así que no hay salto al cruzar.
         ganancia_tilt = self.gain_tilt_up if pitch >= 0.0 else self.gain_tilt_down
 
         pan = yaw * self.gain_pan * (-1.0 if self.invert_pan else 1.0)

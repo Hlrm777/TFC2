@@ -290,10 +290,16 @@ class HeadConfig:
     estimación no tiene la misma sensibilidad en los dos.
 
     El tilt lleva **dos ganancias, una por sentido**, porque hay dos asimetrías
-    que se suman: el robot llega menos hacia abajo (−39° frente a +42°) y la
-    estimación también se queda más corta hacia abajo. Con un único valor habría
-    que elegir entre pasarse por arriba o no llegar nunca por abajo — bajar la
-    barbilla resultaba casi imposible de alcanzar en la prueba con el operador.
+    que no coinciden. La del robot es firme: llega menos hacia abajo, −39°
+    frente a +42°. La del operador se creía en el mismo sentido, pero la
+    grabación de la que salió tenía el tilt invertido (H22 del plan), y leída ya
+    con el signo bueno dice lo contrario: al operador **le cuesta más levantar
+    la cabeza que bajarla**, 18° frente a 23°. Es decir que las dos asimetrías
+    no se suman, se compensan en parte. Pendiente de confirmar en el P4.2, que
+    es la primera medida tomada con el signo correcto.
+
+    Lo que no cambia es que hagan falta dos ganancias: con un único valor habría
+    que elegir entre pasarse por un lado o no llegar nunca por el otro.
 
     Ambas suelen necesitar ser mayores que 1: el cabeceo se estima a partir de
     la profundidad de los landmarks, que MediaPipe entrega comprimida. El demo
@@ -302,13 +308,25 @@ class HeadConfig:
 
     Amplificar tiene un precio: multiplica también el ruido de la estimación y
     hace llegar antes al tope mecánico.
+
+    ``invert_pan`` VIENE ACTIVADO, y el motivo es de diseño de interacción, no
+    de visión. Con él, el operador girando a **su** derecha hace que el robot
+    gire a **su propia** derecha: el robot reproduce el gesto tal como lo haría
+    una persona en el lugar del operador. Es la convención que corresponde al
+    robot físico y a los servos, y la que hay que declarar en el documento.
+
+    El precio es que, mirando al robot **de frente** en el visor, la cabeza
+    parece moverse al revés que la del operador — igual que le pasa a cualquiera
+    que mire a otra persona de frente. Desde atrás, o en primera persona, se ve
+    natural. Si algún día el operador supervisa de frente y prefiere el mapeo
+    especular, esto es lo único que hay que cambiar; no es un cambio de diseño.
     """
 
     method: str = "mesh"
     gain_pan: float = 1.15
     gain_tilt_up: float = 1.0
     gain_tilt_down: float = 1.0
-    invert_pan: bool = False
+    invert_pan: bool = True
     invert_tilt: bool = False
     min_cutoff: float = 0.5
     beta: float = 0.5

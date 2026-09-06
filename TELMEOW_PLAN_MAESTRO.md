@@ -15,6 +15,13 @@ validaciones que le faltan (**P4.1 a P4.5**), los hallazgos **H17-H21**, y dos
 limitaciones nuevas para el documento (§3.3.9 y §3.3.10) — el techo de captura de
 ~15 fps y el efecto de la ganancia sobre el temblor.
 
+**La revisión del 2026-09-06** es la primera sesión con el operador delante del
+visor, y de ahí salen **H22 a H24**. La importante es la H22: el método `mesh`
+devolvía el **tilt invertido**, así que el operador levantaba la cabeza y el
+robot la bajaba. Ya está corregido en la raíz. Con ella quedan cerrados **P4.1 y
+P4.3**, y queda anotado que las cifras de tilt tomadas antes de esa fecha
+—incluidas las etiquetas 3 y 4 de `limites.csv`— llevan el signo viejo.
+
 Cómo leerlo:
 
 - **Partes 0 a 5** — el plan propiamente dicho, con los hallazgos ya integrados
@@ -37,7 +44,7 @@ cambia respecto al plan original.
 | **P1** — Estructura y parámetros | ✅ **hecho** | `66440a5` |
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
-| **P4** — Head tracker | ✅ código hecho ⚠️ **5 validaciones pendientes**, ver P4.1–P4.5 | |
+| **P4** — Head tracker | ✅ código hecho · P4.1 y P4.3 ✅ · ⚠️ **faltan las mediciones P4.2, P4.4 y P4.5**, que son una sola sesión | `b3813a6`, `47ee616` |
 | P5 — Arm tracker | ⬜ **siguiente** | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
@@ -103,7 +110,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── mqtt_monitor.py       ✅
 │   ├── dev_broker.py         ✅ broker sin privilegios de administrador
 │   ├── list_cameras.py       ✅ qué cámara y qué backend usar, con fps REALES
-│   ├── analizar_registro.py  ✅ analiza los CSV de `--record`
+│   ├── analizar_registro.py  ✅ analiza los CSV de `--record`, por percentil
 │   ├── train_fer2013.py      ⬜ P8
 │   └── eval_emotion.py       ⬜ P9
 ├── tests/                    ✅ 403 pruebas
@@ -223,7 +230,7 @@ tesis.
 | 1 | **P1** | Estructura del paquete + límites articulares | ✅ |
 | 2 | **P2** | Capa MQTT compatible con el viewer | ✅ · punto de control superado |
 | 3 | **P3** | Filtros temporales (One Euro, histéresis) | ✅ |
-| 4 | **P4** | Head tracker (Face Mesh + Kabsch/solvePnP, sin dlib) | ✅ código · ⚠️ P4.1–P4.5 |
+| 4 | **P4** | Head tracker (Face Mesh + Kabsch/solvePnP, sin dlib) | ✅ código · ⚠️ faltan P4.2, P4.4 y P4.5 (una sesión de medición) |
 | 5 | **P5** | Arm tracker corregido (bugs 1–4) | ⬜ **siguiente** |
 | 6 | **P6** | Clasificador de emoción con backends intercambiables | ⬜ |
 | 7 | **P8** | Entrenamiento con FER-2013 | ⬜ ⚠️ revisar accuracy |
@@ -301,7 +308,20 @@ apareció con el operador delante.
 Convenio de signos, ya corregido y **medido con el operador, no deducido**:
 `yaw+` = la cara mira hacia la **izquierda de la imagen**; `pitch+` = mira hacia
 arriba. Como la imagen va espejada, el operador girando a **su** izquierda
-produce `pan` **positivo**.
+produce `yaw` **positivo**.
+
+⚠️ **Ese convenio se cumplía en `pnp` pero NO en `mesh`, que es el método por
+defecto** — ver **H22**. El fallo estuvo vivo hasta el 2026-09-06 y afecta a
+todo el tilt medido antes de esa fecha. Corregido en `47ee616`.
+
+**Del ángulo del operador al ángulo del robot: `invert_pan` va activado.** Son
+dos convenios distintos y conviene no confundirlos. El estimador habla de la
+**imagen** (espejada); el `pan` que se publica es el **ángulo articular del
+robot**. Con `invert_pan=True`, el operador girando a **su** derecha hace que el
+robot gire a **su propia** derecha: el robot reproduce el gesto como lo haría
+una persona puesta en su lugar, que es la convención que corresponde a los
+servos y la que se declara en el documento. Ver **P4.1** para por qué eso se ve
+«al revés» en el visor y por qué no es un problema.
 
 ### Resultados medidos con el operador real (2026-09-05)
 
@@ -333,11 +353,20 @@ ambiguas. El filtro One Euro reduce además el temblor de 0.31° a 0.17°.
 Alejarse un 40 % solo empeora un 14 %. El operador no necesita trabajar
 incómodamente cerca.
 
-**Recorrido alcanzado:** pan ±55.5°, tilt +33.3° / −40.2°. Hacia abajo **ya
-supera** el tope del robot (−39°), lo que descarta la queja inicial de que
-bajar la cabeza no llegaba: aquello venía de la cámara integrada mirando desde
-abajo, no del estimador. Cambiar a una cámara externa a la altura de los ojos lo
-resolvió.
+**Recorrido alcanzado:** pan ±55.5°, y en tilt los valores registrados fueron
++33.3° / −40.2°.
+
+⚠️ **Corrección del 2026-09-06.** Esa sesión se grabó con el tilt de signo
+invertido (**H22**), así que hay que leerla al revés: el operador alcanzó
+**33.3° hacia abajo y 40.2° hacia arriba**, no lo contrario. Dos consecuencias:
+
+- La afirmación de que «hacia abajo ya supera el tope del robot (−39°)» **era
+  falsa**: se quedó en 33.3°, siete grados cortos. Lo que rozaba su tope era el
+  movimiento hacia arriba (40.2° frente a 42°).
+- Por tanto **la queja inicial del operador —que bajar la cabeza no llegaba—
+  era correcta**, y no quedó descartada por el cambio de cámara. Vuelve a estar
+  abierta y la resuelve la medición del **P4.2**, que es la que fija de una vez
+  el recorrido real por sentido.
 
 **Otras confirmaciones medidas:**
 
@@ -350,45 +379,98 @@ resolvió.
 
 ### Pendiente de validar — P4 no está cerrado del todo
 
-El código está terminado y probado; lo que falta son **medidas con el operador**
-y una confirmación visual. Ninguno de los cinco puntos requiere escribir código
-nuevo, salvo el P4.3, que es una línea.
+El código está terminado y probado. Lo que queda son **medidas con el operador**;
+**P4.1 y P4.3 ya están cerrados** (2026-09-06), y de esa misma sesión salió el
+fallo del tilt (**H22**), que era invisible sin tener el visor delante.
 
-**P4.1 — Sentido del pan en el visor.** ⬜
-Con la imagen espejada que usa el pipeline, el operador girando a *su* izquierda
-produce `pan` **positivo** (confirmado por el operador mirando el HUD). Falta ver
-**en el visor** hacia qué lado gira el robot con ese valor. Si sale al revés,
-`invert_pan=True` en `HeadConfig` y listo. Es una comprobación de treinta
-segundos que nadie ha hecho todavía porque exige broker + visor + cámara a la vez.
+**P4.1 — Sentido del pan en el visor.** ✅ **cerrado el 2026-09-06.**
+Comprobado con `python -m telmeow_teleop.head_tracker --publish`, que es la
+bandera que se añadió justamente para poder hacerlo (antes no había forma de
+llevar la cabeza al visor: `main.py` es del P7).
+
+**Decisión: `invert_pan=True`, ya fijado por defecto en `HeadConfig`.** El robot
+gira a **su** derecha cuando el operador gira a la suya. Es la convención del
+robot físico, y es la que se envía a los servos y la que valida el visor.
+
+El precio, y hay que decirlo en el documento porque salta a la vista: mirando al
+robot **de frente** en el visor, su cabeza parece moverse al revés que la del
+operador. No es un fallo, es lo que pasa al mirar a cualquiera de frente. Desde
+atrás —o en primera persona, si algún día hay cámara en la cabeza— se ve
+natural, y el visor ya permite orbitar hasta esa vista.
+
+Se consideró y **se descartó** espejar solo la visualización, dejando el dato
+intacto. Dos motivos: un render espejado invierte la quiralidad, así que el
+brazo izquierdo del robot aparecería donde está el derecho —una trampa seria
+justo antes del P5—; y el visor tendría dos verdades en el mismo grafo de
+escena, una para dibujar y otra para colisionar, que es de las cosas que se
+desincronizan calladas. Mover la cámara es una transformación rígida y consigue
+el mismo efecto sin tocar nada.
+
+Redacción para la tesis: *el mapeo del pan reproduce el gesto en el marco del
+robot; que se vea especular en el banco virtual es consecuencia de observarlo de
+frente, y el sentido es un parámetro de configuración (`invert_pan`), no un
+cambio de diseño.*
 
 **P4.2 — El ángulo de pérdida de pantalla.** ⬜ **Es el que bloquea las
-ganancias.**
+ganancias, y el único trabajo que le queda al P4.**
 Decidido el criterio (§3.2.1): el recorrido útil del operador **lo acota su campo
-de visión sobre el monitor**, no su cuello. Falta el número. Protocolo:
+de visión sobre el monitor**, no su cuello. Falta el número.
 
-1. Sentarse a la distancia de trabajo, `c` para calibrar el neutro, `r` para
-   reiniciar extremos, `--record pantalla.csv`.
-2. Girar la cabeza despacio hasta el punto en que **la pantalla deja de leerse
+**Una sola grabación cierra P4.2, P4.4 y P4.5 a la vez**, si se hace en la
+configuración de operación. `limites.csv` se grabó a 1280x720, que es la
+combinación más lenta; la buena es **cámara 1 a 640x480, ~15 fps** (§4.0.4). El
+índice de cámara cambia entre sesiones en Windows, así que conviene correr antes
+`python tools/list_cameras.py`.
+
+```
+$env:TELMEOW_CAMERA_BACKEND="dshow"; $env:TELMEOW_CAMERA_INDEX="1"
+$env:TELMEOW_CAMERA_WIDTH="640";     $env:TELMEOW_CAMERA_HEIGHT="480"
+python -m telmeow_teleop.head_tracker --record pantalla.csv
+```
+
+Protocolo, una etiqueta por fase:
+
+1. Sentarse a la distancia de trabajo real. `c` para calibrar el neutro, `r`
+   para reiniciar extremos.
+2. **Etiqueta 1 — quieto, mirando de frente, 10 s.** No estaba en el protocolo
+   original y es la que da la cifra de temblor del **P4.5**: el temblor solo
+   significa algo en un tramo de reposo.
+3. Girar la cabeza despacio hasta el punto en que **la pantalla deja de leerse
    con comodidad**, y **mantenerlo 5 s** ahí. No volver al centro dentro de la
    etiqueta (ver P4.4).
-3. ESPACIO, y repetir para el otro lado, arriba y abajo. Cuatro etiquetas.
-4. `python tools/analizar_registro.py pantalla.csv`.
+4. ESPACIO, y repetir para el otro lado, arriba y abajo. Cuatro etiquetas más.
+5. `python tools/analizar_registro.py pantalla.csv`.
 
 Con ese ángulo: `gain_pan = 50/ángulo`, `gain_tilt_up = 42/ángulo`,
-`gain_tilt_down = 39/ángulo`. Los 50° salen de la decisión del operador de que
-±50° de robot bastan para la mediación de lectura; los 42/−39 son el rango
-mecánico real del tilt.
+`gain_tilt_down = 39/ángulo` — que es lo que ya propone el analizador. Los 50°
+salen de la decisión del operador de que ±50° de robot bastan para la mediación
+de lectura; los 42/−39 son el rango mecánico real del tilt.
 
-**P4.3 — `suggested_gains()` apunta a ±90°, no a ±50°.** ⬜
-El método divide entre `HEAD_PAN_RANGE`, o sea ±90°
-(`head_tracker.py:419-421`). Con la decisión de §3.2.1 el objetivo del pan es
-**±50°**, así que la ganancia que propone en pantalla sale **1.8× más alta de la
-que corresponde**: para un recorrido cómodo de 29.5° propone 3.05 cuando el
-número que hay que usar es 1.69. El tilt sí está bien, porque ahí el objetivo
-**sí** es el rango mecánico completo.
+Dos cosas que hay que mirar en el resultado, porque el documento afirma hoy lo
+contrario y la corrección del signo (**H22**) las dejó abiertas:
 
-Dos salidas: añadir un parámetro `target_pan=50.0` al método, o dividir a mano.
-Mientras no se resuelva, **no copiar la cifra de pan que muestra el HUD.**
+- **¿Cuál de los dos sentidos del tilt se queda más corto?** La relectura de
+  `limites.csv` dice que cuesta más levantar la cabeza (18°) que bajarla (23°).
+  Si se confirma, hay que reescribir la justificación de las dos ganancias: las
+  asimetrías del robot y del operador **no se suman, se compensan en parte**.
+- **La asimetría del pan.** La grabación vieja daba 29.5° a un lado y 38.3° al
+  otro (1.3×) sin explicación. Si se repite es real y hay que declararla; si
+  desaparece, era que el operador giró más de un lado.
+
+**P4.3 — `suggested_gains()` apuntaba a ±90°, no a ±50°.** ✅ **hecho** (`b3813a6`).
+El método dividía entre `HEAD_PAN_RANGE`, o sea ±90°, y proponía una ganancia de
+pan **1.8× más alta de la que corresponde**: para un recorrido cómodo de 29.5°
+proponía 3.05 cuando el número bueno es 1.69.
+
+Se resolvió con una constante nueva, **`HEAD_PAN_TARGET_RANGE = (−50, +50)`**,
+deliberadamente separada de `HEAD_PAN_RANGE`: la primera es **objetivo de
+calibración** y la segunda sigue siendo el **tope mecánico** que aplica
+`clamp_head`. Hay pruebas de las dos cosas para que nadie las confunda. El tilt
+no se toca, porque ahí el objetivo **sí** es el rango mecánico completo.
+
+El mismo error estaba en `tools/analizar_registro.py`, que es la herramienta con
+la que se leen las grabaciones — o sea que habría reaparecido justo al analizar
+la sesión del P4.2. También corregido.
 
 **P4.4 — La grabación `limites.csv` que ya existe: rescatable, pero
 provisional.** ⬜
@@ -401,13 +483,32 @@ meseta, porque el tiempo se pasó mayoritariamente en ella:
 |---|---|---|---|
 | 1 | pan hacia la izquierda del operador | +25.1° | +29.5° (p95) |
 | 2 | pan hacia la derecha | −36.9° | −38.3° (p05) |
-| 3 | cabeza abajo | −16.3° | −18.0° (p05) |
-| 4 | cabeza arriba | +19.0° | +22.6° (p95) |
+| 3 | cabeza **arriba** (ver aviso) | −16.3° | −18.0° (p05) |
+| 4 | cabeza **abajo** (ver aviso) | +19.0° | +22.6° (p95) |
 | 5 | ambigua, descartar | — | — |
 | 0 | previa a etiquetar, descartar | — | — |
 
+⚠️ **Las etiquetas 3 y 4 están intercambiadas respecto a lo que decía esta tabla
+antes del 2026-09-06**, porque la grabación tiene el tilt con el signo invertido
+(**H22**). Se corrige aquí para que el dato no se cite al revés, pero el pan no
+está afectado: el fallo solo tocaba el cabeceo.
+
 Ganancias provisionales que salen de ahí, con el criterio de ±50°:
-`gain_pan ≈ 1.69`, `gain_tilt_up ≈ 1.86`, `gain_tilt_down ≈ 2.17`.
+`gain_pan ≈ 1.69`, y en tilt **`gain_tilt_up ≈ 2.33` y `gain_tilt_down ≈ 1.73`**.
+
+Ojo con estas dos, que **no son las de antes intercambiadas**: los topes siguen
+atados a su sentido (42° arriba, 39° abajo) y lo que se intercambia son los
+recorridos del operador. O sea `42/18.04 = 2.33` hacia arriba y `39/22.59 =
+1.73` hacia abajo, donde antes figuraban 1.86 y 2.17.
+
+Y el cambio dice algo, aunque haya que confirmarlo en el P4.2: **al operador le
+cuesta más levantar la cabeza que bajarla** (18° frente a 23°), justo al revés
+de lo que este documento venía afirmando. La justificación de las dos ganancias
+separadas sigue en pie; lo que estaba mal era el sentido.
+
+Reproducibles con `python tools/analizar_registro.py limites.csv`, que desde
+`b3813a6` calcula las ganancias desde el percentil y con el objetivo de ±50°
+(recordando que su columna de tilt lleva el signo viejo).
 
 **Sirven para trabajar, no para el documento**, por dos motivos: la etiqueta 5
 quedó inservible, y sobre todo **el protocolo fue el equivocado** — se midió el
@@ -425,6 +526,10 @@ lenta** de las cuatro disponibles: 10.0 fps (§4.0.4). No invalida el resultado
 en la tesis conviene repetir la medida en la configuración que se va a usar de
 verdad, **cámara 1 a 640x480**, y comprobar que no cambia. Si cambiara, la cifra
 buena es la de la configuración de operación.
+
+**No hace falta una sesión aparte**: sale de la etiqueta de reposo que abre el
+protocolo del P4.2. Y el signo del tilt no afecta a esta cifra, porque el
+temblor es dispersión y no cambia al negar el valor.
 
 ### Enunciado original
 
@@ -1015,12 +1120,14 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
      **±50° de robot** basta para la mediación de lectura.
    - Falta medir a qué ángulo de cabeza pierde la pantalla de vista. Con ese
      dato: `ganancia = 50 / ese ángulo`. Protocolo en **P4.2**.
-   - ⚠️ **`suggested_gains()` todavía divide entre ±90°**, así que la cifra de
-     pan que muestra el HUD es 1.8× la que corresponde. Ver **P4.3**.
+   - ✅ `suggested_gains()` ya divide entre `HEAD_PAN_TARGET_RANGE` (±50°), y
+     también lo hace `tools/analizar_registro.py`. La cifra del HUD es citable.
+     Ver **P4.3**.
    - Hay ganancias **provisionales** rescatadas de una grabación anterior
-     (`gain_pan ≈ 1.69`, `tilt_up ≈ 1.86`, `tilt_down ≈ 2.17`), utilizables para
-     seguir trabajando pero **no citables**: se midieron con el criterio del
-     cuello, no con el de la pantalla. Ver **P4.4**.
+     (`gain_pan ≈ 1.69`, `tilt_up ≈ 2.33`, `tilt_down ≈ 1.73`), utilizables para
+     seguir trabajando pero **no citables** por dos motivos: se midieron con el
+     criterio del cuello y no con el de la pantalla, y las de tilt salen de una
+     grabación con el signo invertido (**H22**), releída. Ver **P4.4**.
 
    Es una limitación de **diseño de interacción**, no de visión, y merece
    declararse como tal en el documento: el ancho del campo visual del operador
@@ -1236,9 +1343,12 @@ instancia del repositorio en otro puerto TCP, apuntando el pipeline con
 5. Conectar el visor a `ws://localhost:9001`, topic `telmeow/teleop/pose`. El
    brazo debe oscilar. ✅ **verificado**
 6. `python tools/mqtt_monitor.py` para ver el JSON crudo.
-7. `python -m telmeow_teleop.main` con la cámara. *(tras P7)*
-8. `python -m telmeow_teleop.control_panel`. *(tras P10)*
-9. En la Raspberry: `python raspberry/story_display.py --windowed`. *(tras P11)*
+7. `python -m telmeow_teleop.head_tracker --publish` — la cabeza del operador
+   mueve la del robot en el visor. Es lo que cierra el P4.1, y funciona sin
+   esperar al P7. Admite `--record` a la vez: publica y graba en la misma pasada.
+8. `python -m telmeow_teleop.main` con la cámara. *(tras P7)*
+9. `python -m telmeow_teleop.control_panel`. *(tras P10)*
+10. En la Raspberry: `python raspberry/story_display.py --windowed`. *(tras P11)*
 
 Sin Mosquitto disponible: `python tools/dev_broker.py` levanta un broker
 equivalente en Python puro, sin privilegios de administrador.
@@ -1379,7 +1489,7 @@ t.last_clamp        # HeadClamp, con lower/upper/fraction/clamped para el HUD
 t.raw_angles        # ángulos crudos del estimador, antes de todo
 t.raw_extremes      # {"pan": (min,max), "tilt": (min,max)} · para calibrar
 t.reset_extremes()
-t.suggested_gains() # {"pan", "tilt_up", "tilt_down"} · ⚠️ el pan apunta a ±90, ver P4.3
+t.suggested_gains() # {"pan", "tilt_up", "tilt_down"} · el pan apunta a ±50 (§3.2.1)
 t.face_scale        # px entre comisuras externas de los ojos ≈ distancia
 t.frames_sin_rostro ; t.degenerate_dt_count
 t.close()           # o usarlo como gestor de contexto
@@ -1508,6 +1618,16 @@ H14 no afecta al pipeline de Python —esos IDs son internos del visor— pero
 cualquier automatización o prueba que los use fallará con los nombres
 documentados.
 
+**Cambio hecho en el visor el 2026-09-06 (H23).** El indicador `#t-col` pasa a
+tener un solo escritor, `pintarInterferencia()`, llamado desde `checkCollisions()`
+y desde el manejador de MQTT. Antes escribían los dos directamente y el campo
+parpadeaba entre `libre` y `sin contacto`.
+
+⚠️ **`04_TelmeowViewer` no está bajo control de versiones.** Antes de tocarlo se
+dejó una copia `telmeow_viewer.html.bak-20260906-120706` en esa misma carpeta.
+Ponerlo en git es una tarea pendiente que no cuesta nada y evita el próximo
+susto.
+
 ## 7.7 Sobre el head tracker (H17, H18)
 
 **H17 — El eje de referencia estaba a 180° del sitio.** Los ángulos de Euler se
@@ -1582,7 +1702,59 @@ Con ella, ocho aperturas seguidas sin un solo bloqueo. Aun así MSMF revienta a
 1280x720 con una aserción interna, y no aporta ventaja a 640x480: **se mantiene
 `dshow` por defecto.**
 
-## 7.9 Índice de hallazgos y dónde vive cada uno ahora
+## 7.9 La sesión del 2026-09-06: el tilt iba al revés
+
+**H22 — El método `mesh` invertía el cabeceo.** El operador levantaba la cabeza
+y el robot la bajaba. La causa no estaba en el visor ni en los límites, sino en
+que los dos estimadores descomponían la rotación en sistemas de coordenadas
+**cuya `y` apunta al revés**: `landmarks_to_cloud` construía la nube con la
+convención de la imagen (`y` hacia abajo, que es como MediaPipe entrega los
+landmarks), mientras que `MODEL_POINTS_3D`, el modelo que resuelve `solvePnP`,
+tiene la `y` hacia arriba (mentón en −330, ojos en +170).
+
+Invertir un eje de esa manera **cambia el signo del pitch y deja el yaw
+intacto**, que es exactamente el síntoma observado: el pan se comportaba bien y
+solo fallaba el tilt. Comprobado numéricamente antes de tocar nada — la misma
+rotación de 20° da `pitch +20.00` en un sistema y `pitch −20.00` en el otro,
+mientras que un giro lateral da `yaw +20.00` en los dos.
+
+Se corrigió en la raíz, negando la `y` al construir la nube. **No hubo que tocar
+ni `HEAD_TILT_RANGE` ni el visor**: se verificó pidiéndole al visor ángulos
+fuera de rango y leyendo dónde recorta por colisión geométrica —**−39.7° y
++42.5°**, que son los límites que ya declaraba `limits.py`— y comprobando de
+perfil que el negativo baja la cabeza.
+
+Lo importante para la tesis no es el fallo, es **por qué las 400 pruebas no lo
+vieron**: solo fijaban el signo del camino `pnp`, y el método por defecto es
+`mesh`. Es el mismo modo de fallo del **H17**, repetido: *una prueba sintética
+solo vale si algo externo ata su convenio al del mundo real.* Ahora hay tres
+pruebas que atan los dos métodos entre sí, de modo que si alguien vuelve a tocar
+los ejes de la nube, la prueba dice además **cuál de los dos canales** se rompió.
+
+**H23 — Un indicador con dos dueños parpadea.** El campo «Interferencia» del
+visor alternaba a ojo entre `libre` y `sin contacto`. No era un fallo de
+detección: lo escribían **dos sitios distintos** —el bucle de render cada 120 ms
+y el manejador de MQTT a 20 Hz— con dos vocabularios para el mismo estado. Son
+dos hechos distintos («ahora hay contacto» y «la pose que llegó se recortó»), así
+que la solución no era borrar uno, sino **un solo pintor por prioridad** llamado
+desde los dos eventos.
+
+Y hay un detalle que solo apareció al medirlo: dejar el indicador colgando del
+bucle de render lo **congela** cuando la pestaña deja de estar visible, porque
+el navegador para `requestAnimationFrame`. El aviso de recorte es información de
+seguridad y no puede depender de que alguien esté mirando; por eso se pinta
+también desde el mensaje de MQTT, que llega por WebSocket y no se throttlea.
+
+**H24 — En una postura sostenida, el extremo es ruido.** `tools/analizar_registro.py`
+proponía las ganancias dividiendo entre el mínimo y el máximo de cada etiqueta.
+En una etiqueta de postura mantenida, esos dos valores son **el instante de
+entrar y el de salir**, no la postura. El percentil sí recoge la meseta, que es
+donde se pasó el tiempo. La herramienta usa ahora p05/p95, y además **avisa
+cuando una etiqueta pasó demasiado tiempo lejos de la meseta**: pasada sobre
+`limites.csv` marca sola la etiqueta 5, que era justo la que se había descartado
+a mano por inservible.
+
+## 7.10 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
 |---|---|---|
@@ -1607,8 +1779,15 @@ Con ella, ocho aperturas seguidas sin un solo bloqueo. Aun así MSMF revienta a
 | **H19** | Contar `read()` no mide fps; hay que contar frames distintos | §4.0.4, §7.8 |
 | **H20** | Más resolución = menos fps; el techo es ~15 fps y es del sensor | §0.4, §3.3.9, §4.0.4, §7.8 |
 | **H21** | MSMF se cuelga sin `MSMF_ENABLE_HW_TRANSFORMS=0` antes de importar cv2 | §4.0.5, §7.8 |
+| **H22** | El método `mesh` devolvía el **tilt invertido**: la nube de MediaPipe tiene la `y` hacia abajo y el modelo del PnP hacia arriba | P4, §7.9 |
+| **H23** | Un indicador escrito por dos sitios parpadea aunque los dos acierten | §7.9 |
+| **H24** | En una postura sostenida, el percentil es el dato y el extremo es ruido | P4.4, §7.9 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la
 investigación de la cámara que salió de él. H19 y H20 son **correcciones a
 afirmaciones mías anteriores**, y quedan escritas como tales a propósito: la
 primera versión de esas cifras llegó a influir en la configuración recomendada.
+
+H22 a H24 salen de la primera sesión con el operador **delante del visor**
+(2026-09-06). La H22 obliga además a releer varias cifras de este documento, y
+esas relecturas están anotadas donde estaban las cifras, no solo aquí.

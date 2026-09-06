@@ -78,12 +78,21 @@ def test_defaults_cabeza():
     assert head.gain_pan == 1.15
     assert head.gain_tilt_up == 1.0
     assert head.gain_tilt_down == 1.0
-    assert head.invert_pan is False
+
+
+def test_el_pan_viene_invertido_a_proposito():
+    """Para que el robot gire a SU derecha cuando el operador gira a la suya.
+
+    Es la convención del robot físico. Mirándolo de frente en el visor se ve
+    «al revés», como se ve cualquier persona de frente; no es un fallo.
+    """
+    assert HeadConfig().invert_pan is True
+    assert HeadConfig().invert_tilt is False
 
 
 def test_el_tilt_tiene_una_ganancia_por_sentido():
-    """Dos asimetrías se suman: el robot llega menos hacia abajo (−39 frente a
-    +42) y la estimación también se queda más corta hacia abajo."""
+    """Dos asimetrías que no coinciden: el robot llega menos hacia abajo (−39
+    frente a +42) y el operador se queda más corto hacia arriba."""
     cfg = AppConfig.from_env(
         {"TELMEOW_HEAD_GAIN_TILT_UP": "1.4", "TELMEOW_HEAD_GAIN_TILT_DOWN": "2.2"}
     )
@@ -94,10 +103,10 @@ def test_el_tilt_tiene_una_ganancia_por_sentido():
 def test_las_ganancias_se_pueden_ajustar_por_entorno():
     """Calibrar no debe requerir tocar código."""
     cfg = AppConfig.from_env(
-        {"TELMEOW_HEAD_GAIN_TILT_DOWN": "1.8", "TELMEOW_HEAD_INVERT_PAN": "true"}
+        {"TELMEOW_HEAD_GAIN_TILT_DOWN": "1.8", "TELMEOW_HEAD_INVERT_PAN": "false"}
     )
     assert cfg.head.gain_tilt_down == 1.8
-    assert cfg.head.invert_pan is True
+    assert cfg.head.invert_pan is False  # se puede volver al mapeo especular
     assert cfg.head.gain_pan == 1.15  # sin tocar
 
 

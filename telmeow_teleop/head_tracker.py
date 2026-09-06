@@ -260,9 +260,22 @@ def landmarks_to_cloud(landmarks, width: int, height: int) -> np.ndarray:
     tal cual, con una imagen no cuadrada los tres ejes tendrían escalas
     distintas y la rotación saldría deformada. Aquí se llevan los tres a
     píxeles usando el ancho para x y z, y el alto para y.
+
+    LA ``y`` VA NEGADA, y no es un detalle cosmético. MediaPipe usa la
+    convención de la imagen, donde ``y`` crece HACIA ABAJO; ``MODEL_POINTS_3D``,
+    que es lo que resuelve el método 'pnp', tiene la ``y`` hacia ARRIBA (mentón
+    en −330, ojos en +170). Descomponer una rotación en dos sistemas cuya ``y``
+    apunta al revés **invierte el pitch y deja el yaw intacto**: los dos
+    métodos daban tilt de signo contrario para el mismo gesto, y como 'mesh' es
+    el de por defecto, el operador levantaba la cabeza y el robot la bajaba. El
+    pan no se veía afectado, lo que hacía el fallo aún más difícil de leer.
+
+    Las pruebas sintéticas no lo detectaron porque solo fijaban el signo del
+    camino 'pnp'; hay una prueba nueva que ata los dos métodos a la misma
+    convención.
     """
     return np.array(
-        [(lm.x * width, lm.y * height, lm.z * width) for lm in landmarks],
+        [(lm.x * width, -lm.y * height, lm.z * width) for lm in landmarks],
         dtype=np.float64,
     )
 

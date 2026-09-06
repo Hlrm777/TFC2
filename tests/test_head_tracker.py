@@ -21,8 +21,10 @@ from telmeow_teleop.head_tracker import (
     LANDMARK_IDS,
     MODEL_POINTS_3D,
     HeadTracker,
+    _euler_from_rotation,
     camera_matrix,
     estimate_head_pose,
+    landmarks_to_cloud,
     rotation_between_clouds,
 )
 from telmeow_teleop.limits import (
@@ -373,6 +375,95 @@ def nube_de_prueba(n=200, semilla=0):
     """Nube con la dispersión de un rostro, en píxeles."""
     rng = np.random.default_rng(semilla)
     return rng.normal(scale=40.0, size=(n, 3))
+
+
+class LandmarkFalso:
+    """Lo mínimo que ``landmarks_to_cloud`` le pide a un landmark de Face Mesh."""
+
+    __slots__ = ("x", "y", "z")
+
+    def __init__(self, x, y, z):
+        self.x, self.y, self.z = x, y, z
+
+
+def landmarks_falsos(eje, grados):
+    """Los landmarks que Face Mesh entregaría para una cara girada así.
+
+    Se construyen proyectando el mismo modelo 3D que usa ``proyectar``, de modo
+    que 'girar 20° sobre [1,0,0]' significa **lo mismo** en las pruebas del
+    método 'pnp' y en las del método 'mesh'. Sin esa equivalencia no se puede
+    comparar el signo de los dos caminos, que es justo lo que hace falta.
+
+    Se respeta la convención de MediaPipe: coordenadas normalizadas a [0, 1] y
+    **``y`` creciendo hacia abajo**, como en cualquier imagen.
+    """
+    matriz = FRONTAL_ROTATION @ rotacion(eje, grados)
+    rvec, _ = cv2.Rodrigues(matriz)
+    pixeles, _ = cv2.projectPoints(
+        MODEL_POINTS_3D, rvec, TVEC, K, SIN_DISTORSION
+    )
+    profundidad = (MODEL_POINTS_3D @ matriz.T)[:, 2] * (K[0, 0] / TVEC[2, 0])
+    return [
+        LandmarkFalso(px / ANCHO, py / ALTO, pz / ANCHO)
+        for (px, py), pz in zip(pixeles.reshape(-1, 2), profundidad)
+    ]
+
+
+def angulos_por_mesh(eje, grados):
+    """Recorre el camino 'mesh' completo: landmarks -> nube -> Kabsch -> Euler."""
+    referencia = landmarks_to_cloud(landmarks_falsos(eje, 0), ANCHO, ALTO)
+    observada = landmarks_to_cloud(landmarks_falsos(eje, grados), ANCHO, ALTO)
+    return tuple(
+        math.degrees(a)
+        for a in _euler_from_rotation(rotation_between_clouds(referencia, observada))
+    )
+
+
+def test_los_dos_metodos_coinciden_en_el_signo_del_pitch():
+    """La prueba que faltaba, y que costó una sesión con el operador.
+
+    'mesh' y 'pnp' descomponían la rotación en sistemas cuya ``y`` apuntaba al
+    revés —la nube de MediaPipe la tiene hacia abajo, el modelo 3D hacia
+    arriba—, así que devolvían tilt de signo CONTRARIO para el mismo gesto. El
+    yaw no se veía afectado, porque invertir un eje no cambia el giro alrededor
+    del vertical: el fallo se manifestaba solo en el cabeceo.
+
+    Como 'mesh' es el método por defecto, el operador levantaba la cabeza y el
+    robot la bajaba. Las pruebas sintéticas pasaban en verde porque solo fijaban
+    el signo del camino 'pnp'.
+    """
+    _, pitch_pnp, _ = estimate_head_pose(proyectar([1, 0, 0], 20)[0], (ANCHO, ALTO))
+    _, pitch_mesh, _ = angulos_por_mesh([1, 0, 0], 20)
+
+    assert pitch_pnp > 0          # ya lo fijaba otra prueba: +20 es mirar arriba
+    assert pitch_mesh > 0         # y 'mesh' tiene que decir lo mismo
+
+    # La magnitud NO es lo que se comprueba aquí, y la tolerancia es ancha a
+    # propósito: la nube falsa son 6 puntos proyectados en perspectiva, así que
+    # no es una transformación rígida y Kabsch devuelve un par de grados de más.
+    # Con una cara real son 478 puntos. Lo que esta prueba fija es el SIGNO.
+    assert pitch_mesh == pytest.approx(pitch_pnp, abs=3.0)
+
+
+def test_en_modo_mesh_bajar_la_barbilla_da_tilt_negativo():
+    """El otro sentido, explícito: negativo es abajo, como el rango del robot.
+
+    `HEAD_TILT_RANGE` vale (−39, +42) con −39 = abajo. Si el signo del estimador
+    se invirtiera, cada sentido se calibraría contra el tope del contrario.
+    """
+    _, pitch, _ = angulos_por_mesh([1, 0, 0], -20)
+    assert pitch < 0
+
+
+def test_el_signo_del_yaw_no_depende_del_metodo():
+    """El yaw NO estaba afectado por el fallo del pitch, y conviene fijarlo:
+    así, si algún día alguien vuelve a tocar los ejes de la nube, la prueba
+    distingue cuál de los dos canales se rompió."""
+    yaw_pnp, _, _ = estimate_head_pose(proyectar([0, 1, 0], 20)[0], (ANCHO, ALTO))
+    yaw_mesh, _, _ = angulos_por_mesh([0, 1, 0], 20)
+
+    assert yaw_pnp > 0
+    assert yaw_mesh > 0
 
 
 @pytest.mark.parametrize("grados", [-40, -20, -5, 5, 20, 40])

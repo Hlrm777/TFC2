@@ -453,6 +453,11 @@ se respeta por construcción: el regreso cae siempre en una etiqueta par.
 | tilt arriba | 26.5° | 31.0° |
 | tilt abajo | 21.6° | 19.2° |
 
+La grabación está versionada en `calibracion_20260906_integrada.csv`, que es la
+evidencia de las cifras de abajo. La de la cámara externa **se perdió**: se grabó
+encima con el mismo nombre, y de ella solo queda la salida del analizador. Es lo
+que motivó que `--record` ya no pise la grabación anterior.
+
 **Ganancias resultantes, ya fijadas en `HeadConfig`:**
 
 ```

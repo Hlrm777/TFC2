@@ -17,6 +17,7 @@ nombres existen. Pero eso es exactamente lo que faltaba.
 """
 
 import io
+import re
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,26 @@ def test_no_hay_nombres_indefinidos_ni_imports_rotos():
     """Cubre el código de los demos, que ninguna prueba llega a ejecutar."""
     total, detalle = analizar()
     assert total == 0, f"\npyflakes encontró {total} problema(s):\n{detalle}"
+
+
+def test_ningun_identificador_lleva_tildes_ni_enye():
+    """Los NOMBRES van sin tildes; los comentarios y docstrings, con ellas.
+
+    Python 3 admite identificadores con tildes, pero traen problemas que no
+    compensan: dependen de la codificación del archivo, se rompen al copiar
+    entre editores y herramientas, y obligan a escribirlos exactamente igual
+    desde cualquier terminal. El texto para leer sí lleva sus tildes: ahí no hay
+    ningún riesgo y se lee mejor.
+    """
+    patron = re.compile(r"^\s*(?:def|class)\s+(\w*[^\x00-\x7F]\w*)", re.MULTILINE)
+    culpables = []
+    for objetivo in OBJETIVOS:
+        ruta = RAIZ / objetivo
+        archivos = ruta.rglob("*.py") if ruta.is_dir() else [ruta]
+        for archivo in archivos:
+            for nombre in patron.findall(archivo.read_text(encoding="utf-8")):
+                culpables.append(f"{archivo.relative_to(RAIZ)}: {nombre}")
+    assert not culpables, "identificadores con caracteres no ASCII:\n" + "\n".join(culpables)
 
 
 def test_la_red_de_seguridad_detecta_de_verdad_el_fallo(tmp_path):

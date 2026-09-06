@@ -286,7 +286,7 @@ def test_la_confianza_baja_bloquea_el_cambio():
         assert h.update("triste", 0.4) == "feliz"
 
 
-def test_con_confianza_alta_el_cambio_sí_ocurre():
+def test_con_confianza_alta_el_cambio_si_ocurre():
     h = ClassHysteresis(n_frames=3, min_confidence=0.7)
     for _ in range(3):
         h.update("feliz", 0.9)
@@ -308,7 +308,7 @@ def test_la_confianza_bloquea_la_alternancia_sostenida():
     assert h.current == "neutral"
 
 
-def test_sin_umbral_de_confianza_la_alternancia_sí_atraviesa():
+def test_sin_umbral_de_confianza_la_alternancia_si_atraviesa():
     """El reverso del anterior, para que el límite quede fijado y documentado
     en vez de descubrirse en una sesión con niños delante."""
     h = ClassHysteresis(n_frames=5, min_confidence=0.0, initial="neutral")

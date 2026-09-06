@@ -993,15 +993,50 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
 
 3. **UN SOLO BROKER en el 1883.** ⬜ pendiente, requiere administrador.
 
-4. **La cámara debe entregar MJPG.** Por USB, muchas webcams solo dan 30 fps a
-   1280x720 si comprimen. Sin comprimir (YUY2, el formato por defecto de
-   DirectShow) la cámara baja a **10 fps sin avisar de nada** — medido
-   exactamente eso en la primera sesión de prueba. Ya se pide MJPG antes de
-   fijar la resolución (`TELMEOW_CAMERA_FOURCC`).
+4. **El techo real de captura es ~15 fps, no 30.** Es una limitación del
+   hardware disponible, no del software, y obliga a revisar los objetivos de
+   tasa del plan.
 
-   Importa porque el pipeline publica a 20 Hz: a 10 fps la mitad de los mensajes
-   serían repeticiones del mismo dato, y la teleoperación se vería a tirones sin
-   que ningún indicador lo delatara.
+   Medido con `tools/list_cameras.py --medir`, contando solo frames **distintos
+   del anterior**:
+
+   | Cámara | Backend | 1280x720 | 640x480 |
+   |---|---|---|---|
+   | 0 (externa) | dshow | 10.0 fps | 12.5 fps |
+   | 0 (externa) | msmf | falla | 12.8 fps |
+   | 1 (integrada) | dshow | 8.0 fps | **15.0 fps** |
+   | 1 (integrada) | msmf | falla | **15.3 fps** |
+
+   **Mejor combinación: cámara 1 a 640x480, ~15 fps.**
+
+   Tres cosas que contradicen lo que parecía:
+
+   - **Más resolución da MENOS fps** (8-10 a 720p frente a 12-15 a 480p). La
+     webcam externa tampoco es mejor que la integrada.
+   - **Medir `read()` engaña.** Puede devolver el mismo buffer repetido: una
+     combinación que aparentaba 156 fps entregaba 21 de cada 39 frames
+     duplicados, y su tasa real era de 3.7 fps. Solo vale contar frames
+     distintos.
+   - **Ningún ajuste de software lo cambia.** Se probaron MJPG antes y después
+     de la resolución, `CAP_PROP_BUFFERSIZE`, `CAP_PROP_FPS`,
+     `CAP_PROP_CONVERT_RGB` y cuatro variantes de exposición: los siete dieron
+     79.7-80.2 ms, idénticos. Un lector en hilo aparte confirmó 12.2 fps, así
+     que no es latencia de `read()`: la cámara **produce** a esa tasa.
+
+   Consecuencias para el plan: el objetivo de **30 fps de captura no es
+   alcanzable** con este hardware, y el de **20 Hz de publicación tampoco** —
+   quedaría en ~15 Hz. Hay que declararlo como limitación o cambiar de cámara.
+   MediaPipe no tiene culpa: cuesta 5-7 ms por frame, el 7 % del tiempo.
+
+5. **MSMF se cuelga al abrir, y falla a 720p.** `cv2.CAP_MSMF` bloquea
+   indefinidamente al abrir algunas webcams. El remedio es la variable
+   `OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS=0`, **fijada antes de importar
+   cv2** — el paquete lo hace en su `__init__.py` por eso. Con ella, ocho
+   aperturas seguidas sin un solo bloqueo.
+
+   Aun así, MSMF revienta al pedir 1280x720 en estas cámaras (aserción interna
+   de OpenCV) y no aporta ventaja a 640x480. **Se mantiene `dshow` por
+   defecto.**
 
 5. **El índice de cámara CAMBIA entre sesiones.** Windows enumera por orden de
    aparición del dispositivo: al reconectar o reiniciar, la integrada y la

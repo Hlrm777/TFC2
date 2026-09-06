@@ -52,7 +52,7 @@ cambia respecto al plan original.
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
-| P5 — Arm tracker | ⬜ **siguiente** | |
+| **P5** — Arm tracker | ⬜ **siguiente** · lee «lo que hereda del P4» antes de empezar | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -608,7 +608,64 @@ Commit: "refactor: head tracker con Face Mesh y solvePnP"
 
 ---
 
-## PROMPT 5 — Arm tracker ⬜
+## PROMPT 5 — Arm tracker ⬜ **siguiente**
+
+### Lo que hereda del P4 — leer antes de escribir código
+
+El P4 se cerró el 2026-09-06 con el operador delante, y de ahí salen cuatro
+cosas que le ahorran tiempo al P5.
+
+**1. La configuración de cámara ya está decidida, y se decidió POR EL P5.**
+Cámara **integrada a 640x480**, y el motivo es el encuadre: la externa recorta
+tanto que da una cara de 105 px entre los ojos frente a 60 px de la integrada, y
+el arm tracker necesita **hombros, codos y muñecas en cuadro**. En precisión
+efectiva empatan (**H25**). El índice de cámara cambia entre sesiones en
+Windows: correr `tools/list_cameras.py` al empezar.
+
+```
+$env:TELMEOW_CAMERA_BACKEND="dshow"; $env:TELMEOW_CAMERA_INDEX="1"
+$env:TELMEOW_CAMERA_WIDTH="640";     $env:TELMEOW_CAMERA_HEIGHT="480"
+```
+
+**2. El punto 11 de abajo —la convención de signos— es EL riesgo de este
+prompt, y ya se materializó una vez.** En el P4, el método por defecto devolvía
+el cabeceo invertido y **pasó 400 pruebas en verde**: el operador levantaba la
+cabeza y el robot la bajaba (**H22**). La causa fue que las pruebas sintéticas
+solo ataban el signo de un camino de código, y el otro quedó libre.
+
+El P5 tiene **cuatro canales con signo, más una decisión de espejo**, o sea
+cuatro veces la superficie del mismo fallo. Dos consecuencias prácticas:
+
+- **Ninguna prueba sintética vale si el convenio de referencia sale de la propia
+  prueba.** Hay que atar cada signo contra algo externo: el visor, o una
+  afirmación geométrica independiente. Ver las tres pruebas de
+  `test_los_dos_metodos_coinciden_en_el_signo_del_pitch` y siguientes como
+  patrón — comparan **dos caminos distintos entre sí**, no cada uno consigo
+  mismo.
+- **Verificarlo en el visor es barato y obligatorio.** El head tracker tiene
+  `--publish` (`head_tracker.py`), que publica la pose mientras corre el demo;
+  el arm tracker debería tener lo mismo desde el principio. `main.py` es del P7,
+  así que sin esa bandera no hay forma de ver los brazos moverse.
+
+**3. Cómo verificar en el visor sin equivocarse.** El visor renderiza a muy
+pocos fps cuando no está en primer plano y la cámara sigue deslizándose por
+amortiguación durante muchos segundos tras un arrastre. Comparar dos capturas
+tomadas en momentos distintos **no es fiable** — así se llegó a una conclusión
+falsa sobre el sentido del tilt. Lo correcto es mover **un solo valor** con el
+slider o por MQTT y comparar sin tocar la cámara entre medias.
+
+**4. Herramientas que ya existen.** `--record` graba un CSV por frame (y ya no
+pisa la grabación anterior). `tools/analizar_registro.py` analiza esos CSV con
+percentiles y detección de etiquetas contaminadas, **pero es específico del head
+tracker**: espera columnas `raw_pan`/`raw_tilt`. Si el P5 necesita calibrar algo
+por medición, hay que extenderlo, no asumir que sirve tal cual.
+
+Sobre ganancias: el arm tracker **no las lleva por ahora**. Los ángulos del
+hombro se mapean directos a los DOF del robot; la ganancia del P4 existe porque
+el operador no puede girar la cabeza sin perder de vista el monitor, y ese
+problema no se replica en los brazos.
+
+### Enunciado
 
 ```
 Crea `telmeow_teleop/arm_tracker.py` reemplazando legacy/Hands Tracking.py.

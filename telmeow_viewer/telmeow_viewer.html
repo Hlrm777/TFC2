@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Telmeow · Banco virtual de teleoperación</title>
+<style>
+  :root{
+    --bg:#0e1320;          /* azul tinta profundo */
+    --panel:#161d2e;
+    --panel-2:#1d2740;
+    --line:#2a3550;
+    --ink:#e8edf7;
+    --ink-dim:#8a97b4;
+    --accent:#f5a623;      /* ámbar maneki-neko */
+    --accent-2:#3ad6c5;    /* cian de telemetría */
+    --live:#3ad67a;
+    --warn:#f5604a;
+    --mono:'SFMono-Regular',ui-monospace,'JetBrains Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:var(--mono);
+    overflow:hidden;
+    display:grid;grid-template-columns:1fr 340px;
+  }
+  /* ---- escena ---- */
+  #stage{position:relative;height:100vh}
+  #canvas-host{position:absolute;inset:0}
+  .stage-tag{
+    position:absolute;left:18px;top:16px;z-index:5;
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim)
+  }
+  .stage-tag b{color:var(--accent);font-weight:600}
+  #loadbar{
+    position:absolute;left:18px;bottom:18px;z-index:5;
+    font-size:12px;color:var(--ink-dim);min-width:260px
+  }
+  #loadbar .track{height:3px;background:var(--line);margin-top:7px;border-radius:2px;overflow:hidden}
+  #loadbar .fill{height:100%;width:0;background:var(--accent);transition:width .2s}
+  /* ---- panel ---- */
+  #panel{
+    height:100vh;background:var(--panel);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;overflow-y:auto
+  }
+  .ph{padding:18px 18px 14px;border-bottom:1px solid var(--line)}
+  .ph h1{font-size:15px;letter-spacing:.04em}
+  .ph .sub{font-size:11px;color:var(--ink-dim);margin-top:4px;letter-spacing:.1em;text-transform:uppercase}
+  .sec{padding:16px 18px;border-bottom:1px solid var(--line)}
+  .sec h2{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:14px}
+  .dof{margin-bottom:16px}
+  .dof:last-child{margin-bottom:0}
+  .dof .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+  .dof .name{font-size:12.5px;color:var(--ink)}
+  .dof .val{font-size:12.5px;color:var(--accent-2);font-variant-numeric:tabular-nums}
+  .dof input[type=range]{
+    appearance:none;-webkit-appearance:none;width:100%;height:3px;background:var(--line);border-radius:2px;outline:none
+  }
+  .dof input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+    background:var(--accent);cursor:pointer;border:2px solid var(--panel)
+  }
+  .dof input[type=range]::-moz-range-thumb{
+    width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--panel)
+  }
+  .dof .lim{display:flex;justify-content:space-between;font-size:9.5px;color:var(--ink-dim);margin-top:3px}
+  .btnrow{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap}
+  #emo-row .emo.sel{outline:2px solid #4C8BF5;color:#fff}
+  button{
+    flex:1;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);
+    font-family:var(--mono);font-size:11px;letter-spacing:.05em;padding:9px;border-radius:6px;cursor:pointer;
+    transition:border-color .15s,background .15s
+  }
+  button:hover{border-color:var(--accent);background:#212c47}
+  button.live{border-color:var(--live);color:var(--live)}
+  /* ---- MQTT ---- */
+  .field{margin-bottom:10px}
+  .field label{display:block;font-size:10px;color:var(--ink-dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px}
+  .field input[type=text]{
+    width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);
+    font-family:var(--mono);font-size:11.5px;padding:8px 9px;border-radius:5px;outline:none
+  }
+  .field input[type=text]:focus{border-color:var(--accent-2)}
+  .status{display:flex;align-items:center;gap:8px;font-size:11px;margin-top:10px;color:var(--ink-dim)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--warn);box-shadow:0 0 8px var(--warn)}
+  .dot.on{background:var(--live);box-shadow:0 0 8px var(--live)}
+  .dot.wait{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  /* ---- telemetría ---- */
+  .telem{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .tcell{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:9px 10px}
+  .tcell .k{font-size:9px;color:var(--ink-dim);letter-spacing:.12em;text-transform:uppercase}
+  .tcell .v{font-size:15px;color:var(--accent-2);margin-top:3px;font-variant-numeric:tabular-nums}
+  .tcell .v.amber{color:var(--accent)}
+  .tcell .v.col-hit{color:var(--warn);text-shadow:0 0 8px rgba(245,96,74,.45)}
+  .note{font-size:10.5px;color:var(--ink-dim);line-height:1.5;margin-top:12px}
+  .err{color:var(--warn);font-size:11px;line-height:1.5;margin-top:8px;display:none}
+</style>
+</head>
+<body>
+  <section id="stage">
+    <div id="canvas-host"></div>
+    <div class="stage-tag"><b>TELMEOW</b> · banco virtual de teleoperación · v9</div>
+    <div id="loadbar">
+      <span id="loadtxt">Inicializando escena…</span>
+      <div class="track"><div class="fill" id="loadfill"></div></div>
+    </div>
+  </section>
+
+  <aside id="panel">
+    <div class="ph">
+      <h1>Consola de teleoperación</h1>
+      <div class="sub">6 GDL · cuello + brazos</div>
+    </div>
+
+    <div class="sec">
+      <h2>Grados de libertad</h2>
+
+      <div class="dof">
+        <div class="row"><span class="name">Cuello · pan (yaw)</span><span class="val" id="v-pan">0.0°</span></div>
+        <input type="range" id="s-pan" min="-90" max="90" value="0" step="0.5">
+        <div class="lim"><span>−90°</span><span>+90°</span></div>
+      </div>
+
+      <div class="dof">
+        <div class="row"><span class="name">Cuello · tilt (pitch)</span><span class="val" id="v-tilt">0.0°</span></div>
+        <input type="range" id="s-tilt" min="-45" max="45" value="0" step="0.5">
+        <div class="lim"><span>−45°</span><span>+45°</span></div>
+      </div>
+
+      <div class="dof">
+        <div class="row"><span class="name">Brazo izq · balanceo</span><span class="val" id="v-arL">0.0°</span></div>
+        <input type="range" id="s-arL" min="-90" max="90" value="0" step="0.5">
+        <div class="lim"><span>−90°</span><span>+90°</span></div>
+      </div>
+
+      <div class="dof">
+        <div class="row"><span class="name">Brazo izq · giro</span><span class="val" id="v-arLtw">0.0°</span></div>
+        <input type="range" id="s-arLtw" min="-90" max="90" value="0" step="0.5">
+        <div class="lim"><span>−90°</span><span>+90°</span></div>
+      </div>
+
+      <div class="dof">
+        <div class="row"><span class="name">Brazo der · balanceo</span><span class="val" id="v-arR">0.0°</span></div>
+        <input type="range" id="s-arR" min="-90" max="90" value="0" step="0.5">
+        <div class="lim"><span>−90°</span><span>+90°</span></div>
+      </div>
+
+      <div class="dof">
+        <div class="row"><span class="name">Brazo der · giro</span><span class="val" id="v-arRtw">0.0°</span></div>
+        <input type="range" id="s-arRtw" min="-90" max="90" value="0" step="0.5">
+        <div class="lim"><span>−90°</span><span>+90°</span></div>
+      </div>
+
+      <div class="btnrow">
+        <button id="b-home">Posición home</button>
+        <button id="b-wave">Saludo demo</button>
+      </div>
+      <div class="btnrow" id="emo-row" style="margin-top:6px">
+        <button data-emo="neutral" class="emo sel">Neutral</button>
+        <button data-emo="feliz" class="emo">Feliz</button>
+        <button data-emo="triste" class="emo">Triste</button>
+        <button data-emo="sorprendido" class="emo">Sorprendido</button>
+        <button data-emo="enojado" class="emo">Enojado</button>
+        <button data-emo="concentrado" class="emo">Concentrado</button>
+      </div>
+      <div class="btnrow" style="margin-top:6px">
+        <button id="b-page-prev" title="Simula MQTT gesture:page_prev">◀ Simular pág. anterior</button>
+        <button id="b-page-next" title="Simula MQTT gesture:page_next">Simular pág. siguiente ▶</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--muted);cursor:pointer">
+        <input type="checkbox" id="c-extscr" checked> Mostrar pantalla externa (cuento)
+      </label>
+    </div>
+
+    <div class="sec">
+      <h2>Enlace MQTT / WebSocket</h2>
+      <div class="field">
+        <label>Broker (ws:// o wss://)</label>
+        <input type="text" id="mq-url" value="ws://localhost:9001" spellcheck="false">
+      </div>
+      <div class="field">
+        <label>Tópico de comandos</label>
+        <input type="text" id="mq-topic" value="telmeow/teleop/pose" spellcheck="false">
+      </div>
+      <div class="btnrow">
+        <button id="b-connect">Conectar</button>
+        <button id="b-disconnect">Desconectar</button>
+      </div>
+      <div class="status"><span class="dot" id="mq-dot"></span><span id="mq-state">Sin conexión</span></div>
+      <div class="err" id="mq-err"></div>
+      <div class="note">
+        Espera mensajes JSON con ángulos en grados, p. ej.
+        <code>{"pan":12,"tilt":-5,"armL":30,"armR":-30}</code>.
+        Los sliders y el enlace comparten el mismo estado de pose.
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Telemetría</h2>
+      <div class="telem">
+        <div class="tcell"><div class="k">Latencia cmd</div><div class="v" id="t-lat">— ms</div></div>
+        <div class="tcell"><div class="k">Tasa</div><div class="v" id="t-rate">0.0 Hz</div></div>
+        <div class="tcell"><div class="k">Render</div><div class="v amber" id="t-fps">0 fps</div></div>
+        <div class="tcell"><div class="k">Origen</div><div class="v" id="t-src" style="font-size:12px">manual</div></div>
+        <div class="tcell" style="grid-column:1/-1"><div class="k">Interferencia</div><div class="v" id="t-col" style="font-size:12px">—</div></div>
+      </div>
+      <div class="note">
+        Latencia = intervalo entre mensajes recibidos del broker (proxy del retardo extremo a extremo
+        del pipeline de visión → MQTT → render). Objetivo de diseño &lt; 150 ms.
+      </div>
+    </div>
+  </aside>
+
+  <script type="importmap">
+  { "imports": {
+    "three": "https://esm.sh/three@0.160.0",
+    "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/",
+    "three-mesh-bvh": "https://esm.sh/three-mesh-bvh@0.7.8?deps=three@0.160.0"
+  } }
+  </script>
+
+  <script type="module">
+  import * as THREE from 'three';
+  import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { MeshBVH } from 'three-mesh-bvh';
+
+  /* ============================================================
+     RIG de 6 GDL · Telmeow_Split v10 (Fusion 360). UNIDADES: mm.
+     Cada articulación = 2 Dynamixel en L (un eje gira, otro balancea).
+     Estructura cinemática (padre→hijo). Regla física: en cada articulación
+     el motor FIJO está en la estructura (cuerpo); su eje de salida mueve a
+     la unión, que porta al segundo motor. El segundo motor va alojado en la
+     pieza móvil (cabeza/brazo) con el eje anclado a la unión: al actuar,
+     el CUERPO del motor gira junto con la pieza móvil.
+       Cuello:  [M_Cuello_Base fijo] → tilt(pitch) mueve unión
+                → pan(yaw): M_Cuello_Sup + cabeza giran; la unión NO.
+       Brazo:   [M_Hombro_Sup fijo al cuerpo] → giro mueve unión + M_Hombro_Base
+                → balanceo: brazo + M_Hombro_Base giran respecto a la unión.
+     Cada pieza lleva su matriz de mundo W (de Fusion). Ejes de rotación
+     tomados del eje de salida real de cada servo (medidos en mundo).
+     ============================================================ */
+  const I = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+  function mat4(rm){ const m=new THREE.Matrix4(); m.set(...rm); return m; }
+  const V = (x,y,z)=>new THREE.Vector3(x,y,z);
+
+  // --- Matrices de mundo de las carcasas móviles ---
+  const W = {
+    cabeza: [0,-1,0,0.085,  1,0,0.00001,14.817,  -0.00001,0,1,312.060,  0,0,0,1],
+    brazoL: [-0.98483,0,-0.17353,-173.33558,  0,1,0.00002,-16.26032,  0.17353,0.00002,-0.98483,155.41715,  0,0,0,1],
+    brazoR: [0.98532,0.00001,0.17069,173.50906,  0,-1,0.00007,16.26417,  0.17069,-0.00007,-0.98532,155.10854,  0,0,0,1],
+    // motores y uniones (mundo)
+    cuelloBase:[0,0,1,0.085, 1,0,0,-10.934, 0,1,0,215.060, 0,0,0,1],
+    cuelloSup:[-0.03863,-0.99925,0,0.085, -0.99786,0.03857,-0.05287,-8.449, 0.05283,-0.00204,-0.99860,261.994, 0,0,0,1],
+    cuelloUnion:[-1,0,0,0.085, 0,0.05287,0.99860,-10.934, 0,0.99860,-0.05287,215.060, 0,0,0,1],
+    hdBase:[-0.17069,-0.98532,0.00001,109.44899,  -0.00007,0,-1,-0.08528,  0.98532,-0.17069,-0.00007,142.33673,  0,0,0,1],
+    hdSup:[0.00006,-0.16973,0.98549,63.131, 1,0.00033,0,-0.085, -0.00032,0.98549,0.16973,134.359, 0,0,0,1],
+    hdUnion:[-0.00001,-0.98549,-0.16973,109.44899,  1,0,-0.00007,-0.08528,  0.00007,-0.16973,0.98549,142.33673,  0,0,0,1],
+    hiBase:[-0.17353,0.98483,0,-109.31233,  0.00002,0,-1,0.08528,  -0.98483,-0.17353,-0.00002,142.46224,  0,0,0,1],
+    hiSup:[0,0.17364,-0.98481,-63.026, -1,0,0,0.085, 0,0.98481,0.17364,134.301, 0,0,0,1],
+    hiUnion:[0,0.98481,-0.17364,-109.31233,  1,0,0.00002,0.08528,  0.00002,-0.17364,-0.98481,142.46224,  0,0,0,1],
+  };
+
+  // --- Pivotes (centro del servo, mm) y ejes de rotación (mundo, unitarios) ---
+  // Cada DOF pivota sobre el eje de salida del servo que lo ejecuta:
+  //   tilt/giro → servo fijo a la estructura del cuerpo (no rota nunca)
+  //   pan/balanceo → servo alojado en la pieza móvil (su cuerpo gira con ella)
+  const RIG = {
+    neckPan:   { piv:V(0.1,-8.4,262.0),  axis:V(0,0,-1) },          // eje del M_Cuello_Sup (motor en la cabeza)
+    neckTilt:  { piv:V(0.1,-10.9,215.1), axis:V(1,0,0) },           // eje del M_Cuello_Base (fijo al cuerpo)
+    armR_bal:  { piv:V(109.4,-0.1,142.3),axis:V(0,-1,0) }, // eje del M_HombroDer_Base (motor en el brazo) · +θ eleva
+    armR_twist:{ piv:V(63.1,-0.1,134.4), axis:V(-0.985,0,-0.170) }, // eje del M_HombroDer_Sup (fijo) · invertido: +θ = adelante en ambos brazos
+    armL_bal:  { piv:V(-109.3,0.1,142.5),axis:V(0,1,0) }, // eje del M_HombroIzq_Base (motor en el brazo) · signo invertido para que +θ también eleve
+    armL_twist:{ piv:V(-63.0,0.1,134.3), axis:V(-0.985,0,0.174) },  // eje del M_HombroIzq_Sup (fijo al cuerpo)
+  };
+
+  const CM=0x4f5a70, CMS=0x7c8aa6, CU=0xf5a623; // colores motor base / sup / union
+  // archivo, grupo lógico, color, matriz W
+  // grupos: 'neckPan' (cuelga de tilt), 'neckTilt',
+  //         'armRbal' (cuelga de giro/twist), 'armRtwist', idem izq, 'static'
+  const PARTS = [
+    // Cuello — M_Cuello_Base fijo al cuerpo (ejecuta el pitch).
+    // La unión solo acompaña al pitch (inhabilitada para yaw).
+    // En yaw giran: M_Cuello_Sup (motor alojado bajo la cabeza, anclado a la unión) + cabeza.
+    ['Cabeza_Full.stl','neckPan', 0xb9c0cf, W.cabeza],
+    ['Tapa_Cabeza_W.stl','neckPan',0xa7afc0, W.cabeza],
+    ['M_Cuello_Sup.stl','neckPan', CMS, W.cuelloSup],
+    ['M_Cuello_Union.stl','neckTilt',CU, W.cuelloUnion],
+    ['M_Cuello_Base.stl','static',  CM, W.cuelloBase],   // base fija al cuerpo
+
+    // Brazo derecho — M_HombroDer_Sup fijo al cuerpo (ejecuta el giro).
+    // En giro rotan: unión + M_HombroDer_Base (motor alojado en el brazo).
+    // En balanceo rotan: brazo + M_HombroDer_Base respecto a la unión.
+    ['Brazo_Der_W.stl','armRbal', 0xcfd5e0, W.brazoR],
+    ['M_HombroDer_Base.stl','armRbal', CM, W.hdBase],     // viaja con el brazo
+    ['M_HombroDer_Union.stl','armRtwist',CU, W.hdUnion],
+    ['M_HombroDer_Sup.stl','static', CMS, W.hdSup],       // fijo al cuerpo
+
+    // Brazo izquierdo — misma lógica
+    ['Brazo_Izq_W.stl','armLbal', 0xcfd5e0, W.brazoL],
+    ['M_HombroIzq_Base.stl','armLbal', CM, W.hiBase],     // viaja con el brazo
+    ['M_HombroIzq_Union.stl','armLtwist',CU, W.hiUnion],
+    ['M_HombroIzq_Sup.stl','static', CMS, W.hiSup],       // fijo al cuerpo
+
+    // tronco estático (identidad)
+    ['Tronco_TSI.stl','static', 0x9aa3b5, I],
+    ['Tronco_TSD.stl','static', 0x9aa3b5, I],
+    ['Tronco_TIIA.stl','static',0x8f98ab, I],
+    ['Tronco_TIIP.stl','static',0x8f98ab, I],
+    ['Tronco_TIDA.stl','static',0x8f98ab, I],
+    ['Tronco_TIDP.stl','static',0x8f98ab, I],
+    ['Pata_Izquierda.stl','static',0x848da0, I],
+    ['Pata_Derecha.stl','static',0x848da0, I],
+    ['Tapa_Cuerpo.stl','static',0x9aa3b5, I],
+    ['Modulo_Cajita.stl','static',0x5a6270, I],
+  ];
+
+  const STL_DIR = './'; // los .stl deben estar junto a este HTML
+
+  /* ---------- escena ---------- */
+  const host = document.getElementById('canvas-host');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0e1320);
+
+  const cam = new THREE.PerspectiveCamera(38, 1, 1, 20000);
+  cam.position.set(700, -900, 550);
+  cam.up.set(0,0,1);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  host.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(cam, renderer.domElement);
+  controls.enableDamping = true;
+  controls.target.set(0,0,180);
+  controls.minDistance = 120;    // evita que la cámara entre al modelo (zoom 'bugeado')
+  controls.maxDistance = 4000;   // evita perder la escena alejándose
+  cam.near = 0.5;                // sin recorte visual al acercarse
+  cam.updateProjectionMatrix();
+
+  // luces
+  scene.add(new THREE.HemisphereLight(0xbfd0ff, 0x1a2030, 0.85));
+  const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(40,-60,80); scene.add(key);
+  const rim = new THREE.DirectionalLight(0xf5a623, 0.5); rim.position.set(-50,40,30); scene.add(rim);
+
+  // piso de referencia
+  const grid = new THREE.GridHelper(1200, 24, 0x2a3550, 0x1c2438);
+  grid.rotation.x = Math.PI/2; grid.position.z = -180; scene.add(grid);
+  function snapGridToFloor(){
+    // apoyar la grilla en el punto más bajo del robot (las patas)
+    scene.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(sceneRoot);
+    if(isFinite(box.min.z)) grid.position.z = box.min.z;
+  }
+
+  /* ---------- grupos pivote (jerarquía cinemática) ----------
+     Cada grupo se ubica en el pivote de su servo. Las mallas, ya en coords
+     de mundo, se insertan con offset -pivote para rotar sobre el eje real.
+     Anidamiento: tilt→pan→(cabeza); giro→balanceo→(brazo). El offset entre
+     un grupo padre y su hijo compensa la diferencia de pivote. */
+  function makeJoint(parent, rig){
+    const g = new THREE.Group();
+    // posición del grupo = pivote relativo al padre
+    const pp = parent.userData.pivot || new THREE.Vector3();
+    g.position.set(rig.piv.x-pp.x, rig.piv.y-pp.y, rig.piv.z-pp.z);
+    g.userData.pivot = rig.piv.clone();
+    g.userData.axis  = rig.axis.clone().normalize();
+    parent.add(g);
+    return g;
+  }
+  const sceneRoot = new THREE.Group(); scene.add(sceneRoot);
+  sceneRoot.userData.pivot = new THREE.Vector3();
+
+  // Cuello: tilt (motor base fijo al cuerpo, cuelga de root) → pan (motor sup)
+  const gNeckTilt = makeJoint(sceneRoot, RIG.neckTilt);
+  const gNeckPan  = makeJoint(gNeckTilt, RIG.neckPan);
+  // Brazo derecho: giro (motor sup fijo al cuerpo) → balanceo (motor en el brazo)
+  const gArmRtwist = makeJoint(sceneRoot,  RIG.armR_twist);
+  const gArmRbal   = makeJoint(gArmRtwist, RIG.armR_bal);
+  // Brazo izquierdo: giro → balanceo
+  const gArmLtwist = makeJoint(sceneRoot,  RIG.armL_twist);
+  const gArmLbal   = makeJoint(gArmLtwist, RIG.armL_bal);
+
+  const gStatic = new THREE.Group(); sceneRoot.add(gStatic);
+  gStatic.userData.pivot = new THREE.Vector3();
+
+  const groupMap = {
+    neckPan:gNeckPan, neckTilt:gNeckTilt,
+    armRbal:gArmRbal, armRtwist:gArmRtwist,
+    armLbal:gArmLbal, armLtwist:gArmLtwist,
+    static:gStatic
+  };
+  // pivote acumulado para colocar cada malla: usamos el pivote del grupo destino
+  function pivotOf(grp){ return groupMap[grp].userData.pivot || new THREE.Vector3(); }
+
+  /* ---------- carga STL ---------- */
+  const loader = new STLLoader();
+  const loadfill = document.getElementById('loadfill');
+  const loadtxt  = document.getElementById('loadtxt');
+  let done = 0;
+  const total = PARTS.length;
+
+  const meshByFile = {};   // nombre STL → THREE.Mesh (para colisiones)
+
+  function loadPart([file, grp, color, w]){
+    return new Promise(res=>{
+      loader.load(STL_DIR+file, geo=>{
+        geo.applyMatrix4(mat4(w));      // llevar a mundo
+        geo.computeVertexNormals();
+        const mat = new THREE.MeshStandardMaterial({color, metalness:0.25, roughness:0.55});
+        const mesh = new THREE.Mesh(geo, mat);
+        // El grupo destino está (en mundo) sobre su pivote acumulado; restamos
+        // ese pivote para que la geometría de mundo aterrice en su sitio y rote
+        // sobre el eje del servo. Para grupos anidados, el pivote es absoluto.
+        const p = pivotOf(grp);
+        mesh.position.set(-p.x, -p.y, -p.z);
+        groupMap[grp].add(mesh);
+        meshByFile[file] = mesh;
+        done++; loadfill.style.width = (done/total*100)+'%';
+        loadtxt.textContent = `Cargando componentes… ${done}/${total}`;
+        res();
+      }, undefined, err=>{
+        console.warn('No se pudo cargar', file, err);
+        done++; loadfill.style.width=(done/total*100)+'%'; res();
+      });
+    });
+  }
+
+  Promise.all(PARTS.map(loadPart)).then(()=>{
+    loadtxt.textContent = done===total ? 'Modelo cargado · listo' : `Cargado parcial (${done}/${total}) · revisa rutas STL`;
+    setTimeout(()=>{ document.getElementById('loadbar').style.opacity=.0; }, 2500);
+    initCollisions();
+    initBackplane();
+    snapGridToFloor();
+    initEyeScreen();
+    initExtScreen();
+  });
+
+  /* ---------- pantalla interna de ojos (DSI 5" · 800×480) ----------
+     Geometría REAL medida en Fusion (Telmeow_Split v11): el lazo interior
+     del marco de Pantalla_Interna da el área activa = 108.00 × 64.80 mm
+     exactos (AR 800:480, correspondencia píxel-milímetro 1:1), con plano
+     frontal en y = 75.124 mm y centro (x = 0.085, z = 309.809) mm.
+     Las caras del panel tienen normal (0, 1, 0): la pantalla mira RECTO
+     al frente, SIN guiñada. La guiñada de 2.87° que se veía antes venía
+     de leer transform2 de la ocurrencia en vez de la geometría de las
+     caras: la rotación del componente está compensada dentro del cuerpo.
+     La ventana de la cabeza mide 100.0 × 56.8 mm y es concéntrica con el
+     área activa. Cuelga de gNeckPan (acompaña pan+tilt); crossfade de
+     350 ms entre expresiones. ---- */
+  const EYE = {
+    w:108.0, h:64.8,              // área activa (= 800×480 px)
+    cx:0.085, cy:75.124, cz:309.809,
+    bezelW:120.7, bezelH:75.8,    // marco del módulo
+    bezelCz:311.949               // el marco NO es concéntrico con el vidrio
+    // Ventana de la cabeza: 100.0 × 56.8 mm concéntrica → solo se ve el
+    // 92.6 % del ancho y el 87.7 % del alto del panel. Área segura de
+    // diseño ≈ 741 × 421 px del lienzo de 800 × 480.
+  };
+  const EMO_FILES = {
+    neutral:'01_NEUTRAL.png', sorprendido:'02_SORPRENDIDO.png',
+    feliz:'03_FELIZ.png', enojado:'04_ENOJADO.png',
+    triste:'05_TRISTE.png', concentrado:'06_CONCENTRADO.png'
+  };
+  const EMO_ALIAS = { happy:'feliz', sad:'triste', surprise:'sorprendido',
+    surprised:'sorprendido', angry:'enojado', anger:'enojado', focused:'concentrado' };
+  // Los PNG se entregan ya normalizados a 800×480 con el par de ojos
+  // centrado en (400,240) y ancho común de 640 px, así que el centro de
+  // contenido es el del lienzo. Se deja el mecanismo por si se sustituyen
+  // los assets por otros sin normalizar.
+  const EMO_CENTER = {};
+  const emoTex = {};
+  let eyeFront=null, eyeBack=null, eyeFadeT0=0, currentEmo='neutral';
+
+  function loadEmoTexture(name){
+    return new Promise(res=>{
+      new THREE.TextureLoader().load(EMO_FILES[name], tx=>{
+        tx.flipY = false;                       // el plano se rota X−90°: esto endereza la imagen
+        tx.colorSpace = THREE.SRGBColorSpace;
+        tx.wrapS = tx.wrapT = THREE.ClampToEdgeWrapping;
+        const AR = 800/480, iar = tx.image.width/tx.image.height;
+        // recorte centrado "cover" al aspecto de la matriz de píxeles real
+        let fx=1, fy=1;
+        if(iar >= AR) fx = AR/iar; else fy = iar/AR;
+        const c = EMO_CENTER[name] || {u:0.5, v:0.5};
+        // ventana centrada en el contenido, sin salirse del lienzo
+        const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+        const u0 = clamp(c.u - fx/2, 0, 1-fx);
+        const v0 = clamp(c.v - fy/2, 0, 1-fy);
+        // repeat.x negativo = des-espejar: visto de frente (cámara −Y),
+        // la derecha del observador es −X y el eje U del plano corre en +X
+        tx.repeat.set(-fx, fy);
+        tx.offset.set(u0 + fx, v0);
+        emoTex[name]=tx; res(tx);
+      }, undefined, ()=>{ console.warn('Sin textura', EMO_FILES[name]); res(null); });
+    });
+  }
+
+  function initEyeScreen(){
+    const p = pivotOf('neckPan');                          // mismo truco que loadPart
+    const holder = new THREE.Group();                      // porta-pantalla, sin rotación
+    holder.position.set(EYE.cx-p.x, EYE.cy-p.y, EYE.cz-p.z);
+    groupMap['neckPan'].add(holder);
+    const mk = (w,h,mat,dy,dz)=>{
+      const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h), mat);
+      m.rotation.x = -Math.PI/2;                           // normal hacia +Y (frente)
+      m.position.set(0, dy, dz||0);
+      holder.add(m);
+      return m;
+    };
+    mk(EYE.bezelW, EYE.bezelH,
+       new THREE.MeshStandardMaterial({color:0x0a0b0e, roughness:0.4}),
+       -0.4, EYE.bezelCz-EYE.cz);                          // marco del módulo (z propio)
+    eyeBack  = mk(EYE.w, EYE.h, new THREE.MeshBasicMaterial({color:0x000000}), 0);
+    eyeFront = mk(EYE.w, EYE.h, new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0}), 0.15);
+    loadEmoTexture('neutral').then(tx=>{
+      if(tx){ eyeBack.material.map=tx; eyeBack.material.color.set(0xffffff); eyeBack.material.needsUpdate=true; }
+    });
+    Object.keys(EMO_FILES).forEach(n=>{ if(n!=='neutral') loadEmoTexture(n); });
+  }
+
+  function setEmotion(name){
+    name = (EMO_ALIAS[name]||name||'').toLowerCase().trim();
+    if(!(name in EMO_FILES) || name===currentEmo || !eyeFront) return;
+    currentEmo = name;
+    document.querySelectorAll('#emo-row .emo').forEach(b=>
+      b.classList.toggle('sel', b.dataset.emo===name));
+    const apply = tx=>{
+      if(!tx) return;
+      eyeFront.material.map=tx; eyeFront.material.opacity=0;
+      eyeFront.material.needsUpdate=true;
+      eyeFadeT0 = performance.now();
+    };
+    emoTex[name] ? apply(emoTex[name]) : loadEmoTexture(name).then(apply);
+  }
+
+  function tickEyeFade(now){
+    if(!eyeFadeT0 || !eyeFront) return;
+    const k = Math.min((now-eyeFadeT0)/350, 1);            // crossfade 350 ms
+    eyeFront.material.opacity = k;
+    if(k>=1){
+      eyeBack.material.map = eyeFront.material.map;        // consolidar y resetear
+      eyeBack.material.color.set(0xffffff);
+      eyeBack.material.needsUpdate = true;
+      eyeFront.material.opacity = 0;
+      eyeFadeT0 = 0;
+    }
+  }
+
+  document.querySelectorAll('#emo-row .emo').forEach(b=>
+    b.onclick = ()=> setEmotion(b.dataset.emo));
+
+  /* ---------- detección de colisiones (three-mesh-bvh) ----------
+     Verifica interferencia malla-malla entre las piezas móviles y el
+     tronco estático. Sirve para determinar empíricamente los límites
+     articulares seguros: mover cada slider hasta que aparezca contacto
+     y registrar el ángulo. Chequeo throttled (~8 Hz) solo cuando la
+     pose cambia, con BVH precomputado por geometría. */
+  const COLLISION_PAIRS = [
+    // [etiqueta, malla móvil, mallas estáticas contra las que chocar]
+    ['cabeza',    'Cabeza_Full.stl', ['Tronco_TSI.stl','Tronco_TSD.stl','Tapa_Cuerpo.stl']],
+    ['brazo izq', 'Brazo_Izq_W.stl', ['Tronco_TSI.stl','Tronco_TIIA.stl','Tronco_TIIP.stl']],
+    ['brazo der', 'Brazo_Der_W.stl', ['Tronco_TSD.stl','Tronco_TIDA.stl','Tronco_TIDP.stl']],
+  ];
+  let collisionReady = false, poseDirty = true, lastColCheck = 0;
+  const _rel = new THREE.Matrix4(), _inv = new THREE.Matrix4();
+
+  function initCollisions(){
+    const need = new Set();
+    COLLISION_PAIRS.forEach(([,m,statics])=>{ need.add(m); statics.forEach(s=>need.add(s)); });
+    let ok = true;
+    need.forEach(f=>{
+      const mesh = meshByFile[f];
+      if(!mesh){ ok = false; return; }
+      mesh.geometry.boundsTree = new MeshBVH(mesh.geometry);
+    });
+    collisionReady = ok;
+    if(!ok) console.warn('Colisiones: faltan mallas, detector desactivado');
+    checkCollisions();
+  }
+
+  function pairHit(pairDef){
+    const [, movFile, statics] = pairDef;
+    const mov = meshByFile[movFile];
+    for(const sf of statics){
+      const st = meshByFile[sf];
+      _inv.copy(st.matrixWorld).invert();
+      _rel.multiplyMatrices(_inv, mov.matrixWorld);
+      if(st.geometry.boundsTree.intersectsGeometry(mov.geometry, _rel)) return true;
+    }
+    return false;
+  }
+
+  /* Instante del último recorte de una pose recibida por MQTT. Lo APUNTA
+     clampPoseExternal(); lo PINTA checkCollisions(), que a partir de ahora es
+     el único dueño del indicador #t-col.
+
+     Antes escribían los dos a la vez: el bucle de render ponía 'sin contacto'
+     cada 120 ms y el manejador de MQTT ponía 'libre' a 20 Hz, así que el
+     indicador parpadeaba entre dos palabras que significan lo mismo. Son dos
+     hechos distintos —«ahora no hay contacto» y «la pose que acaba de llegar
+     se recortó»— así que no se puede borrar uno de los dos: se pintan desde un
+     solo sitio y por prioridad. El aviso de recorte se sostiene un momento
+     porque el recorte dura un instante y si no, no daría tiempo a leerlo. */
+  let ultimoRecorte = -Infinity;   // lo apunta clampPoseExternal()
+  let ultimosHits = [];            // lo apunta checkCollisions()
+  const MS_AVISO_RECORTE = 1200;
+
+  /* ÚNICO sitio que escribe el indicador #t-col.
+
+     Antes escribían dos: el bucle de render ponía 'sin contacto' cada 120 ms y
+     el manejador de MQTT ponía 'libre' a 20 Hz, así que parpadeaba entre dos
+     palabras que significan lo mismo. Son dos hechos distintos —«ahora hay
+     contacto» y «la pose que acaba de llegar se recortó»— así que no se puede
+     borrar uno: se pintan desde aquí, por prioridad.
+
+     Se llama desde los DOS eventos a propósito, y no solo desde el render: si
+     la pestaña deja de estar visible, el navegador congela
+     requestAnimationFrame y con él checkCollisions. Dejar el aviso de recorte
+     colgando de ahí lo dejaría congelado justo cuando el operador no está
+     mirando, que es cuando más falta hace que quede registrado. El mensaje de
+     MQTT llega por WebSocket y no lo throttlea nadie. */
+  function pintarInterferencia(){
+    const el = document.getElementById('t-col');
+    if(!el) return;
+    if(ultimosHits.length){
+      el.textContent = '⚠ ' + ultimosHits.join(' · '); el.classList.add('col-hit');
+    } else if(performance.now() - ultimoRecorte < MS_AVISO_RECORTE){
+      // El recorte dura un instante; se sostiene un momento para poder leerlo.
+      el.textContent = 'recortada por colisión'; el.classList.add('col-hit');
+    } else {
+      el.textContent = 'sin contacto'; el.classList.remove('col-hit');
+    }
+  }
+
+  function checkCollisions(){
+    if(!collisionReady) return;
+    scene.updateMatrixWorld(true);
+    const hits = [];
+    for(const p of COLLISION_PAIRS) if(pairHit(p)) hits.push(p[0]);
+    if(typeof backplaneHit === 'function'){
+      if(backplaneHit('Brazo_Izq_W.stl')) hits.push('plano post·izq');
+      if(backplaneHit('Brazo_Der_W.stl')) hits.push('plano post·der');
+    }
+    ultimosHits = hits;
+    pintarInterferencia();
+  }
+
+  /* ---------- barrido automático de límites articulares ----------
+     Recorre cada DOF en pasos de 5° (los demás en home) y detecta el
+     primer ángulo con interferencia; luego refina en pasos de 1° dentro
+     del último intervalo libre. Resultado: rango seguro por DOF. */
+  const DOF_SWEEP = [
+    // [clave pose, etiqueta, par de colisión, mín slider, máx slider]
+    ['pan',   'Cuello · pan (yaw)',     'cabeza',    -90, 90],
+    ['tilt',  'Cuello · tilt (pitch)',  'cabeza',    -45, 45],
+    ['armL',  'Brazo izq · balanceo',   'brazo izq', -90, 90],
+    ['armLtw','Brazo izq · giro',       'brazo izq', -90, 90],
+    ['armR',  'Brazo der · balanceo',   'brazo der', -90, 90],
+    ['armRtw','Brazo der · giro',       'brazo der', -90, 90],
+  ];
+  const nextFrame = ()=>new Promise(r=>requestAnimationFrame(r));
+
+  function probe(pair, key, ang){
+    pose[key] = ang; applyPose(); scene.updateMatrixWorld(true);
+    if(PAIR_FILE[pair] && backplaneHit(PAIR_FILE[pair])) return true;   // límite expresivo cuenta como contacto
+    return pairHit(COLLISION_PAIRS.find(p=>p[0]===pair));
+  }
+
+  /* Las herramientas de barrido (sweepLimits / sweep2D) se retiraron en
+     ago-2026: su función era DERIVAR los límites articulares, y esas tablas
+     ya están medidas y consolidadas (ver limits.py del pipeline Python y la
+     skill telmeow-viewer). El motor de colisiones BVH y el plano posterior
+     SÍ se conservan: siguen operando en vivo como segunda capa de filtro
+     sobre los sliders y sobre las poses recibidas por MQTT. */
+
+  /* ---------- plano posterior (límite expresivo) ----------
+     Restricción de naturalidad: las manos no deben cruzar hacia atrás
+     del plano frontal (los brazos gesticulan acompañando la narración).
+     Plano XZ invisible desplazado marginMM hacia la espalda (+Y);
+     si la punta del brazo (bolita) lo cruza, se considera contacto y
+     los sliders revierten el movimiento. back:-1 → espalda mira a -Y
+     (verificado visualmente por Harold con el plano visible). */
+  const BACKPLANE = { back:-1, marginMM:20, enabled:true };
+  const PAIR_FILE = {'brazo izq':'Brazo_Izq_W.stl','brazo der':'Brazo_Der_W.stl'};
+  let planeMesh = null; const armTips = {};
+
+  function initBackplane(){
+    for(const f of Object.values(PAIR_FILE)){
+      const m = meshByFile[f]; if(!m) return;
+      const pos = m.geometry.attributes.position;
+      let best = 0, bi = 0;                    // vértice más lateral = bolita de la mano
+      for(let i=0;i<pos.count;i++){ const ax=Math.abs(pos.getX(i)); if(ax>best){best=ax;bi=i;} }
+      armTips[f] = new THREE.Vector3(pos.getX(bi), pos.getY(bi), pos.getZ(bi));
+    }
+    const g = new THREE.PlaneGeometry(520, 440);
+    const mt = new THREE.MeshBasicMaterial({color:0xf5604a, transparent:true, opacity:0.12, side:THREE.DoubleSide, depthWrite:false});
+    planeMesh = new THREE.Mesh(g, mt);
+    planeMesh.rotation.x = Math.PI/2;                        // plano XZ, normal Y
+    planeMesh.position.set(0, BACKPLANE.back*BACKPLANE.marginMM, 200);
+    planeMesh.visible = false;
+    scene.add(planeMesh);
+    const chk = document.getElementById('c-plane');
+    if(chk) chk.onchange = e=>{ planeMesh.visible = e.target.checked; };
+  }
+
+  function backplaneHit(file){
+    if(!BACKPLANE.enabled || !armTips[file]) return false;
+    const p = armTips[file].clone().applyMatrix4(meshByFile[file].matrixWorld);
+    return BACKPLANE.back * p.y > BACKPLANE.marginMM;
+  }
+  function anyBackplaneHit(){
+    return Object.values(PAIR_FILE).some(f=>backplaneHit(f));
+  }
+
+  /* ---------- estado de pose (6 GDL) ---------- */
+  const pose = {pan:0, tilt:0, armL:0, armLtw:0, armR:0, armRtw:0};
+  const d2r = d=>d*Math.PI/180;
+
+  function setJoint(g, deg){
+    g.quaternion.setFromAxisAngle(g.userData.axis, d2r(deg));
+  }
+  function applyPose(){
+    setJoint(gNeckPan,   pose.pan);
+    setJoint(gNeckTilt,  pose.tilt);
+    setJoint(gArmRbal,   pose.armR);      // balanceo brazo derecho
+    setJoint(gArmRtwist, pose.armRtw);    // giro brazo derecho
+    setJoint(gArmLbal,   pose.armL);      // balanceo brazo izquierdo
+    setJoint(gArmLtwist, pose.armLtw);    // giro brazo izquierdo
+    poseDirty = true;
+  }
+
+  /* ---------- sliders ---------- */
+  const sl = {pan:'s-pan',tilt:'s-tilt',armL:'s-arL',armLtw:'s-arLtw',armR:'s-arR',armRtw:'s-arRtw'};
+  const lbl = {pan:'v-pan',tilt:'v-tilt',armL:'v-arL',armLtw:'v-arLtw',armR:'v-arR',armRtw:'v-arRtw'};
+  function syncLabels(){
+    for(const k in sl){ const el=document.getElementById(lbl[k]); if(el) el.textContent = pose[k].toFixed(1)+'°'; }
+  }
+  function syncSliders(){
+    for(const k in sl){ const el=document.getElementById(sl[k]); if(el) el.value = pose[k]; }
+  }
+  function poseBlocked(){
+    // contacto geométrico (cuerpo) o plano expresivo
+    scene.updateMatrixWorld(true);
+    if(anyBackplaneHit()) return true;
+    for(const p of COLLISION_PAIRS) if(pairHit(p)) return true;
+    return false;
+  }
+
+  /* ---------- segunda capa de filtro: clamp de poses externas ----------
+     El pipeline Python ya recorta contra las tablas de limits.py ANTES de
+     publicar, pero esas tablas se midieron con los demás DOF en home y no
+     cubren combinaciones simultáneas (p.ej. cabeza inclinada + brazo
+     elevado). Aquí se verifica la pose completa contra la geometría real:
+     si la pose recibida colisiona, se retrocede por bisección a lo largo
+     del segmento entre la última pose válida y la pedida, quedándose en el
+     punto admisible más cercano al comando del operador.
+     Devuelve true si hubo recorte (para señalizarlo en la telemetría). */
+  let lastValidPose = {pan:0, tilt:0, armL:0, armLtw:0, armR:0, armRtw:0};
+
+  function clampPoseExternal(){
+    if(!collisionReady) return false;
+    applyPose();
+    if(!poseBlocked()){ lastValidPose = {...pose}; return false; }
+    const want = {...pose};
+    let lo = 0, hi = 1;                       // t=0 → última válida, t=1 → pedida
+    for(let i=0;i<12;i++){
+      const t = (lo+hi)/2;
+      for(const k in pose) pose[k] = lastValidPose[k] + (want[k]-lastValidPose[k])*t;
+      applyPose();
+      if(poseBlocked()) hi = t; else lo = t;
+    }
+    for(const k in pose) pose[k] = lastValidPose[k] + (want[k]-lastValidPose[k])*lo;
+    applyPose();
+    if(poseBlocked()){                        // ni siquiera t=lo sirve: revertir
+      Object.assign(pose, lastValidPose); applyPose();
+    } else {
+      lastValidPose = {...pose};
+    }
+    return true;
+  }
+
+  for(const k in sl){
+    const el=document.getElementById(sl[k]); if(!el) continue;
+    el.addEventListener('input', e=>{
+      const prev = pose[k];
+      const want = parseFloat(e.target.value);
+      pose[k] = want; applyPose();
+      if(collisionReady && poseBlocked()){
+        // el evento pudo saltar varios grados: bisección entre el último
+        // valor válido y el pedido para aterrizar en el límite exacto
+        let lo = prev, hi = want;
+        for(let i=0;i<10;i++){
+          const mid = (lo+hi)/2;
+          pose[k] = mid; applyPose();
+          if(poseBlocked()) hi = mid; else lo = mid;
+        }
+        pose[k] = Math.round(lo*2)/2;   // redondeo a 0.5° (paso del slider)
+        applyPose();
+        if(collisionReady && poseBlocked()){ pose[k] = Math.floor(lo); applyPose(); }
+        e.target.value = pose[k];
+      }
+      lastValidPose = {...pose};   // los sliders ya clampan: esta pose es válida
+      document.getElementById('t-src').textContent = 'manual';
+      syncLabels();
+    });
+  }
+
+  // El navegador restaura los valores de los <input> tras F5, pero la pose
+  // arranca en home: forzar coherencia al iniciar y al restaurar la página.
+  syncSliders(); syncLabels();
+  window.addEventListener('pageshow', ()=>{ syncSliders(); syncLabels(); });
+
+  document.getElementById('b-home').onclick = ()=>{
+    pose.pan=pose.tilt=pose.armL=pose.armLtw=pose.armR=pose.armRtw=0;
+    applyPose(); syncSliders(); syncLabels();
+    document.getElementById('t-src').textContent='manual';
+  };
+  let waving=null;
+  /* Saludo demo con transición: en vez de "teletransportarse" a la pose
+     inicial del saludo, interpola desde la pose actual (ramp-in, 900 ms,
+     smoothstep), oscila, y al detenerse regresa suavemente a home
+     (ramp-out). Todo el trayecto queda dentro del espacio admisible. */
+  const RAMP_MS = 900;
+  const easeS = t=>t*t*(3-2*t);                    // smoothstep
+  const WAVE_CENTER = {pan:0, tilt:8, armL:0, armLtw:0, armR:30, armRtw:50};
+  function rampOutToHome(){
+    setEmotion('neutral');
+    const start = {...pose}, t0 = performance.now();
+    const iv = setInterval(()=>{
+      const k = Math.min((performance.now()-t0)/RAMP_MS, 1), e = easeS(k);
+      for(const key in pose) pose[key] = start[key]*(1-e);
+      applyPose(); syncSliders(); syncLabels();
+      if(k>=1) clearInterval(iv);
+    },33);
+  }
+  document.getElementById('b-wave').onclick = ()=>{
+    if(waving){ clearInterval(waving); waving=null; rampOutToHome(); return; }
+    setEmotion('feliz');
+    const start = {...pose};
+    let phase='in', t0=performance.now();
+    waving=setInterval(()=>{
+      const now = performance.now();
+      if(phase==='in'){
+        const k = Math.min((now-t0)/RAMP_MS, 1), e = easeS(k);
+        for(const key in pose) pose[key] = start[key] + (WAVE_CENTER[key]-start[key])*e;
+        if(k>=1){ phase='wave'; t0=now; }
+      }else{
+        const t = (now-t0)/1000*3.64;              // misma cadencia que antes
+        // Saludo dentro del espacio admisible (mapa 2D): brazo derecho al
+        // frente (giro+ = adelante, convención unificada) y balanceo moderado
+        pose.armRtw = 50 + Math.sin(t*4)*8;        // 42..58 (adelante)
+        pose.armR   = 30 + Math.sin(t*1.2)*12;     // 18..42 (bal.máx≈55 en ese giro)
+        pose.pan    = Math.sin(t*1.5)*12;
+        pose.tilt   = 8 + Math.sin(t*1.5)*5;
+      }
+      applyPose(); syncSliders(); syncLabels();
+    },33);
+  };
+
+  /* ---------- gesto de cambio de página ----------
+     Al avanzar/retroceder una página del libro álbum, el operador NO baja
+     la mirada (se vería antinatural frente al público) — en su lugar, el
+     ROBOT hace un gesto de lectura: barrido de cabeza hacia la pantalla
+     externa (apoyada en las patas). Ver Cap. 5: pantalla 15.6", top del
+     panel en Z≈131.9mm, bbox Y≈157–162mm (coords Fusion, Telmeow_Split v11).
+
+     Cálculo geométrico (pivote de tilt en Z=215.1mm, Y=-10.9mm — ver PIVOTS):
+       Δforward ≈ 170.9mm · Δdown-al-centro-pantalla ≈ 180.4mm
+       → ángulo para apuntar al CENTRO de la pantalla ≈ 46.5° hacia abajo
+     El límite mecánico de tilt es -39° (barrido con colisión BVH), que
+     insuficiente para el centro, pero SÍ alcanza la franja superior del
+     panel (a -39° la mirada cae ~28% del borde superior). Por eso este
+     gesto es una mirada ESTILIZADA, no un apuntado literal: usa -35° (deja
+     margen de seguridad de 4° respecto al límite duro), que intersecta la
+     franja superior de la pantalla externa — defendible como "el gesto de
+     la cabeza se dirige hacia la pantalla", no como "el robot enfoca el
+     centro exacto del contenido". Documentar así en la tesis. ---- */
+  /* Valores calibrados visualmente contra la pantalla externa (ago-2026).
+     tilt −30°: deja 9° de margen respecto al límite mecánico (−39°) y sigue
+     intersectando el panel. pan ±35°: el borde del monitor queda a ~45.8°
+     del eje de la cabeza (semiancho 172.7 mm a 168 mm de distancia), así
+     que 35° recorre ~76 % del ancho de la página — lectura de barrido, no
+     giro completo. 700 ms por tramo (1.4 s total): cadencia pausada, acorde
+     al ritmo de una sesión de mediación de lectura. */
+  const PAGE_GESTURE = { panSweep:35, tiltDown:-30, downMs:700, upMs:700 };
+  let pageGestureActive = false, liveTiltPanBuffer = null;
+
+  function playPageGesture(dir){
+    if(pageGestureActive) return;                    // ignora superpuestos
+    pageGestureActive = true;
+    const startPan = pose.pan, startTilt = pose.tilt;
+    // avanzar → barrido izq→der (pan+); retroceder → der→izq (pan-)
+    const sign = dir==='page_prev' ? -1 : 1;
+    const mid = { pan: sign*PAGE_GESTURE.panSweep, tilt: PAGE_GESTURE.tiltDown };
+    const t0 = performance.now();
+    const iv = setInterval(()=>{
+      const el = performance.now()-t0;
+      if(el <= PAGE_GESTURE.downMs){
+        const k = easeS(el/PAGE_GESTURE.downMs);
+        pose.pan  = startPan  + (mid.pan -startPan )*k;
+        pose.tilt = startTilt + (mid.tilt-startTilt)*k;
+      } else if(el <= PAGE_GESTURE.downMs+PAGE_GESTURE.upMs){
+        const k = easeS((el-PAGE_GESTURE.downMs)/PAGE_GESTURE.upMs);
+        // regresa al último valor LIVE recibido por MQTT durante el gesto
+        // (no a home): la teleoperación de cabeza nunca se detuvo en
+        // realidad, solo se pausó su aplicación mientras dura el gesto.
+        const target = liveTiltPanBuffer || {pan:startPan, tilt:startTilt};
+        pose.pan  = mid.pan  + (target.pan -mid.pan )*k;
+        pose.tilt = mid.tilt + (target.tilt-mid.tilt)*k;
+      } else {
+        clearInterval(iv);
+        pageGestureActive = false;
+        // Snap exacto al destino. Sin esto queda un residuo: el último tick
+        // del setInterval cae con el<upMs, así que k<1 y la interpolación
+        // nunca alcanza el 100%. El error es de centésimas de grado, pero
+        // como cada gesto arranca desde pose.pan (ya desviada), se ACUMULA
+        // gesto tras gesto y tras muchos cambios de página se hace visible.
+        const end = liveTiltPanBuffer || {pan:startPan, tilt:startTilt};
+        pose.pan = end.pan; pose.tilt = end.tilt;
+        liveTiltPanBuffer = null;
+      }
+      applyPose(); syncSliders(); syncLabels();
+    },33);
+  }
+  /* ---------- pantalla externa (banco de prueba del gesto de página) ----
+     Monitor de 15.6" 1080p apoyado en las aberturas de las patas. Cotas
+     medidas en Fusion (Telmeow_Split v11, ocurrencia Pantalla_Externa v4:1):
+     panel de 345.4 × 194.3 mm (16:9), base en Y≈157.5..162.5 mm, extensión
+     en Z de −62.4 a 131.9 mm. Se modela como plano texturado con canvas —
+     no requiere el STL y permite pintar contenido de página sincronizado
+     con el gesto de cabeza, que es lo que se quiere calibrar. ---- */
+  const EXTSCR = { w:345.4, h:194.3, y:160.0, zTop:131.9, zBot:-62.4 };
+  let extCanvas=null, extCtx=null, extTex=null, extMesh=null;
+  let pageNum = 1, pageTotal = 12;
+
+  function initExtScreen(){
+    extCanvas = document.createElement('canvas');
+    extCanvas.width = 960; extCanvas.height = 540;      // 16:9, proxy de 1920×1080
+    extCtx = extCanvas.getContext('2d');
+    extTex = new THREE.CanvasTexture(extCanvas);
+    extTex.colorSpace = THREE.SRGBColorSpace;
+    // Misma corrección que en la pantalla de ojos: con el plano rotado
+    // X−90° la imagen queda invertida en vertical (flipY) y espejada en
+    // horizontal (el observador frontal está en +Y mirando hacia −Y, así
+    // que el +X local cae a la izquierda de pantalla).
+    extTex.flipY = false;
+    extTex.wrapS = THREE.RepeatWrapping;
+    extTex.repeat.x = -1;
+    extTex.offset.x = 1;
+
+    extMesh = new THREE.Group();
+    const face = new THREE.Mesh(
+      new THREE.PlaneGeometry(EXTSCR.w, EXTSCR.h),
+      new THREE.MeshBasicMaterial({map:extTex}));
+    face.rotation.x = -Math.PI/2;                       // normal hacia +Y (frente)
+    face.position.y = 1.5;
+    // carcasa trasera: un monitor real no es legible por detrás, se ve su
+    // chasis. Evita que el panel "desaparezca" al orbitar la escena.
+    const back = new THREE.Mesh(
+      new THREE.PlaneGeometry(EXTSCR.w+10, EXTSCR.h+10),
+      new THREE.MeshStandardMaterial({color:0x23262e, roughness:0.6}));
+    back.rotation.x = Math.PI/2;                        // normal hacia −Y (atrás)
+    extMesh.add(face); extMesh.add(back);
+    extMesh.position.set(0, EXTSCR.y, (EXTSCR.zTop+EXTSCR.zBot)/2);
+    scene.add(extMesh);
+    drawPage();
+  }
+
+  function drawPage(){
+    if(!extCtx) return;
+    const W=extCanvas.width, H=extCanvas.height, c=extCtx;
+    // páginas sintéticas de colores distintos: sirven para ver de un vistazo
+    // que el cambio ocurrió y en qué momento respecto al gesto de cabeza
+    const hue = (pageNum*47) % 360;
+    c.fillStyle = `hsl(${hue}, 45%, 88%)`; c.fillRect(0,0,W,H);
+    c.fillStyle = `hsl(${hue}, 55%, 62%)`; c.fillRect(0,0,W,68);
+    c.fillStyle = '#1b1d24';
+    c.font = 'bold 40px system-ui, sans-serif';
+    c.fillText('Cuento — página '+pageNum+' / '+pageTotal, 32, 48);
+    // "ilustración" y bloques de texto simulados
+    c.fillStyle = `hsl(${(hue+180)%360}, 50%, 70%)`;
+    c.fillRect(60, 110, 380, 300);
+    c.fillStyle = 'rgba(27,29,36,.75)';
+    for(let i=0;i<7;i++){
+      const y = 130+i*40, w = 380 - (i%3)*70;
+      c.fillRect(490, y, w, 16);
+    }
+    extTex.needsUpdate = true;
+  }
+
+  function changePage(dir){
+    if(dir==='page_next' && pageNum < pageTotal) pageNum++;
+    else if(dir==='page_prev' && pageNum > 1) pageNum--;
+    else return false;
+    drawPage();
+    return true;
+  }
+  // Botones de prueba manual, sin depender del pipeline Python/MQTT.
+  // El cambio de página y el gesto salen del MISMO evento — igual que hará
+  // el panel del operador vía MQTT, para que la sincronía sea representativa.
+  document.getElementById('b-page-next')?.addEventListener('click', ()=>{
+    if(changePage('page_next')) playPageGesture('page_next');
+  });
+  document.getElementById('b-page-prev')?.addEventListener('click', ()=>{
+    if(changePage('page_prev')) playPageGesture('page_prev');
+  });
+
+  document.getElementById('c-extscr')?.addEventListener('change', e=>{
+    if(extMesh) extMesh.visible = e.target.checked;
+  });
+
+  /* ---------- MQTT over WebSocket ----------
+     Usa mqtt.js si está disponible; si no, cae a WebSocket crudo
+     (el servidor debe emitir el JSON de pose directamente). ------ */
+  const dot=document.getElementById('mq-dot'), state=document.getElementById('mq-state');
+  const errBox=document.getElementById('mq-err');
+  let client=null, rawWS=null, lastMsg=0, rateAcc=[];
+
+  function setLink(s,msg){ dot.className='dot'+(s==='on'?' on':s==='wait'?' wait':''); state.textContent=msg; }
+  function showErr(m){ errBox.style.display='block'; errBox.textContent=m; }
+  function clearErr(){ errBox.style.display='none'; }
+
+  function onPoseMsg(txt){
+    try{
+      const o=JSON.parse(txt);
+      // pan/tilt: si hay un gesto de página en curso, el mensaje LIVE se
+      // guarda en buffer en vez de aplicarse — el gesto es dueño temporal
+      // de esos dos DOF y hace el handoff suave al terminar (ver playPageGesture)
+      if(typeof o.pan==='number' || typeof o.tilt==='number'){
+        if(pageGestureActive){
+          liveTiltPanBuffer = { pan: o.pan ?? (liveTiltPanBuffer?.pan ?? pose.pan),
+                                 tilt: o.tilt ?? (liveTiltPanBuffer?.tilt ?? pose.tilt) };
+        } else {
+          if(typeof o.pan==='number')  pose.pan  = o.pan;
+          if(typeof o.tilt==='number') pose.tilt = o.tilt;
+        }
+      }
+      ['armL','armLtw','armR','armRtw'].forEach(k=>{ if(typeof o[k]==='number') pose[k]=o[k]; });
+      if(typeof o.emo==='string') setEmotion(o.emo);
+      else if(typeof o.emotion==='string') setEmotion(o.emotion);
+      if(o.gesture==='page_next' || o.gesture==='page_prev'){
+        changePage(o.gesture);            // mantiene la maqueta en sincronía
+        playPageGesture(o.gesture);
+      }
+      if(typeof o.page==='number'){ pageNum = o.page; drawPage(); }
+      // Segunda capa de filtro: el publisher Python ya recortó por tabla,
+      // pero aquí se verifica la pose COMPLETA contra la geometría real.
+      const clipped = clampPoseExternal();
+      syncSliders(); syncLabels();
+      if(clipped) ultimoRecorte = performance.now();
+      pintarInterferencia();   // único escritor de #t-col, ver su comentario
+      document.getElementById('t-src').textContent='MQTT';
+      const now=performance.now();
+      if(lastMsg){ document.getElementById('t-lat').textContent=(now-lastMsg).toFixed(0)+' ms';
+        rateAcc.push(now); rateAcc=rateAcc.filter(t=>now-t<1000);
+        document.getElementById('t-rate').textContent=rateAcc.length.toFixed(1)+' Hz'; }
+      lastMsg=now;
+    }catch(e){ /* mensaje no-JSON, ignorar */ }
+  }
+
+  document.getElementById('b-connect').onclick = async ()=>{
+    clearErr();
+    const url=document.getElementById('mq-url').value.trim();
+    const topic=document.getElementById('mq-topic').value.trim();
+    setLink('wait','Conectando…');
+    // intenta cargar mqtt.js bajo demanda
+    if(!window.mqtt){
+      await new Promise(r=>{ const s=document.createElement('script');
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.5/mqtt.min.js';
+        s.onload=r; s.onerror=r; document.head.appendChild(s); });
+    }
+    try{
+      if(window.mqtt){
+        client=window.mqtt.connect(url);
+        client.on('connect',()=>{ setLink('on','Conectado · '+topic); client.subscribe(topic); });
+        client.on('message',(t,p)=>onPoseMsg(p.toString()));
+        client.on('error',e=>{ showErr('MQTT: '+e.message); setLink('off','Error'); });
+        client.on('close',()=>setLink('off','Sin conexión'));
+      } else {
+        // fallback WebSocket crudo
+        rawWS=new WebSocket(url);
+        rawWS.onopen=()=>setLink('on','WebSocket · crudo');
+        rawWS.onmessage=ev=>onPoseMsg(ev.data);
+        rawWS.onerror=()=>{ showErr('No se pudo abrir WebSocket en '+url); setLink('off','Error'); };
+        rawWS.onclose=()=>setLink('off','Sin conexión');
+      }
+    }catch(e){ showErr(e.message); setLink('off','Error'); }
+  };
+  document.getElementById('b-disconnect').onclick=()=>{
+    if(client){client.end(true);client=null;}
+    if(rawWS){rawWS.close();rawWS=null;}
+    setLink('off','Sin conexión');
+    document.getElementById('t-lat').textContent='— ms';
+    document.getElementById('t-rate').textContent='0.0 Hz';
+    lastMsg=0; rateAcc=[];
+  };
+
+  /* ---------- loop ---------- */
+  let fpsT=performance.now(), frames=0;
+  function resize(){
+    const w=host.clientWidth, h=host.clientHeight;
+    cam.aspect=w/h; cam.updateProjectionMatrix(); renderer.setSize(w,h);
+  }
+  window.addEventListener('resize',resize); resize();
+
+  function tick(){
+    requestAnimationFrame(tick);
+    controls.update();
+    const nowT = performance.now();
+    tickEyeFade(nowT);
+    renderer.render(scene,cam);
+    if(poseDirty && collisionReady && nowT - lastColCheck > 120){
+      poseDirty = false; lastColCheck = nowT;
+      checkCollisions();
+    }
+    frames++; const n=performance.now();
+    if(n-fpsT>=500){ document.getElementById('t-fps').textContent=Math.round(frames*1000/(n-fpsT))+' fps'; frames=0; fpsT=n; }
+  }
+  tick(); applyPose(); syncLabels();
+  </script>
+</body>
+</html>

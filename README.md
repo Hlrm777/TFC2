@@ -210,7 +210,7 @@ python -m telmeow_teleop.publisher
 bloquean por CORS y la escena se queda en «Inicializando escena…» para siempre.
 
 ```bash
-cd D:\02_Tesis\01_Principales\04_TelmeowViewer && python -m http.server 8000
+python -m http.server 8000 --directory telmeow_viewer
 ```
 
 Luego abrir `http://localhost:8000/telmeow_viewer.html`.

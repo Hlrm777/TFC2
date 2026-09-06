@@ -1,7 +1,8 @@
 # Telmeow — Plan maestro de implementación (v2)
 
 Repositorio: `Hlrm777/TFC2` · Código: `D:\02_Tesis\01_Principales\02_Codigo`
-Viewer: `D:\02_Tesis\01_Principales\04_TelmeowViewer\telmeow_viewer.html`
+Viewer: `telmeow_viewer/telmeow_viewer.html`, dentro del repositorio desde el
+2026-09-06 (antes vivía suelto en `..\04_TelmeowViewer`, sin control de versiones)
 
 **Versión 2 · 2026-08-30, revisada el 2026-09-05.** Reemplaza a la v1 y absorbe
 los documentos de hallazgos y de anexo que existieron entre medias: **este
@@ -25,9 +26,10 @@ Tres cosas de esa jornada cambian lo que este documento decía:
   levantaba la cabeza y el robot la bajaba. Corregido en la raíz.
 - **H26** — `limites.csv` queda **descartada entera**, no releída. Las ganancias
   provisionales que salían de ella se retiran.
-- **H27** — el techo de captura de **~15 fps queda en duda**: el pipeline real
-  midió 30.0 fps sin frames duplicados. La limitación de tasa que este plan
-  declaraba **no se puede citar hasta resolverlo** (§4.0.4).
+- **H27** — **el techo de ~15 fps no existe**: lo que limita la captura es la
+  luz, vía exposición. La misma cámara mide 30 fps con buena iluminación y 10
+  con poca. La limitación de tasa se retira y pasa a ser una condición de
+  operación (§4.0.4).
 
 Cómo leerlo:
 
@@ -110,6 +112,9 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   └── main.py               ⬜ P7
 ├── raspberry/
 │   └── story_display.py      ⬜ P11
+├── telmeow_viewer/           ✅ el visor 3D y sus 40 STL · en git desde el 2026-09-06
+│   ├── telmeow_viewer.html   la autoridad sobre el rig y los límites
+│   └── *.stl, *.png          mallas de Fusion y texturas de los ojos
 ├── legacy/                   ✅ los scripts originales, intactos
 │   ├── MQTT/
 │   └── haarcascade_frontalface_default.xml   (huérfano, ver §0.6)
@@ -163,20 +168,19 @@ Correcciones respecto a la v1, verificadas en `telmeow_viewer.html:987-1023`:
 
 Ángulos en grados (float), sin cuantizar.
 
-**Sobre la tasa objetivo. ⚠️ CUESTIÓN ABIERTA, no citar todavía.** El plan
-declara 20 Hz y el publisher los sostiene sin problema —verificado con el brazo
-oscilando en el visor—. Lo que está en el aire es si la cámara da para tanto.
+**Sobre la tasa objetivo.** El plan declara 20 Hz, el publisher los sostiene
+—verificado con el brazo oscilando en el visor— y **la cámara también da para
+tanto**: la sesión de calibración del 2026-09-06 corrió a **30 fps sostenidos**
+durante 142 s, sin un solo frame duplicado.
 
-- Una medición con `tools/list_cameras.py` dio un techo de **~15 fps**, y de ahí
-  salió la limitación de «~15 Hz de extremo a extremo» que este plan venía
-  declarando.
-- La sesión de calibración del 2026-09-06 corrió a **30.0 fps con cero frames
-  duplicados**, medido sobre el CSV crudo. Si eso es correcto, los 20 Hz de
-  publicación **sí son alcanzables** y la limitación desaparece.
+La limitación de «~15 Hz por hardware» que este plan declaró durante un mes
+**queda retirada**: no era un techo del sensor sino una medición tomada con poca
+luz. Lo que limita la captura es la **exposición**, y por tanto la iluminación de
+la sala — la misma cámara da 30 fps o 10 según la luz (**H27**, §4.0.4).
 
-La hipótesis que reconcilia las dos —el `fourcc` MJPG, que el pipeline aplica y
-la herramienta de medición no— está en §4.0.4 como **H27**, sin confirmar.
-**Resolverlo antes de escribir cualquier cifra de tasa en el documento.**
+Lo que sí hay que declarar en la tesis es la **condición**: la tasa se sostiene
+con iluminación suficiente, y la cifra que se reporte debe ir acompañada de las
+condiciones en que se midió.
 
 **Sobre la latencia declarada.** El indicador `t-lat` del visor está
 honestamente etiquetado como «proxy», pero mide el **intervalo entre mensajes**,
@@ -1244,16 +1248,15 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    se hizo con los demás DOF en home. Por eso existe la segunda capa de recorte
    en el visor — ver §5, que lo convierte en un resultado en vez de un problema.
 
-9. **La tasa del sistema la limita la cámara, no el algoritmo** — ⚠️ **y cuánto
-   la limita está por resolver.** Que el cuello de botella es el sensor y no el
-   método sigue en pie: MediaPipe cuesta 5-7 ms por frame, el 7 % del
-   presupuesto. Lo que está en duda es la cifra. Una medición dio ~15 fps
-   (§4.0.4) y la sesión de calibración del pipeline real dio **30.0 fps sin un
-   solo frame duplicado**; la hipótesis que las reconcilia es el formato MJPG
-   (**H27**), sin confirmar. **Hasta resolverlo no se declara ninguna
-   limitación de tasa.** Lo que no cambia en ningún caso es el argumento de
-   fondo: sea cual sea el techo, lo pone el equipo de pruebas y una cámara mejor
-   lo levanta sin tocar una línea, así que el diseño no depende de ella.
+9. **La tasa de captura depende de la ILUMINACIÓN del puesto, no del
+   algoritmo.** El cuello de botella no es el método —MediaPipe cuesta 5-7 ms
+   por frame, el 7 % del presupuesto— ni resultó ser el sensor: es la
+   exposición. La misma cámara, con el mismo código, mide **30 fps con buena luz
+   y 10 con poca** (**H27**, §4.0.4). Con la iluminación de la sesión de
+   calibración la captura sostuvo 30 fps durante 142 s, de sobra para los 20 Hz
+   de publicación. **Lo que se declara no es un techo, es una condición de
+   operación**, y la cifra reportada tiene que ir con las condiciones en que se
+   midió.
 
 10. **El mapeo operador → robot está amplificado, y eso amplifica el temblor.**
     La ganancia > 1 es necesaria porque el campo de visión del operador sobre su
@@ -1357,31 +1360,56 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    tampoco** — quedaría en ~15 Hz. MediaPipe no tiene culpa: cuesta 5-7 ms por
    frame, el 7 % del tiempo.
 
-   ### ⚠️ Esa conclusión está EN DUDA desde el 2026-09-06 — no citarla todavía
+   ### ⚠️ CORREGIDO el 2026-09-06: no hay techo fijo, lo pone la LUZ
 
-   **Lo medido, sin interpretar.** La sesión de calibración del P4.2 corrió a
-   **30.0 fps con cero frames duplicados**: ni uno solo de los 4261 pares
-   consecutivos del CSV repite ángulo, así que no son frames repetidos, son 30
-   frames **distintos** por segundo. La sesión con la otra cámara marcó 30.8.
-   Comprobado sobre el registro crudo, no sobre el contador del HUD.
+   **No es una limitación del sensor. Es la exposición, y por tanto la
+   iluminación de la sala.** La misma cámara, con el mismo formato, la misma
+   resolución y el mismo código, mide **30 fps o 10 fps según la luz que haya**.
 
-   **Hipótesis, localizada pero SIN confirmar** (**H27**): `CameraConfig.fourcc`
-   vale `"MJPG"` por defecto y el demo lo aplica **antes** de la resolución
-   (`config.py:268`); **`tools/list_cameras.py` no toca el formato**, así que
-   midió con el formato crudo de la cámara. A 640x480 sin comprimir, el bus USB
-   no da para 30 fps; con MJPG sí. Encaja con todo lo observado, pero **choca
-   con lo que dice el punto anterior** —que se probó MJPG y no cambiaba nada— y
-   las dos cosas no pueden ser ciertas a la vez.
+   **Evidencia 1 — la sesión de calibración corrió a 30 fps sostenidos.** 4262
+   frames en 142.1 s, con **cero frames duplicados** en los 4261 pares
+   consecutivos. Y el reparto de periodos entre frames lo confirma por una vía
+   independiente: mediana de **32.1 ms**, p95 de 48.4 ms y **ni un solo periodo
+   por encima de 90 ms**. Si la cámara hubiera estado entregando 10 fps,
+   `read()` habría bloqueado ~100 ms por frame y esos periodos aparecerían.
 
-   **Qué hacer con esto.** No se ha tocado nada: ni el código de medición ni la
-   configuración, que funciona. Pero **la limitación de ~15 Hz no se puede citar
-   en el documento mientras esté así**, porque la medición del pipeline real
-   dice lo contrario. Resolverlo cuesta un comando —`list_cameras.py --medir`
-   con y sin MJPG, misma luz, misma cámara— y hay que hacerlo antes de escribir
-   esa limitación.
+   **Evidencia 2 — la misma cámara, esa misma tarde, daba 10 fps.** Medido
+   replicando la secuencia exacta del demo (formato antes que resolución) y con
+   12 s de calentamiento: 10.0 fps en la integrada, 12.5 en la externa. Con
+   brillo medio de 84/255 y 10/255 respectivamente.
 
-   Si se confirma, la noticia es buena: el objetivo de **20 Hz de publicación
-   vuelve a ser alcanzable** y la tesis pierde una limitación en vez de ganarla.
+   **Dos hipótesis descartadas por el camino**, que conviene no volver a probar:
+
+   - **El formato NO es la causa** (esto refuta la **H27** tal como se formuló).
+     Se le añadió a `list_cameras.py` la opción `--fourcc`, que ahora mide con
+     MJPG por defecto igual que el pipeline, y **la cifra no cambió**: sigue
+     dando 10-12.5 fps. El arreglo de la herramienta se conserva igualmente,
+     porque medir en una configuración distinta de la de producción es un error
+     de método aunque en este caso no fuera la causa.
+   - **El calentamiento tampoco.** A los 12 s de rodar sigue en 10 fps.
+
+   La exposición manual no se pudo forzar para cerrar el círculo: esa cámara no
+   acepta `CAP_PROP_EXPOSURE` por DSHOW y devuelve imagen negra. El mecanismo
+   —poca luz, exposición larga, menos frames por segundo— es el que documenta el
+   propio `fps_reales()` de la herramienta, y es estándar en webcams USB.
+
+   **Consecuencias, que son tres y ninguna mala:**
+
+   1. **La limitación de «~15 Hz por hardware» se retira.** No existe tal techo:
+      era una medida tomada con poca luz y elevada a propiedad del equipo.
+   2. **Los 20 Hz de publicación son alcanzables**, y de hecho la sesión de
+      calibración los superó con margen. Lo que hay que declarar en la tesis no
+      es un techo sino una **condición de operación**.
+   3. **La iluminación pasa a ser requisito del puesto**, junto a la distancia al
+      monitor. Es defendible y hasta esperable: un sistema de visión que pide luz
+      suficiente no sorprende a nadie, y el número que se reporte tiene que ir
+      con las condiciones en que se midió.
+
+   **Lo único que queda por medir**, y solo lo puede hacer el operador: repetir
+   `list_cameras.py --medir` con la sala iluminada como en la sesión de
+   calibración, y anotar los fps junto al brillo. Con eso se puede escribir «a
+   partir de X de brillo medio, la captura sostiene 30 fps», que es una frase
+   mucho más fuerte que cualquiera de las dos que este documento llegó a tener.
 
 5. **MSMF se cuelga al abrir, y falla a 720p.** `cv2.CAP_MSMF` bloquea
    indefinidamente al abrir algunas webcams. El remedio es la variable
@@ -1443,9 +1471,18 @@ instancia del repositorio en otro puerto TCP, apuntando el pipeline con
 2. `& "C:\Program Files\mosquitto\mosquitto.exe" -c mosquitto.conf -v` — deben
    aparecer **cuatro** líneas `Opening ... listen socket`, dos por puerto.
 3. `python -m telmeow_teleop.publisher` — pose oscilante, sin cámara.
-4. Servir el visor: `python -m http.server 8000` desde `04_TelmeowViewer`, abrir
-   `http://localhost:8000/telmeow_viewer.html`. **NUNCA con `file://`** — los
-   módulos ES se bloquean por CORS.
+4. Servir el visor, desde la raíz del repositorio:
+
+   ```
+   python -m http.server 8000 --directory telmeow_viewer
+   ```
+
+   y abrir `http://localhost:8000/telmeow_viewer.html`. **NUNCA con `file://`**
+   — los módulos ES se bloquean por CORS. `--directory` evita tener que moverse
+   de carpeta, que es cómodo porque el tracker se lanza desde la raíz. Si sale
+   un 404, casi siempre es que el servidor se lanzó desde otro sitio: sirve la
+   carpeta desde la que se arrancó, y los STL se piden con rutas relativas al
+   HTML.
 5. Conectar el visor a `ws://localhost:9001`, topic `telmeow/teleop/pose`. El
    brazo debe oscilar. ✅ **verificado**
 6. `python tools/mqtt_monitor.py` para ver el JSON crudo.
@@ -1506,14 +1543,14 @@ equivalente en Python puro, sin privilegios de administrador.
   Hoy la respuesta honesta es que no se midieron: el indicador mide el intervalo
   entre mensajes. Ver §3.2 punto 2.
 
-- **«¿A qué tasa va su sistema?»** *(pendiente de cerrar, ver §4.0.4)*
-  El transporte MQTT sostiene 20 Hz, verificado. El techo de captura está sin
-  resolver: una medición dio 15 fps y la sesión de calibración del pipeline dio
-  30 fps sin frames duplicados. **No llevar esta pregunta al jurado sin haberla
-  cerrado antes**: la respuesta correcta es un número medido, y ahora mismo hay
-  dos. Lo que sí es defendible en cualquier caso es que el cuello de botella es
-  el sensor y no el método —MediaPipe consume 5-7 ms por frame, el 7 % del
-  presupuesto— y que una cámara mejor levanta el techo sin tocar una línea.
+- **«¿A qué tasa va su sistema, y de qué depende?»**
+  El transporte MQTT sostiene 20 Hz, verificado, y la captura sostuvo 30 fps
+  durante los 142 s de la sesión de calibración, sin un solo frame duplicado. Lo
+  interesante es de qué depende: **de la iluminación**. La misma cámara da 10 fps
+  con poca luz, porque alarga la exposición. No es una limitación del método
+  —MediaPipe consume 5-7 ms por frame, el 7 % del presupuesto— sino una
+  condición de operación del puesto, igual que la distancia al monitor. Se
+  reporta la tasa junto con las condiciones en que se midió.
 
 - **«¿Por qué usa una ganancia mayor que 1? ¿No está exagerando el
   movimiento?»** *(nueva)*
@@ -1732,10 +1769,10 @@ tener un solo escritor, `pintarInterferencia()`, llamado desde `checkCollisions(
 y desde el manejador de MQTT. Antes escribían los dos directamente y el campo
 parpadeaba entre `libre` y `sin contacto`.
 
-⚠️ **`04_TelmeowViewer` no está bajo control de versiones.** Antes de tocarlo se
-dejó una copia `telmeow_viewer.html.bak-20260906-120706` en esa misma carpeta.
-Ponerlo en git es una tarea pendiente que no cuesta nada y evita el próximo
-susto.
+✅ **El visor ya está bajo control de versiones.** El 2026-09-06 se movió a
+`telmeow_viewer/` dentro del repositorio, con sus 40 STL y las texturas de los
+ojos. Antes vivía suelto en `..\04_TelmeowViewer` y cualquier edición era
+irreversible.
 
 ## 7.7 Sobre el head tracker (H17, H18)
 
@@ -1889,13 +1926,24 @@ hasta que dos sesiones nuevas la contradijeron. El dato bueno costó diez minuto
 de grabación; la relectura costó más que eso y dejó una cifra equivocada por
 medio. **Cuando el protocolo fue el equivocado, se vuelve a medir.**
 
-**H27 — El `fourcc` como explicación de los 15 fps, sin confirmar.** Está
-detallado en §4.0.4. La forma general del hallazgo, que es la que interesa:
-**una herramienta de diagnóstico que no replica la configuración de producción
-induce a error con toda la autoridad de una medición.** `list_cameras.py` mide
-sin fijar el formato; el pipeline fija MJPG antes de la resolución. Si eso es lo
-que separa 15 de 30 fps, la limitación de tasa que este plan declaró durante un
-mes nunca existió.
+**H27 — El techo de captura lo pone la luz, no el sensor.** Detallado en §4.0.4
+con las dos mediciones. El resumen: la misma cámara, con el mismo código, da
+**30 fps con buena iluminación y 10 con poca**, porque la exposición larga es lo
+que limita. La «limitación de ~15 Hz por hardware» que este plan declaró durante
+un mes **nunca existió**: era una medición tomada con poca luz y ascendida a
+propiedad del equipo.
+
+Dos lecciones, y la segunda es la que más va a doler si se olvida:
+
+- **Una medición no es una propiedad.** «El sensor produce a 15 fps» era una
+  inferencia, no un dato; el dato era «esta tarde, con esta luz, salieron 15».
+  La diferencia no se ve al escribirla y sí al citarla en la tesis.
+- **Una herramienta de diagnóstico que no replica la configuración de producción
+  induce a error con toda la autoridad de una medición.** `list_cameras.py`
+  medía sin fijar el formato mientras el pipeline fija MJPG. Resultó **no** ser
+  la causa aquí —se comprobó, y la cifra no cambia—, pero el defecto de método
+  era real y está corregido: la herramienta ahora mide con el formato del
+  pipeline por defecto y acepta `--fourcc` para comparar.
 
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
@@ -1927,7 +1975,7 @@ mes nunca existió.
 | **H24** | En una postura sostenida, el percentil es el dato y el extremo es ruido | P4.4, §7.9 |
 | **H25** | El temblor crudo y el filtrado **ordenan las cámaras al revés** | §4.0.4, §7.10 |
 | **H26** | Una grabación con el protocolo equivocado no se rescata releyéndola | P4.4, §7.10 |
-| **H27** | *(en duda)* El `fourcc` podría explicar los 15 fps frente a los 30 medidos | §4.0.4, §7.10 |
+| **H27** | El techo de captura lo pone **la luz**, no el sensor: 30 fps con buena iluminación, 10 con poca | §0.4, §4.0.4, §7.10 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la
 investigación de la cámara que salió de él. H19 y H20 son **correcciones a

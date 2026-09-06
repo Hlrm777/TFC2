@@ -77,8 +77,16 @@ def fps_reales(cap, segundos: float = 3.0) -> tuple[float, float]:
     )
 
 
-def probar(indice: int, backend: int, medir: bool = False) -> dict | None:
-    """Abre una cámara y averigua qué resoluciones acepta realmente."""
+def probar(
+    indice: int, backend: int, medir: bool = False, fourcc: str = ""
+) -> dict | None:
+    """Abre una cámara y averigua qué resoluciones acepta realmente.
+
+    ``fourcc`` es el formato en que se le pide entregar los frames, y **cambia
+    la tasa medida**, no solo la calidad: sin comprimir, a 640x480 el bus USB no
+    da para 30 fps. Por eso se mide con el mismo formato que usa el pipeline
+    (``CameraConfig.fourcc``, MJPG) — medir con otro es medir otra cosa.
+    """
     cap = cv2.VideoCapture(indice, backend)
     if not cap.isOpened():
         cap.release()
@@ -118,6 +126,10 @@ def probar(indice: int, backend: int, medir: bool = False) -> dict | None:
             # existe justamente para descubrir esas incompatibilidades, así que
             # las anota en vez de morirse.
             try:
+                # El formato ANTES que la resolución, igual que en el demo:
+                # pedirlo después no siempre se aplica.
+                if fourcc:
+                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, ancho)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, alto)
                 cap.set(cv2.CAP_PROP_FPS, 30)
@@ -147,9 +159,20 @@ def main(argv: list[str] | None = None) -> int:
              "resolución. Tarda unos segundos por combinación, pero es la única "
              "forma de saber cuál conviene usar.",
     )
+    parser.add_argument(
+        "--fourcc", default=None,
+        help="Formato de captura con el que medir. Por defecto, EL MISMO QUE "
+             "USA EL PIPELINE (MJPG). Pasar cadena vacía mide con el formato "
+             "por defecto de la cámara, que a 640x480 puede dar la mitad de "
+             "fps: sin comprimir, el bus USB no da para más.",
+    )
     args = parser.parse_args(argv)
 
     cfg = AppConfig.from_env()
+    # Medir con el formato del pipeline es lo correcto por defecto: una
+    # herramienta de diagnóstico que no replica la configuración de producción
+    # induce a error con toda la autoridad de una medición (H27 del plan).
+    fourcc = cfg.camera.fourcc if args.fourcc is None else args.fourcc
     backends = (
         [(args.backend, BACKENDS[args.backend])]
         if args.backend
@@ -159,9 +182,13 @@ def main(argv: list[str] | None = None) -> int:
 
     encontradas = 0
     for nombre_backend, backend in backends:
-        print(f"Buscando cámaras con el backend '{nombre_backend}'…\n")
+        formato = fourcc or "el de la camara, sin comprimir"
+        print(
+            f"Buscando cámaras con el backend '{nombre_backend}'"
+            f"{f', formato {formato}' if args.medir else ''}…\n"
+        )
         for indice in range(args.max_index + 1):
-            info = probar(indice, backend, medir=args.medir)
+            info = probar(indice, backend, medir=args.medir, fourcc=fourcc)
             if info is None:
                 continue
             encontradas += 1

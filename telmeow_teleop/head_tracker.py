@@ -70,7 +70,7 @@ import numpy as np
 
 from .config import AppConfig
 from .filters import OneEuroFilter
-from .limits import HEAD_PAN_RANGE, HEAD_TILT_RANGE, HeadClamp, clamp_head
+from .limits import HEAD_PAN_TARGET_RANGE, HEAD_TILT_RANGE, HeadClamp, clamp_head
 
 __all__ = [
     "HeadTracker",
@@ -397,12 +397,12 @@ class HeadTracker:
         self._extremos = {"pan": [0.0, 0.0], "tilt": [0.0, 0.0]}
 
     def suggested_gains(self) -> dict[str, float | None]:
-        """Ganancias que harían falta para alcanzar el tope del robot.
+        """Ganancias que harían falta para alcanzar el objetivo de cada eje.
 
-        Procedimiento de calibración: calibrar el neutro, llevar la cabeza hasta
-        donde resulte CÓMODO en cada sentido, y leer estos valores. Son las
-        ganancias con las que ese recorrido cómodo cubre justo el rango del
-        robot.
+        Procedimiento de calibración: calibrar el neutro, girar la cabeza hasta
+        el ángulo en que **la pantalla deja de leerse con comodidad**, y leer
+        estos valores. Son las ganancias con las que ese recorrido útil cubre
+        justo el objetivo.
 
         El tilt se propone **por separado hacia arriba y hacia abajo**, porque
         las dos asimetrías se suman: el robot llega menos hacia abajo (−39°
@@ -411,14 +411,21 @@ class HeadTracker:
         llegar nunca por abajo.
 
         El pan sí usa un solo valor, tomando el lado de menor recorrido: su
-        rango es simétrico (±90°) y no hay razón para diferenciarlo.
+        objetivo es simétrico (±50°) y no hay razón para diferenciarlo.
+
+        OBJETIVOS DISTINTOS POR EJE, y no es un descuido. El tilt apunta a su
+        rango mecánico completo (`HEAD_TILT_RANGE`); el pan apunta a
+        `HEAD_PAN_TARGET_RANGE`, que es ±50° y no los ±90° que el cuello del
+        robot admite, porque lo que acota al operador no es su cuello sino su
+        campo de visión sobre el monitor (§3.2.1 del plan maestro). Dividir por
+        el rango mecánico daba una ganancia 1.8× más alta de la que corresponde.
         """
         minimo_pan, maximo_pan = self._extremos["pan"]
         propuestas_pan = []
         if minimo_pan < -1e-6:
-            propuestas_pan.append(abs(HEAD_PAN_RANGE[0] / minimo_pan))
+            propuestas_pan.append(abs(HEAD_PAN_TARGET_RANGE[0] / minimo_pan))
         if maximo_pan > 1e-6:
-            propuestas_pan.append(abs(HEAD_PAN_RANGE[1] / maximo_pan))
+            propuestas_pan.append(abs(HEAD_PAN_TARGET_RANGE[1] / maximo_pan))
 
         minimo_tilt, maximo_tilt = self._extremos["tilt"]
         return {
@@ -646,7 +653,12 @@ ALTO_TEXTO = 145
 
 
 def _demo(argv: list[str] | None = None) -> int:
-    """`python -m telmeow_teleop.head_tracker`"""
+    """`python -m telmeow_teleop.head_tracker [--record CSV] [--publish]`
+
+    Las dos banderas son independientes y se combinan: ``--record`` deja el
+    dato para analizarlo después, ``--publish`` deja ver el robot moverse en el
+    visor mientras tanto.
+    """
     import argparse
     import csv
 
@@ -657,6 +669,12 @@ def _demo(argv: list[str] | None = None) -> int:
         help="Registra cada frame en un CSV, para analizar los datos después "
              "en vez de juzgar a ojo. La tecla ESPACIO cambia de etiqueta, "
              "para separar las fases de la prueba.",
+    )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="Publica la pose en el broker MQTT, para ver la cabeza moverse en "
+             "el visor 3D mientras se calibra. Convive con --record.",
     )
     args = parser.parse_args(argv)
 
@@ -682,12 +700,19 @@ def _demo(argv: list[str] | None = None) -> int:
 
     print(
         "CALIBRACION DE GANANCIA\n"
-        "  1. Pulsa 'c' mirando de frente, en tu postura natural.\n"
-        "  2. Pulsa 'r' para reiniciar los extremos.\n"
-        "  3. Mueve la cabeza hasta donde te resulte COMODO, arriba, abajo y a\n"
-        "     los lados. No fuerces el cuello: el objetivo es que ese recorrido\n"
-        "     comodo cubra todo el rango del robot.\n"
-        "  4. Lee 'sugerida' en pantalla y ajusta con las teclas.\n\n"
+        "  El limite NO es tu cuello, es TU PANTALLA: teleoperas mirando el\n"
+        "  monitor, asi que el recorrido util acaba donde dejas de leerlo.\n"
+        "  1. Sientate a la distancia de trabajo real.\n"
+        "  2. Pulsa 'c' mirando de frente, en tu postura natural, y 'r' para\n"
+        "     reiniciar los extremos.\n"
+        "  3. Gira DESPACIO hasta el punto en que la pantalla deja de leerse\n"
+        "     con comodidad, y MANTENLO 5 SEGUNDOS ahi.\n"
+        "  4. ESPACIO para cerrar la etiqueta, y repite: otro lado, arriba y\n"
+        "     abajo. NO vuelvas al centro dentro de una etiqueta: mezcla la\n"
+        "     postura medida con el camino de ida y vuelta y la inutiliza.\n"
+        "  5. Lee 'sugerida' en pantalla, o analiza el CSV con\n"
+        "     'python tools/analizar_registro.py <archivo>', que da la cifra\n"
+        "     por percentil y avisa si una etiqueta salio contaminada.\n\n"
         "TECLAS\n"
         "  c = calibrar neutro    n = borrarlo    r = reiniciar extremos\n"
         "  z/Z = ganancia tilt ARRIBA -/+\n"
@@ -708,6 +733,33 @@ def _demo(argv: list[str] | None = None) -> int:
         min_cutoff=cfg.head.min_cutoff,
         beta=cfg.head.beta,
     )
+
+    # Publicación opcional al visor 3D. Es lo que permite comprobar el SENTIDO
+    # del giro: el HUD dice el signo del ángulo, pero hacia qué lado gira el
+    # robot con ese signo solo se ve en el visor.
+    #
+    # Se importa aquí dentro y no arriba a propósito: el módulo tiene que poder
+    # usarse sin paho-mqtt instalado y sin broker levantado, que es como se
+    # ejecuta en la mayoría de las pruebas.
+    publicador = None
+    if args.publish:
+        from .publisher import PosePublisher
+
+        publicador = PosePublisher(cfg.mqtt, cfg.rates).connect()
+        if publicador.wait_connected(timeout=5.0):
+            print(
+                f"Publicando en {cfg.mqtt.host}:{cfg.mqtt.port} "
+                f"topic '{cfg.mqtt.topic_pose}' a {cfg.rates.publish_hz:g} Hz\n"
+            )
+        else:
+            # No se aborta: paho reintenta solo y el enlace puede subir a
+            # mitad de sesión. Pero hay que decirlo, porque con QoS 0 lo que se
+            # publique mientras tanto se pierde sin dejar rastro.
+            print(
+                f"AVISO: no hay enlace con el broker en {cfg.mqtt.host}:"
+                f"{cfg.mqtt.port}. Se sigue reintentando; mira el contador "
+                f"'perdidos' del HUD.\n"
+            )
 
     registro = None
     escritor = None
@@ -788,7 +840,7 @@ def _demo(argv: list[str] | None = None) -> int:
             extremos = tracker.raw_extremes
             sugeridas = tracker.suggested_gains()
             filas = (
-                ("pan", extremos["pan"], HEAD_PAN_RANGE, sugeridas["pan"], None),
+                ("pan", extremos["pan"], HEAD_PAN_TARGET_RANGE, sugeridas["pan"], None),
                 ("tilt", extremos["tilt"], HEAD_TILT_RANGE,
                  sugeridas["tilt_down"], sugeridas["tilt_up"]),
             )
@@ -807,6 +859,13 @@ def _demo(argv: list[str] | None = None) -> int:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 255, 180), 1,
                 )
 
+            if publicador is not None and pose is not None:
+                # La pose YA filtrada y recortada, la misma que se dibuja y se
+                # graba. El publisher limita la tasa por descarte, así que
+                # llamarlo en cada frame es correcto aunque la cámara vaya más
+                # deprisa que `publish_hz`.
+                publicador.publish(pan=pose[0], tilt=pose[1])
+
             if escritor is not None and pose is not None:
                 crudo = tracker.raw_angles or (float("nan"), float("nan"))
                 recorte = tracker.last_clamp
@@ -824,6 +883,22 @@ def _demo(argv: list[str] | None = None) -> int:
                 frame, f"etiqueta {etiqueta}" if escritor else "", (10, 200),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 100), 2,
             )
+
+            if publicador is not None:
+                # El contador de perdidos NO es decorativo. Con QoS 0, si el
+                # enlace no está arriba, paho tira el mensaje sin encolarlo: sin
+                # este número el HUD anunciaría 20 Hz mientras al broker no
+                # llega absolutamente nada, que es el peor modo de fallo — el
+                # que parece que funciona.
+                enlace = "MQTT" if publicador.connected else "MQTT SIN ENLACE"
+                cv2.putText(
+                    frame,
+                    f"{enlace}  {publicador.effective_hz:4.1f} Hz  "
+                    f"enviados {publicador.message_count}  "
+                    f"perdidos {publicador.failed_count}",
+                    (10, 224), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    (0, 255, 0) if publicador.connected else (0, 0, 255), 1,
+                )
 
             cv2.imshow("Telmeow - head tracker", frame)
             tecla = cv2.waitKey(1) & 0xFF
@@ -861,6 +936,13 @@ def _demo(argv: list[str] | None = None) -> int:
         tracker.close()
         cap.release()
         cv2.destroyAllWindows()
+        if publicador is not None:
+            print(
+                f"\nMQTT: {publicador.message_count} enviados, "
+                f"{publicador.dropped_count} descartados por tasa, "
+                f"{publicador.failed_count} perdidos sin enlace"
+            )
+            publicador.disconnect()
         if registro is not None:
             registro.close()
             print(f"\nRegistro guardado en {args.record}")

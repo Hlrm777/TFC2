@@ -44,6 +44,7 @@ __all__ = [
     "HeadClamp",
     "GIRO_RANGE",
     "HEAD_PAN_RANGE",
+    "HEAD_PAN_TARGET_RANGE",
     "HEAD_TILT_RANGE",
     "ARM_BALANCEO_1D",
     "clamp_scalar",
@@ -112,6 +113,14 @@ class BalanceoPolicy(Enum):
 GIRO_RANGE: tuple[float, float] = (-90.0, 90.0)
 HEAD_PAN_RANGE: tuple[float, float] = (-90.0, 90.0)
 HEAD_TILT_RANGE: tuple[float, float] = (-39.0, 42.0)  # asimétrico
+
+#: Rango objetivo del pan para el operador (§3.2.1).
+#:
+#: El operador teleopera viendo un monitor. Si girara tanto la cabeza como para
+#: cubrir los ±90° mecánicos, dejaría de ver la pantalla. Con ±50° basta para
+#: la mediación de lectura y el operador mantiene la pantalla en su campo de
+#: visión. ``suggested_gains()`` usa este rango, no ``HEAD_PAN_RANGE``.
+HEAD_PAN_TARGET_RANGE: tuple[float, float] = (-50.0, 50.0)
 
 #: Balanceo admisible con el brazo en giro = 0°, como metadato documental.
 #:

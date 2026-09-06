@@ -14,6 +14,7 @@ from telmeow_teleop.limits import (
     ARM_BALANCEO_1D,
     GIRO_RANGE,
     HEAD_PAN_RANGE,
+    HEAD_PAN_TARGET_RANGE,
     HEAD_TILT_RANGE,
     BalanceoPolicy,
     Side,
@@ -356,3 +357,26 @@ def test_cabeza_fraction_refleja_la_asimetria_del_tilt():
 def test_rangos_de_cabeza_declarados():
     assert HEAD_PAN_RANGE == (-90.0, 90.0)
     assert HEAD_TILT_RANGE == (-39.0, 42.0)
+    assert HEAD_PAN_TARGET_RANGE == (-50.0, 50.0)
+
+
+def test_el_objetivo_del_pan_cabe_dentro_del_rango_mecanico():
+    """Son cosas distintas: el objetivo es de CALIBRACIÓN, el rango es el tope.
+
+    El objetivo puede ser más estrecho —lo es, porque al operador lo acota su
+    campo de visión sobre el monitor y no el cuello del robot (§3.2.1)— pero
+    nunca puede salirse del rango mecánico: eso pediría al robot un ángulo que
+    no existe.
+    """
+    assert HEAD_PAN_RANGE[0] <= HEAD_PAN_TARGET_RANGE[0]
+    assert HEAD_PAN_TARGET_RANGE[1] <= HEAD_PAN_RANGE[1]
+
+
+def test_el_objetivo_del_pan_no_recorta_nada():
+    """`clamp_head` sigue recortando a ±90°. El objetivo no es un límite nuevo.
+
+    Si alguien lo confundiera y clampara a ±50°, el robot perdería recorrido que
+    sí tiene.
+    """
+    assert clamp_head(pan=70.0, tilt=0.0).pan.value == pytest.approx(70.0)
+    assert clamp_head(pan=70.0, tilt=0.0).clamped is False

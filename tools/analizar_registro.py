@@ -24,7 +24,28 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from telmeow_teleop.limits import HEAD_PAN_RANGE, HEAD_TILT_RANGE  # noqa: E402
+from telmeow_teleop.limits import (  # noqa: E402
+    HEAD_PAN_TARGET_RANGE,
+    HEAD_TILT_RANGE,
+)
+
+#: Por debajo de esta fracción de la meseta, una muestra se considera trayecto.
+#:
+#: Sirve para detectar la etiqueta contaminada: si el operador vuelve al centro
+#: dentro de una etiqueta, aparece un montón de muestras a medio camino que no
+#: pertenecen a la postura que se quería medir.
+FRACCION_MESETA = 0.5
+
+#: Si más de este porcentaje del tiempo se pasó fuera de la meseta, se avisa.
+TOLERANCIA_TRAYECTO = 0.25
+
+#: Excursión mínima, en grados, para proponer una ganancia en ese eje.
+#:
+#: Con el umbral en 1° cada etiqueta proponía ganancias en los cuatro sentidos,
+#: incluidos los ejes que el operador ni movió: 3° de cabeceo residual mientras
+#: giraba la cabeza salían como «tilt 11.81», que no significa nada y compite en
+#: pantalla con la cifra que sí importa.
+EXCURSION_MINIMA = 5.0
 
 
 def cargar(ruta: Path) -> list[dict]:
@@ -68,6 +89,58 @@ def temblor(valores: list[float], tiempos: list[float], ventana=1.0) -> float | 
     return statistics.median(desviaciones) if desviaciones else None
 
 
+def percentil(valores: list[float], p: float) -> float:
+    """Percentil ``p`` (0-100) por interpolación lineal entre las dos muestras
+    que lo rodean.
+
+    Se usa en vez del mínimo y el máximo porque en una etiqueta de POSTURA
+    SOSTENIDA los extremos recogen el instante de entrada y el de salida, que no
+    son la postura: son el trayecto hacia ella. El percentil se queda con la
+    meseta, que es donde el operador pasó el tiempo.
+    """
+    if not valores:
+        raise ValueError("no hay valores")
+    ordenados = sorted(valores)
+    if len(ordenados) == 1:
+        return ordenados[0]
+    posicion = (p / 100.0) * (len(ordenados) - 1)
+    bajo = int(posicion)
+    alto = min(bajo + 1, len(ordenados) - 1)
+    peso = posicion - bajo
+    return ordenados[bajo] * (1 - peso) + ordenados[alto] * peso
+
+
+def diagnostico_meseta(valores: list[float]) -> tuple[float, str] | None:
+    """¿Esta etiqueta es una postura sostenida limpia, o se volvió al centro?
+
+    Devuelve ``(meseta, aviso)``, donde la meseta es el p95 o el p05 según el
+    sentido en que se movió el operador, y el aviso está vacío si la etiqueta
+    está limpia.
+
+    El defecto que busca es concreto y ya ocurrió una vez: en la grabación
+    `limites.csv` el operador volvió al centro dentro de una etiqueta —le picó
+    la nariz— y esa etiqueta quedó inservible, porque mezcla la postura que se
+    quería medir con el camino de ida y vuelta. Si más de una cuarta parte del
+    tiempo se pasó a menos de la mitad de la meseta, es esa firma.
+    """
+    if not valores:
+        return None
+    p05, p95 = percentil(valores, 5), percentil(valores, 95)
+    meseta = p95 if abs(p95) >= abs(p05) else p05
+    if abs(meseta) < 5.0:
+        return None  # etiqueta de reposo o de centro: no hay meseta que juzgar
+
+    umbral = FRACCION_MESETA * abs(meseta)
+    fuera = sum(1 for v in valores if abs(v) < umbral)
+    fraccion = fuera / len(valores)
+    if fraccion <= TOLERANCIA_TRAYECTO:
+        return meseta, ""
+    return meseta, (
+        f"  <-- el {100 * fraccion:.0f} % del tiempo por debajo de la mitad de "
+        f"la meseta: revisar si se volvio al centro dentro de la etiqueta"
+    )
+
+
 def resumen_bloque(nombre: str, filas: list[dict]) -> None:
     if len(filas) < 2:
         print(f"  {nombre}: solo {len(filas)} muestras, se omite")
@@ -98,12 +171,16 @@ def resumen_bloque(nombre: str, filas: list[dict]) -> None:
 
     print(f"  {nombre}")
     print(f"    {len(filas):5d} muestras en {duracion:5.1f} s  ->  {fps:5.1f} fps")
-    print(f"    pan  mediana {mediana_pan:+7.2f}   recorrido "
-          f"[{min(crudo_pan):+7.2f},{max(crudo_pan):+7.2f}]"
-          f"   TEMBLOR {fmt(temblor_pan)}")
-    print(f"    tilt mediana {mediana_tilt:+7.2f}   recorrido "
-          f"[{min(crudo_tilt):+7.2f},{max(crudo_tilt):+7.2f}]"
-          f"   TEMBLOR {fmt(temblor_tilt)}")
+    for eje, crudo, mediana in (
+        ("pan ", crudo_pan, mediana_pan),
+        ("tilt", crudo_tilt, mediana_tilt),
+    ):
+        temblor_eje = temblor_pan if eje == "pan " else temblor_tilt
+        print(f"    {eje} mediana {mediana:+7.2f}   p05 {percentil(crudo, 5):+7.2f}"
+              f"   p95 {percentil(crudo, 95):+7.2f}   TEMBLOR {fmt(temblor_eje)}")
+        diagnostico = diagnostico_meseta(crudo)
+        aviso = diagnostico[1] if diagnostico else ""
+        print(f"         extremos [{min(crudo):+7.2f},{max(crudo):+7.2f}]{aviso}")
     if temblor_pan_f is not None or temblor_tilt_f is not None:
         print(f"    tras el filtro One Euro:  pan {fmt(temblor_pan_f)}"
               f"   tilt {fmt(temblor_tilt_f)}")
@@ -120,18 +197,29 @@ def resumen_bloque(nombre: str, filas: list[dict]) -> None:
         print(f"    recortado por el tope del robot en {recortados} de "
               f"{len(filas)} muestras ({100 * recortados / len(filas):.0f} %)")
 
-    # Ganancias que harían falta para que ESTE recorrido cubra el rango.
+    # Ganancias que harían falta para que ESTE recorrido cubra el objetivo.
+    #
+    # Se calculan desde el PERCENTIL, no desde el extremo: el extremo incluye el
+    # instante de entrada y el de salida de la postura, y usarlo propone una
+    # ganancia más baja de la debida —el operador no sostiene ese ángulo—.
+    #
+    # El objetivo del pan es ±50°, no su rango mecánico de ±90°: al operador lo
+    # acota su campo de visión sobre el monitor, no el cuello del robot
+    # (§3.2.1). Dividir por HEAD_PAN_RANGE daba una ganancia 1.8× más alta.
+    p05_pan, p95_pan = percentil(crudo_pan, 5), percentil(crudo_pan, 95)
+    p05_tilt, p95_tilt = percentil(crudo_tilt, 5), percentil(crudo_tilt, 95)
     sugerencias = []
-    if min(crudo_pan) < -1:
-        sugerencias.append(f"pan {abs(HEAD_PAN_RANGE[0] / min(crudo_pan)):.2f}")
-    if max(crudo_pan) > 1:
-        sugerencias.append(f"pan {abs(HEAD_PAN_RANGE[1] / max(crudo_pan)):.2f}")
-    if max(crudo_tilt) > 1:
-        sugerencias.append(f"tilt^ {abs(HEAD_TILT_RANGE[1] / max(crudo_tilt)):.2f}")
-    if min(crudo_tilt) < -1:
-        sugerencias.append(f"tiltv {abs(HEAD_TILT_RANGE[0] / min(crudo_tilt)):.2f}")
+    if p05_pan < -EXCURSION_MINIMA:
+        sugerencias.append(f"pan {abs(HEAD_PAN_TARGET_RANGE[0] / p05_pan):.2f}")
+    if p95_pan > EXCURSION_MINIMA:
+        sugerencias.append(f"pan {abs(HEAD_PAN_TARGET_RANGE[1] / p95_pan):.2f}")
+    if p95_tilt > EXCURSION_MINIMA:
+        sugerencias.append(f"tilt^ {abs(HEAD_TILT_RANGE[1] / p95_tilt):.2f}")
+    if p05_tilt < -EXCURSION_MINIMA:
+        sugerencias.append(f"tiltv {abs(HEAD_TILT_RANGE[0] / p05_tilt):.2f}")
     if sugerencias:
-        print(f"    ganancias para cubrir el rango: {'  '.join(sugerencias)}")
+        print(f"    ganancias desde el percentil (pan -> {HEAD_PAN_TARGET_RANGE[1]:.0f},"
+              f" tilt -> rango mecanico): {'  '.join(sugerencias)}")
     print()
 
 
@@ -172,6 +260,8 @@ def main(argv: list[str] | None = None) -> int:
           f"{', '.join(f'{w}x{h}' for w, h in sorted(resoluciones))}")
     print("\nNota: la desviacion en un tramo de REPOSO es el temblor; en un tramo")
     print("de movimiento no significa nada (mide el propio movimiento).")
+    print("Nota: en una etiqueta de postura SOSTENIDA la cifra que vale es el")
+    print("percentil, no el extremo: el extremo incluye entrar y salir de ella.")
     return 0
 
 

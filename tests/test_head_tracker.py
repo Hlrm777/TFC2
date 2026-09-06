@@ -25,7 +25,11 @@ from telmeow_teleop.head_tracker import (
     estimate_head_pose,
     rotation_between_clouds,
 )
-from telmeow_teleop.limits import HEAD_PAN_RANGE, HEAD_TILT_RANGE
+from telmeow_teleop.limits import (
+    HEAD_PAN_RANGE,
+    HEAD_PAN_TARGET_RANGE,
+    HEAD_TILT_RANGE,
+)
 
 ANCHO, ALTO = 640, 480
 K = camera_matrix(ANCHO, ALTO)
@@ -475,11 +479,42 @@ def test_el_tilt_propone_una_ganancia_por_sentido():
 
 
 def test_el_pan_usa_una_sola_ganancia_por_ser_simetrico():
-    """Su rango es ±90°, así que se toma el lado de menor recorrido."""
+    """Su objetivo es simétrico, así que se toma el lado de menor recorrido."""
     t = tracker_con()
     try:
-        t._extremos["pan"] = [-45.0, 30.0]  # 90/45 = 2.0 ; 90/30 = 3.0
-        assert t.suggested_gains()["pan"] == pytest.approx(2.0, abs=0.01)
+        t._extremos["pan"] = [-45.0, 30.0]  # 50/45 = 1.11 ; 50/30 = 1.67
+        assert t.suggested_gains()["pan"] == pytest.approx(1.11, abs=0.01)
+    finally:
+        t.close()
+
+
+def test_la_ganancia_del_pan_apunta_al_objetivo_no_al_rango_mecanico():
+    """El pan se calibra contra ±50°, no contra los ±90° que el robot admite.
+
+    Lo acota el campo de visión del operador sobre el monitor, no el cuello del
+    robot (§3.2.1). Dividir por el rango mecánico proponía una ganancia 1.8 veces
+    más alta de la que corresponde, y esa cifra se llegó a mostrar en el HUD.
+    """
+    t = tracker_con()
+    try:
+        t._extremos["pan"] = [-25.0, 25.0]
+        propuesta = t.suggested_gains()["pan"]
+        assert propuesta == pytest.approx(HEAD_PAN_TARGET_RANGE[1] / 25.0, abs=0.01)
+        assert propuesta != pytest.approx(HEAD_PAN_RANGE[1] / 25.0, abs=0.01)
+    finally:
+        t.close()
+
+
+def test_aplicar_la_ganancia_sugerida_del_pan_lleva_al_objetivo():
+    """Y no al tope mecánico: el recorrido cómodo tiene que caer en ±50°."""
+    t = tracker_con()
+    try:
+        t._extremos["pan"] = [-30.0, 30.0]
+        t.gain_pan = t.suggested_gains()["pan"]
+
+        pan, _ = t.map_to_robot(30.0, 0.0, timestamp=0.0)
+        assert pan == pytest.approx(HEAD_PAN_TARGET_RANGE[1], abs=0.5)
+        assert t.last_clamp.clamped is False
     finally:
         t.close()
 

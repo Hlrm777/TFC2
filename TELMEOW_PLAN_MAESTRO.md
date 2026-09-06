@@ -15,12 +15,19 @@ validaciones que le faltan (**P4.1 a P4.5**), los hallazgos **H17-H21**, y dos
 limitaciones nuevas para el documento (§3.3.9 y §3.3.10) — el techo de captura de
 ~15 fps y el efecto de la ganancia sobre el temblor.
 
-**La revisión del 2026-09-06** es la primera sesión con el operador delante del
-visor, y de ahí salen **H22 a H24**. La importante es la H22: el método `mesh`
-devolvía el **tilt invertido**, así que el operador levantaba la cabeza y el
-robot la bajaba. Ya está corregido en la raíz. Con ella quedan cerrados **P4.1 y
-P4.3**, y queda anotado que las cifras de tilt tomadas antes de esa fecha
-—incluidas las etiquetas 3 y 4 de `limites.csv`— llevan el signo viejo.
+**La revisión del 2026-09-06 cierra el PROMPT 4 entero**, con el operador
+delante: las cinco validaciones P4.1 a P4.5, las ganancias medidas y fijadas
+(`1.49 / 1.59 / 1.80`), y los hallazgos **H22 a H27**.
+
+Tres cosas de esa jornada cambian lo que este documento decía:
+
+- **H22** — el método `mesh` devolvía el **tilt invertido**: el operador
+  levantaba la cabeza y el robot la bajaba. Corregido en la raíz.
+- **H26** — `limites.csv` queda **descartada entera**, no releída. Las ganancias
+  provisionales que salían de ella se retiran.
+- **H27** — el techo de captura de **~15 fps queda en duda**: el pipeline real
+  midió 30.0 fps sin frames duplicados. La limitación de tasa que este plan
+  declaraba **no se puede citar hasta resolverlo** (§4.0.4).
 
 Cómo leerlo:
 
@@ -44,7 +51,7 @@ cambia respecto al plan original.
 | **P1** — Estructura y parámetros | ✅ **hecho** | `66440a5` |
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
-| **P4** — Head tracker | ✅ código hecho · P4.1 y P4.3 ✅ · ⚠️ **faltan las mediciones P4.2, P4.4 y P4.5**, que son una sola sesión | `b3813a6`, `47ee616` |
+| **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
 | P5 — Arm tracker | ⬜ **siguiente** | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
@@ -156,13 +163,20 @@ Correcciones respecto a la v1, verificadas en `telmeow_viewer.html:987-1023`:
 
 Ángulos en grados (float), sin cuantizar.
 
-**Sobre la tasa objetivo.** El plan declara 20 Hz y el publisher los sostiene sin
-problema —verificado con el brazo oscilando en el visor—, pero **la cámara no da
-para tanto**: el techo medido es ~15 fps (§4.0.4), y el pipeline no puede
-publicar poses nuevas más deprisa de lo que las ve. Con este hardware la tasa
-real de extremo a extremo queda en **~15 Hz**. La cifra de 20 Hz sigue siendo la
-del transporte; la del sistema completo hay que declararla como 15 Hz o cambiar
-de cámara (§3.3.9).
+**Sobre la tasa objetivo. ⚠️ CUESTIÓN ABIERTA, no citar todavía.** El plan
+declara 20 Hz y el publisher los sostiene sin problema —verificado con el brazo
+oscilando en el visor—. Lo que está en el aire es si la cámara da para tanto.
+
+- Una medición con `tools/list_cameras.py` dio un techo de **~15 fps**, y de ahí
+  salió la limitación de «~15 Hz de extremo a extremo» que este plan venía
+  declarando.
+- La sesión de calibración del 2026-09-06 corrió a **30.0 fps con cero frames
+  duplicados**, medido sobre el CSV crudo. Si eso es correcto, los 20 Hz de
+  publicación **sí son alcanzables** y la limitación desaparece.
+
+La hipótesis que reconcilia las dos —el `fourcc` MJPG, que el pipeline aplica y
+la herramienta de medición no— está en §4.0.4 como **H27**, sin confirmar.
+**Resolverlo antes de escribir cualquier cifra de tasa en el documento.**
 
 **Sobre la latencia declarada.** El indicador `t-lat` del visor está
 honestamente etiquetado como «proxy», pero mide el **intervalo entre mensajes**,
@@ -230,7 +244,7 @@ tesis.
 | 1 | **P1** | Estructura del paquete + límites articulares | ✅ |
 | 2 | **P2** | Capa MQTT compatible con el viewer | ✅ · punto de control superado |
 | 3 | **P3** | Filtros temporales (One Euro, histéresis) | ✅ |
-| 4 | **P4** | Head tracker (Face Mesh + Kabsch/solvePnP, sin dlib) | ✅ código · ⚠️ faltan P4.2, P4.4 y P4.5 (una sesión de medición) |
+| 4 | **P4** | Head tracker (Face Mesh + Kabsch/solvePnP, sin dlib) | ✅ **hecho y calibrado con el operador** |
 | 5 | **P5** | Arm tracker corregido (bugs 1–4) | ⬜ **siguiente** |
 | 6 | **P6** | Clasificador de emoción con backends intercambiables | ⬜ |
 | 7 | **P8** | Entrenamiento con FER-2013 | ⬜ ⚠️ revisar accuracy |
@@ -326,8 +340,14 @@ servos y la que se declara en el documento. Ver **P4.1** para por qué eso se ve
 ### Resultados medidos con el operador real (2026-09-05)
 
 Sesión grabada con `--record` y analizada con `tools/analizar_registro.py`.
-1962 muestras, cámara externa a 1280x720 — que después resultó ser la peor
-configuración disponible (§4.0.4). Ver **P4.5**.
+1962 muestras, cámara externa a 1280x720.
+
+⚠️ **De esta sesión solo sobrevive la comparación entre métodos.** Las cifras de
+temblor quedan sustituidas por las del **P4.5**, tomadas en la configuración de
+operación; el recorrido de tilt no se cita, por el signo (**H22**). Lo que sí se
+mantiene es la comparación `mesh` frente a `pnp`, porque es una comparación
+**relativa** entre dos métodos sobre los mismos frames: el signo y la
+configuración afectan igual a los dos y se cancelan.
 
 **Repetibilidad (temblor), medida como la mediana de la desviación en ventanas
 de 1 s.** Es la cifra que sustituye a la exactitud absoluta, que no se puede
@@ -353,20 +373,18 @@ ambiguas. El filtro One Euro reduce además el temblor de 0.31° a 0.17°.
 Alejarse un 40 % solo empeora un 14 %. El operador no necesita trabajar
 incómodamente cerca.
 
-**Recorrido alcanzado:** pan ±55.5°, y en tilt los valores registrados fueron
-+33.3° / −40.2°.
+**Recorrido alcanzado:** pan ±55.5°, y en tilt se registraron +33.3° / −40.2°.
 
-⚠️ **Corrección del 2026-09-06.** Esa sesión se grabó con el tilt de signo
-invertido (**H22**), así que hay que leerla al revés: el operador alcanzó
-**33.3° hacia abajo y 40.2° hacia arriba**, no lo contrario. Dos consecuencias:
+⚠️ **El recorrido de tilt de esta sesión no se cita.** Se grabó con el signo
+invertido (**H22**) y además forzando el cuello, no con el criterio de pantalla.
+La cifra buena es la del **P4.2**: 26.5° arriba y 21.6° abajo, sostenidos.
 
-- La afirmación de que «hacia abajo ya supera el tope del robot (−39°)» **era
-  falsa**: se quedó en 33.3°, siete grados cortos. Lo que rozaba su tope era el
-  movimiento hacia arriba (40.2° frente a 42°).
-- Por tanto **la queja inicial del operador —que bajar la cabeza no llegaba—
-  era correcta**, y no quedó descartada por el cambio de cámara. Vuelve a estar
-  abierta y la resuelve la medición del **P4.2**, que es la que fija de una vez
-  el recorrido real por sentido.
+Lo que sí queda establecido, y con dos sesiones que coinciden: **el operador
+llega menos hacia abajo que hacia arriba**. Su asimetría va en el mismo sentido
+que la del robot (−39° frente a +42°), así que **las dos se suman** — de ahí que
+el tilt necesite dos ganancias separadas y que `gain_tilt_down` sea la mayor de
+las tres. Es también la respuesta a la queja inicial del operador de que bajar
+la cabeza no llegaba: era cierta, y se corrige con la ganancia, no con la cámara.
 
 **Otras confirmaciones medidas:**
 
@@ -377,11 +395,16 @@ invertido (**H22**), así que hay que leerla al revés: el operador alcanzó
   el arranque lento y los avisos de oneDNN. Es dependencia suya, no nuestra, pero
   hay que tenerlo en cuenta para la Raspberry Pi del PROMPT 11.
 
-### Pendiente de validar — P4 no está cerrado del todo
+### Las cinco validaciones — todas cerradas el 2026-09-06
 
-El código está terminado y probado. Lo que queda son **medidas con el operador**;
-**P4.1 y P4.3 ya están cerrados** (2026-09-06), y de esa misma sesión salió el
-fallo del tilt (**H22**), que era invisible sin tener el visor delante.
+El P4 estaba «hecho» desde que compiló, pero no **calibrado**: le faltaban cinco
+comprobaciones que solo se podían hacer con el operador delante. Las cinco están
+cerradas, y de ellas salieron dos cosas que ninguna prueba automática habría
+encontrado: el tilt invertido (**H22**) y las ganancias reales.
+
+Merece quedar dicho, porque se repite en los prompts que vienen: **el código
+pasaba 400 pruebas en verde con el cabeceo al revés.** Lo que lo destapó fue
+sentar a una persona delante y mirar el robot.
 
 **P4.1 — Sentido del pan en el visor.** ✅ **cerrado el 2026-09-06.**
 Comprobado con `python -m telmeow_teleop.head_tracker --publish`, que es la
@@ -411,51 +434,57 @@ robot; que se vea especular en el banco virtual es consecuencia de observarlo de
 frente, y el sentido es un parámetro de configuración (`invert_pan`), no un
 cambio de diseño.*
 
-**P4.2 — El ángulo de pérdida de pantalla.** ⬜ **Es el que bloquea las
-ganancias, y el único trabajo que le queda al P4.**
-Decidido el criterio (§3.2.1): el recorrido útil del operador **lo acota su campo
-de visión sobre el monitor**, no su cuello. Falta el número.
+**P4.2 — El ángulo de pérdida de pantalla.** ✅ **medido el 2026-09-06.**
+El criterio (§3.2.1) era que el recorrido útil del operador **lo acota su campo
+de visión sobre el monitor**, no su cuello. Faltaba el número, y ya está.
 
-**Una sola grabación cierra P4.2, P4.4 y P4.5 a la vez**, si se hace en la
-configuración de operación. `limites.csv` se grabó a 1280x720, que es la
-combinación más lenta; la buena es **cámara 1 a 640x480, ~15 fps** (§4.0.4). El
-índice de cámara cambia entre sesiones en Windows, así que conviene correr antes
-`python tools/list_cameras.py`.
+Protocolo ejecutado: once etiquetas alternando **tránsito** y **postura
+sostenida** —las impares son el dato, las pares el camino—, con la mirada fija
+en un texto centrado en el monitor y girando solo la cabeza. La regla de no
+volver al centro dentro de una etiqueta, que fue lo que inutilizó `limites.csv`,
+se respeta por construcción: el regreso cae siempre en una etiqueta par.
+
+**Recorrido útil sostenido del operador**, por percentil:
+
+| Sentido | Integrada (operación) | Externa (repetición) |
+|---|---|---|
+| pan izquierda | 33.5° | 21.9° |
+| pan derecha | 29.5° | 29.6° |
+| tilt arriba | 26.5° | 31.0° |
+| tilt abajo | 21.6° | 19.2° |
+
+**Ganancias resultantes, ya fijadas en `HeadConfig`:**
 
 ```
-$env:TELMEOW_CAMERA_BACKEND="dshow"; $env:TELMEOW_CAMERA_INDEX="1"
-$env:TELMEOW_CAMERA_WIDTH="640";     $env:TELMEOW_CAMERA_HEIGHT="480"
-python -m telmeow_teleop.head_tracker --record pantalla.csv
+gain_pan       = 1.49      (50 / 33.5)
+gain_tilt_up   = 1.59      (42 / 26.5)
+gain_tilt_down = 1.80      (39 / 21.6)
 ```
 
-Protocolo, una etiqueta por fase:
+Se adoptan las de la **configuración de operación**, sin mezclar sesiones ni
+promediar: son las que propone `tools/analizar_registro.py` sobre esa grabación.
+La repetición con la otra cámara da 1.69 / 1.35 / 2.03, y esa dispersión de
+±15 % es **la repetibilidad de la calibración**, que es una cifra citable por sí
+misma.
 
-1. Sentarse a la distancia de trabajo real. `c` para calibrar el neutro, `r`
-   para reiniciar extremos.
-2. **Etiqueta 1 — quieto, mirando de frente, 10 s.** No estaba en el protocolo
-   original y es la que da la cifra de temblor del **P4.5**: el temblor solo
-   significa algo en un tramo de reposo.
-3. Girar la cabeza despacio hasta el punto en que **la pantalla deja de leerse
-   con comodidad**, y **mantenerlo 5 s** ahí. No volver al centro dentro de la
-   etiqueta (ver P4.4).
-4. ESPACIO, y repetir para el otro lado, arriba y abajo. Cuatro etiquetas más.
-5. `python tools/analizar_registro.py pantalla.csv`.
+Las tres son mayores que 1, como anticipaba §3.2.1: el operador no puede cubrir
+el rango del robot con un gesto que le deje ver la pantalla, y la ganancia es el
+mecanismo que lo compensa.
 
-Con ese ángulo: `gain_pan = 50/ángulo`, `gain_tilt_up = 42/ángulo`,
-`gain_tilt_down = 39/ángulo` — que es lo que ya propone el analizador. Los 50°
-salen de la decisión del operador de que ±50° de robot bastan para la mediación
-de lectura; los 42/−39 son el rango mecánico real del tilt.
+⚠️ **Son de ESTE operador y de ESTE puesto.** Dependen de la distancia al
+monitor y de cuánto ocupa este en su campo visual —no de la cámara ni del
+robot—, así que otro operador, u otra mesa, exige repetir el protocolo. Conviene
+declararlo así en el documento: es un parámetro de puesto, no una constante del
+sistema.
 
-Dos cosas que hay que mirar en el resultado, porque el documento afirma hoy lo
-contrario y la corrección del signo (**H22**) las dejó abiertas:
-
-- **¿Cuál de los dos sentidos del tilt se queda más corto?** La relectura de
-  `limites.csv` dice que cuesta más levantar la cabeza (18°) que bajarla (23°).
-  Si se confirma, hay que reescribir la justificación de las dos ganancias: las
-  asimetrías del robot y del operador **no se suman, se compensan en parte**.
-- **La asimetría del pan.** La grabación vieja daba 29.5° a un lado y 38.3° al
-  otro (1.3×) sin explicación. Si se repite es real y hay que declararla; si
-  desaparece, era que el operador giró más de un lado.
+**La asimetría del pan NO se declara.** Venía arrastrándose como posible
+hallazgo desde `limites.csv` (29.5° a un lado, 38.3° al otro), pero las tres
+grabaciones no coinciden ni en el sentido ni en la magnitud: 29.5/38.3, luego
+21.9/29.6, luego 33.5/29.5. El lado derecho sí resulta notablemente reproducible
+—29.6° y 29.5° en las dos sesiones nuevas—, pero el izquierdo varía 12° entre
+sesiones. En la grabación de la externa, el propio tramo de tránsito llegó a 32°
+antes de que el operador se acomodara en 21.5°, lo que apunta a **cómo se
+asiente, no a un límite anatómico**. Se atribuye a la postura y se deja de citar.
 
 **P4.3 — `suggested_gains()` apuntaba a ±90°, no a ±50°.** ✅ **hecho** (`b3813a6`).
 El método dividía entre `HEAD_PAN_RANGE`, o sea ±90°, y proponía una ganancia de
@@ -472,64 +501,33 @@ El mismo error estaba en `tools/analizar_registro.py`, que es la herramienta con
 la que se leen las grabaciones — o sea que habría reaparecido justo al analizar
 la sesión del P4.2. También corregido.
 
-**P4.4 — La grabación `limites.csv` que ya existe: rescatable, pero
-provisional.** ⬜
-1506 muestras, 6 etiquetas. El operador volvió al centro dentro de cada etiqueta
-—le picó la nariz en una— así que los extremos por etiqueta mezclan la meseta con
-el trayecto de ida y vuelta. La mediana y los percentiles **sí** rescatan la
-meseta, porque el tiempo se pasó mayoritariamente en ella:
+**P4.4 — La grabación `limites.csv`.** ✅ **cerrado: superada y descartada.**
+Queda sustituida por la sesión del P4.2 y **se deja de citar**. No sirve ni
+releyendo: tenía el protocolo equivocado —se midió la comodidad del cuello, no
+la pérdida de pantalla—, el tilt con el signo invertido (**H22**) y las
+etiquetas asignadas de memoria después de grabar.
 
-| Etiqueta | Qué es | Mediana | Percentil extremo |
-|---|---|---|---|
-| 1 | pan hacia la izquierda del operador | +25.1° | +29.5° (p95) |
-| 2 | pan hacia la derecha | −36.9° | −38.3° (p05) |
-| 3 | cabeza **arriba** (ver aviso) | −16.3° | −18.0° (p05) |
-| 4 | cabeza **abajo** (ver aviso) | +19.0° | +22.6° (p95) |
-| 5 | ambigua, descartar | — | — |
-| 0 | previa a etiquetar, descartar | — | — |
+Intentar rescatarla tuvo un coste concreto, y por eso queda escrito como
+**H26**: al releerla con el signo corregido se dedujo que al operador le costaba
+más levantar la cabeza que bajarla, y esa afirmación falsa estuvo un día en este
+documento y en tres docstrings. Las dos sesiones nuevas dicen lo contrario y
+coinciden entre sí. **Una grabación con el protocolo equivocado no se recupera
+reinterpretándola.**
 
-⚠️ **Las etiquetas 3 y 4 están intercambiadas respecto a lo que decía esta tabla
-antes del 2026-09-06**, porque la grabación tiene el tilt con el signo invertido
-(**H22**). Se corrige aquí para que el dato no se cite al revés, pero el pan no
-está afectado: el fallo solo tocaba el cabeceo.
+**P4.5 — Repetibilidad en la configuración de operación.** ✅ **medida.**
+Salió de la etiqueta de reposo que abre el protocolo del P4.2, sin necesidad de
+una sesión aparte. **Cifras citables para la tesis:**
 
-Ganancias provisionales que salen de ahí, con el criterio de ±50°:
-`gain_pan ≈ 1.69`, y en tilt **`gain_tilt_up ≈ 2.33` y `gain_tilt_down ≈ 1.73`**.
+| | Crudo | Tras el One Euro |
+|---|---|---|
+| pan | 0.159° | **0.058°** |
+| tilt | 0.296° | **0.138°** |
 
-Ojo con estas dos, que **no son las de antes intercambiadas**: los topes siguen
-atados a su sentido (42° arriba, 39° abajo) y lo que se intercambia son los
-recorridos del operador. O sea `42/18.04 = 2.33` hacia arriba y `39/22.59 =
-1.73` hacia abajo, donde antes figuraban 1.86 y 2.17.
+Y lo que de verdad recibe el robot, que es el temblor filtrado por la ganancia:
+**0.09° en pan y 0.25° en tilt**, sobre rangos de ±50° y −39/+42°.
 
-Y el cambio dice algo, aunque haya que confirmarlo en el P4.2: **al operador le
-cuesta más levantar la cabeza que bajarla** (18° frente a 23°), justo al revés
-de lo que este documento venía afirmando. La justificación de las dos ganancias
-separadas sigue en pie; lo que estaba mal era el sentido.
-
-Reproducibles con `python tools/analizar_registro.py limites.csv`, que desde
-`b3813a6` calcula las ganancias desde el percentil y con el objetivo de ±50°
-(recordando que su columna de tilt lleva el signo viejo).
-
-**Sirven para trabajar, no para el documento**, por dos motivos: la etiqueta 5
-quedó inservible, y sobre todo **el protocolo fue el equivocado** — se midió el
-«hasta donde resulte cómodo» del cuello, no el ángulo de pérdida de pantalla del
-P4.2, que es el criterio que se acabó adoptando. La asimetría del pan
-(29.5° a un lado, 38.3° al otro, 1.3×) queda sin explicar: puede ser real o puede
-ser que el operador girase más de un lado. La repetición del P4.2 lo aclara.
-
-**P4.5 — Las cifras de repetibilidad se midieron en la peor configuración de
-cámara.** ⬜
-Los 0.19°/0.31° de temblor salieron de la sesión del 2026-09-05 con la **cámara
-externa a 1280x720**, que después se descubrió que es la combinación **más
-lenta** de las cuatro disponibles: 10.0 fps (§4.0.4). No invalida el resultado
-—el temblor es dispersión angular, no depende de la tasa— pero antes de citarlo
-en la tesis conviene repetir la medida en la configuración que se va a usar de
-verdad, **cámara 1 a 640x480**, y comprobar que no cambia. Si cambiara, la cifra
-buena es la de la configuración de operación.
-
-**No hace falta una sesión aparte**: sale de la etiqueta de reposo que abre el
-protocolo del P4.2. Y el signo del tilt no afecta a esta cifra, porque el
-temblor es dispersión y no cambia al negar el valor.
+Las cifras viejas (0.19°/0.31°, cámara externa a 1280x720) quedan sustituidas.
+La configuración de operación resulta **mejor**, no peor, que aquella.
 
 ### Enunciado original
 
@@ -1118,16 +1116,15 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
      amplifica un gesto pequeño y cómodo hasta el recorrido del robot.
    - No hace falta cubrir los ±90° mecánicos del pan. El operador estima que con
      **±50° de robot** basta para la mediación de lectura.
-   - Falta medir a qué ángulo de cabeza pierde la pantalla de vista. Con ese
-     dato: `ganancia = 50 / ese ángulo`. Protocolo en **P4.2**.
+   - ✅ **Medido y cerrado** (P4.2). El recorrido útil sostenido resultó ser
+     33.5° / 29.5° en pan y 26.5° / 21.6° en tilt, de donde salen las ganancias
+     **1.49 / 1.59 / 1.80**, ya fijadas en `HeadConfig`. Una repetición con otra
+     cámara da 1.69 / 1.35 / 2.03: ±15 % de repetibilidad de la calibración.
    - ✅ `suggested_gains()` ya divide entre `HEAD_PAN_TARGET_RANGE` (±50°), y
      también lo hace `tools/analizar_registro.py`. La cifra del HUD es citable.
      Ver **P4.3**.
-   - Hay ganancias **provisionales** rescatadas de una grabación anterior
-     (`gain_pan ≈ 1.69`, `tilt_up ≈ 2.33`, `tilt_down ≈ 1.73`), utilizables para
-     seguir trabajando pero **no citables** por dos motivos: se midieron con el
-     criterio del cuello y no con el de la pantalla, y las de tilt salen de una
-     grabación con el signo invertido (**H22**), releída. Ver **P4.4**.
+   - Las ganancias provisionales que salían de `limites.csv` **quedan retiradas**:
+     esa grabación se descarta entera, no se relee. Ver **P4.4** y **H26**.
 
    Es una limitación de **diseño de interacción**, no de visión, y merece
    declararse como tal en el documento: el ancho del campo visual del operador
@@ -1185,14 +1182,16 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    se hizo con los demás DOF en home. Por eso existe la segunda capa de recorte
    en el visor — ver §5, que lo convierte en un resultado en vez de un problema.
 
-9. **La tasa del sistema la limita la cámara, no el algoritmo.** El techo medido
-   con el hardware disponible es de **~15 fps** (§4.0.4), frente a los 30 fps que
-   el plan daba por supuestos, y ningún ajuste de software lo mueve. MediaPipe
-   cuesta 5-7 ms por frame, el 7 % del presupuesto: **el cuello de botella es el
-   sensor**. Consecuencia honesta: la tasa de teleoperación declarada baja de
-   20 Hz a ~15 Hz. Es una limitación del equipo de pruebas, no del método, y
-   una cámara mejor la levanta sin tocar una línea — lo cual también es el
-   argumento de que el diseño no depende de ella.
+9. **La tasa del sistema la limita la cámara, no el algoritmo** — ⚠️ **y cuánto
+   la limita está por resolver.** Que el cuello de botella es el sensor y no el
+   método sigue en pie: MediaPipe cuesta 5-7 ms por frame, el 7 % del
+   presupuesto. Lo que está en duda es la cifra. Una medición dio ~15 fps
+   (§4.0.4) y la sesión de calibración del pipeline real dio **30.0 fps sin un
+   solo frame duplicado**; la hipótesis que las reconcilia es el formato MJPG
+   (**H27**), sin confirmar. **Hasta resolverlo no se declara ninguna
+   limitación de tasa.** Lo que no cambia en ningún caso es el argumento de
+   fondo: sea cual sea el techo, lo pone el equipo de pruebas y una cámara mejor
+   lo levanta sin tocar una línea, así que el diseño no depende de ella.
 
 10. **El mapeo operador → robot está amplificado, y eso amplifica el temblor.**
     La ganancia > 1 es necesaria porque el campo de visión del operador sobre su
@@ -1251,7 +1250,26 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    | 1 (integrada) | dshow | 8.0 fps | **15.0 fps** |
    | 1 (integrada) | msmf | falla | **15.3 fps** |
 
-   **Mejor combinación: cámara 1 a 640x480, ~15 fps.**
+   **Mejor combinación: cámara integrada a 640x480.**
+
+   ⚠️ **La cifra de ~15 fps de esta tabla está EN DUDA desde el 2026-09-06**, y
+   con ella la limitación que este plan declara en §0.4 y §3.3.9. Ver el aviso
+   al final de este apartado.
+
+   **Por qué la integrada y no la externa**, ya con datos del operador y no solo
+   de la tabla:
+
+   - **El encuadre manda, y es del PROMPT 5.** La externa recorta mucho más: a
+     la misma distancia da una cara de 105 px entre los ojos frente a 60 px de
+     la integrada. Para la cabeza eso es una ventaja, pero el arm tracker
+     necesita **hombros, codos y muñecas en cuadro**, y ahí ese recorte es
+     descalificante. La configuración tiene que servir al sistema completo, no
+     al head tracker solo.
+   - **En precisión efectiva empatan.** Es lo que dice **H25**: la externa gana
+     en temblor crudo (0.146° frente a 0.159° en pan) y **pierde tras el filtro
+     One Euro** (0.098° frente a 0.058°). La cifra que llega al robot es la
+     filtrada, y ahí la integrada es igual o mejor. Comparar cámaras por el
+     dato crudo lleva a la decisión contraria a la correcta.
 
    ```
    $env:TELMEOW_CAMERA_BACKEND="dshow"; $env:TELMEOW_CAMERA_INDEX="1"
@@ -1272,10 +1290,36 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
      79.7-80.2 ms, idénticos. Un lector en hilo aparte confirmó 12.2 fps, así
      que no es latencia de `read()`: la cámara **produce** a esa tasa.
 
-   Consecuencias para el plan: el objetivo de **30 fps de captura no es
-   alcanzable** con este hardware, y el de **20 Hz de publicación tampoco** —
-   quedaría en ~15 Hz. Hay que declararlo como limitación o cambiar de cámara.
-   MediaPipe no tiene culpa: cuesta 5-7 ms por frame, el 7 % del tiempo.
+   Consecuencias que se dedujeron entonces: el objetivo de **30 fps de captura
+   no sería alcanzable** con este hardware, y el de **20 Hz de publicación
+   tampoco** — quedaría en ~15 Hz. MediaPipe no tiene culpa: cuesta 5-7 ms por
+   frame, el 7 % del tiempo.
+
+   ### ⚠️ Esa conclusión está EN DUDA desde el 2026-09-06 — no citarla todavía
+
+   **Lo medido, sin interpretar.** La sesión de calibración del P4.2 corrió a
+   **30.0 fps con cero frames duplicados**: ni uno solo de los 4261 pares
+   consecutivos del CSV repite ángulo, así que no son frames repetidos, son 30
+   frames **distintos** por segundo. La sesión con la otra cámara marcó 30.8.
+   Comprobado sobre el registro crudo, no sobre el contador del HUD.
+
+   **Hipótesis, localizada pero SIN confirmar** (**H27**): `CameraConfig.fourcc`
+   vale `"MJPG"` por defecto y el demo lo aplica **antes** de la resolución
+   (`config.py:268`); **`tools/list_cameras.py` no toca el formato**, así que
+   midió con el formato crudo de la cámara. A 640x480 sin comprimir, el bus USB
+   no da para 30 fps; con MJPG sí. Encaja con todo lo observado, pero **choca
+   con lo que dice el punto anterior** —que se probó MJPG y no cambiaba nada— y
+   las dos cosas no pueden ser ciertas a la vez.
+
+   **Qué hacer con esto.** No se ha tocado nada: ni el código de medición ni la
+   configuración, que funciona. Pero **la limitación de ~15 Hz no se puede citar
+   en el documento mientras esté así**, porque la medición del pipeline real
+   dice lo contrario. Resolverlo cuesta un comando —`list_cameras.py --medir`
+   con y sin MJPG, misma luz, misma cámara— y hay que hacerlo antes de escribir
+   esa limitación.
+
+   Si se confirma, la noticia es buena: el objetivo de **20 Hz de publicación
+   vuelve a ser alcanzable** y la tesis pierde una limitación en vez de ganarla.
 
 5. **MSMF se cuelga al abrir, y falla a 720p.** `cv2.CAP_MSMF` bloquea
    indefinidamente al abrir algunas webcams. El remedio es la variable
@@ -1346,6 +1390,8 @@ instancia del repositorio en otro puerto TCP, apuntando el pipeline con
 7. `python -m telmeow_teleop.head_tracker --publish` — la cabeza del operador
    mueve la del robot en el visor. Es lo que cierra el P4.1, y funciona sin
    esperar al P7. Admite `--record` a la vez: publica y graba en la misma pasada.
+   Si el CSV de destino ya existe, **la grabación anterior se conserva** con el
+   sufijo `_anterior`; no se pisa (se perdió una así el 2026-09-06).
 8. `python -m telmeow_teleop.main` con la cámara. *(tras P7)*
 9. `python -m telmeow_teleop.control_panel`. *(tras P10)*
 10. En la Raspberry: `python raspberry/story_display.py --windowed`. *(tras P11)*
@@ -1398,13 +1444,14 @@ equivalente en Python puro, sin privilegios de administrador.
   Hoy la respuesta honesta es que no se midieron: el indicador mide el intervalo
   entre mensajes. Ver §3.2 punto 2.
 
-- **«¿Por qué su sistema va a 15 Hz si declaró 20?»** *(nueva)*
-  Porque el techo lo pone la cámara, no el método: medido, 15 fps a 640x480, y
-  ningún ajuste de software lo mueve (§7.8). MediaPipe consume 5-7 ms por frame,
-  el 7 % del presupuesto. El transporte MQTT sí sostiene 20 Hz —verificado— y una
-  cámara mejor levanta el techo sin tocar una línea de código. La cifra que se
-  reporta es la del sistema completo con el equipo disponible, no la del mejor
-  caso.
+- **«¿A qué tasa va su sistema?»** *(pendiente de cerrar, ver §4.0.4)*
+  El transporte MQTT sostiene 20 Hz, verificado. El techo de captura está sin
+  resolver: una medición dio 15 fps y la sesión de calibración del pipeline dio
+  30 fps sin frames duplicados. **No llevar esta pregunta al jurado sin haberla
+  cerrado antes**: la respuesta correcta es un número medido, y ahora mismo hay
+  dos. Lo que sí es defendible en cualquier caso es que el cuello de botella es
+  el sensor y no el método —MediaPipe consume 5-7 ms por frame, el 7 % del
+  presupuesto— y que una cámara mejor levanta el techo sin tocar una línea.
 
 - **«¿Por qué usa una ganancia mayor que 1? ¿No está exagerando el
   movimiento?»** *(nueva)*
@@ -1754,7 +1801,41 @@ cuando una etiqueta pasó demasiado tiempo lejos de la meseta**: pasada sobre
 `limites.csv` marca sola la etiqueta 5, que era justo la que se había descartado
 a mano por inservible.
 
-## 7.10 Índice de hallazgos y dónde vive cada uno ahora
+## 7.10 La calibración del 2026-09-06 (H25, H26, H27)
+
+Dos sesiones de grabación con el protocolo del P4.2, una por cámara. De ahí
+salen las ganancias y tres cosas que conviene no olvidar.
+
+**H25 — El temblor crudo y el filtrado ordenan las cámaras al revés.** La cámara
+externa gana en crudo (0.146° frente a 0.159° en pan) y **pierde tras el One
+Euro** (0.098° frente a 0.058°). Si la comparación se hubiera hecho con el dato
+crudo —que es el reflejo natural— se habría elegido la cámara equivocada. **La
+cifra que decide es la que llega al robot**, no la que sale del estimador. Vale
+para cualquier comparación de hardware que quede en el proyecto.
+
+La decisión final, además, no la ganó ninguna de las dos por precisión sino por
+**encuadre**: la externa recorta demasiado para meter los brazos del PROMPT 5. La
+configuración se elige para el sistema completo, no para el módulo que se está
+midiendo ese día.
+
+**H26 — Una grabación con el protocolo equivocado no se rescata releyéndola.**
+`limites.csv` se intentó reinterpretar dos veces: primero rescatando la meseta
+por percentiles, después corrigiendo el signo del tilt. La segunda relectura
+produjo una afirmación **falsa** —que al operador le costaba más levantar la
+cabeza que bajarla— que estuvo un día en este documento y en tres docstrings,
+hasta que dos sesiones nuevas la contradijeron. El dato bueno costó diez minutos
+de grabación; la relectura costó más que eso y dejó una cifra equivocada por
+medio. **Cuando el protocolo fue el equivocado, se vuelve a medir.**
+
+**H27 — El `fourcc` como explicación de los 15 fps, sin confirmar.** Está
+detallado en §4.0.4. La forma general del hallazgo, que es la que interesa:
+**una herramienta de diagnóstico que no replica la configuración de producción
+induce a error con toda la autoridad de una medición.** `list_cameras.py` mide
+sin fijar el formato; el pipeline fija MJPG antes de la resolución. Si eso es lo
+que separa 15 de 30 fps, la limitación de tasa que este plan declaró durante un
+mes nunca existió.
+
+## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
 |---|---|---|
@@ -1782,12 +1863,22 @@ a mano por inservible.
 | **H22** | El método `mesh` devolvía el **tilt invertido**: la nube de MediaPipe tiene la `y` hacia abajo y el modelo del PnP hacia arriba | P4, §7.9 |
 | **H23** | Un indicador escrito por dos sitios parpadea aunque los dos acierten | §7.9 |
 | **H24** | En una postura sostenida, el percentil es el dato y el extremo es ruido | P4.4, §7.9 |
+| **H25** | El temblor crudo y el filtrado **ordenan las cámaras al revés** | §4.0.4, §7.10 |
+| **H26** | Una grabación con el protocolo equivocado no se rescata releyéndola | P4.4, §7.10 |
+| **H27** | *(en duda)* El `fourcc` podría explicar los 15 fps frente a los 30 medidos | §4.0.4, §7.10 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la
 investigación de la cámara que salió de él. H19 y H20 son **correcciones a
 afirmaciones mías anteriores**, y quedan escritas como tales a propósito: la
 primera versión de esas cifras llegó a influir en la configuración recomendada.
 
-H22 a H24 salen de la primera sesión con el operador **delante del visor**
-(2026-09-06). La H22 obliga además a releer varias cifras de este documento, y
-esas relecturas están anotadas donde estaban las cifras, no solo aquí.
+H22 a H27 salen todos del mismo día, el 2026-09-06: la primera sesión con el
+operador **delante del visor** y la calibración que vino después. Es el patrón a
+retener de cara a los prompts que quedan — **el código llevaba 400 pruebas en
+verde con el cabeceo invertido**, y lo destapó sentar a una persona delante.
+
+Tres de esos hallazgos obligan a releer cifras que ya estaban escritas aquí: la
+H22 (el signo del tilt), la H26 (`limites.csv` se descarta entera) y la H27 (la
+tasa de captura queda en el aire). Esas relecturas están anotadas **donde
+estaban las cifras**, no solo en esta tabla, porque el riesgo no es olvidar el
+hallazgo sino citar el número viejo.

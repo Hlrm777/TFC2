@@ -63,6 +63,7 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
+from pathlib import Path
 
 import cv2
 import mediapipe as mp
@@ -80,6 +81,7 @@ __all__ = [
     "MODEL_POINTS_3D",
     "LANDMARK_IDS",
     "FRONTAL_ROTATION",
+    "apartar_si_existe",
 ]
 
 
@@ -418,13 +420,18 @@ class HeadTracker:
         justo el objetivo.
 
         El tilt se propone **por separado hacia arriba y hacia abajo**, porque
-        las asimetrías del robot y del operador no coinciden: el robot llega
-        menos hacia abajo (−39° frente a +42°), mientras que el operador se
-        queda más corto hacia arriba. Con un único valor habría que elegir entre
-        pasarse por un lado o no llegar nunca por el otro.
+        las dos asimetrías van en el mismo sentido y se suman: el robot llega
+        menos hacia abajo (−39° frente a +42°) y el operador también se queda
+        más corto hacia abajo (medido, 26.5° arriba frente a 21.6° abajo). Con
+        un único valor habría que elegir entre pasarse por arriba o no llegar
+        nunca por abajo.
 
-        El pan sí usa un solo valor, tomando el lado de menor recorrido: su
-        objetivo es simétrico (±50°) y no hay razón para diferenciarlo.
+        El pan sí usa un solo valor, porque su objetivo es simétrico (±50°) y
+        las medidas no sostienen una asimetría estable del operador. De las dos
+        propuestas se toma la **menor**, que es la del lado de MAYOR recorrido:
+        así ningún sentido se pasa del objetivo, a cambio de que el lado corto
+        se quede algo por debajo. Es la elección conservadora, y con la
+        asimetría medida no es cosmética — son 1.49 frente a 1.69.
 
         OBJETIVOS DISTINTOS POR EJE, y no es un descuido. El tilt apunta a su
         rango mecánico completo (`HEAD_TILT_RANGE`); el pan apunta a
@@ -585,11 +592,10 @@ class HeadTracker:
         # calibran contra lo que él alcanza cómodamente, no contra lo que acabe
         # haciendo el robot.
         #
-        # Los dos sentidos son asimétricos y por motivos distintos: el robot
-        # llega menos hacia abajo (−39° frente a +42°) y el operador se queda
-        # más corto hacia arriba. Con una sola ganancia hay que elegir entre
-        # pasarse por un lado o no llegar por el otro. La función es continua
-        # en 0, así que no hay salto al cruzar.
+        # Bajar la barbilla es el caso peor, y por partida doble: el robot llega
+        # menos hacia abajo (−39° frente a +42°) y el operador también. Con una
+        # sola ganancia hay que elegir entre pasarse arriba o no llegar abajo.
+        # La función es continua en 0, así que no hay salto al cruzar.
         ganancia_tilt = self.gain_tilt_up if pitch >= 0.0 else self.gain_tilt_down
 
         pan = yaw * self.gain_pan * (-1.0 if self.invert_pan else 1.0)
@@ -622,6 +628,32 @@ class HeadTracker:
 # --------------------------------------------------------------------------
 # Modo demo
 # --------------------------------------------------------------------------
+
+
+def apartar_si_existe(ruta: Path) -> Path | None:
+    """Si ``ruta`` ya existe, la renombra con el sufijo ``_anterior``.
+
+    Devuelve dónde quedó la anterior, o None si no había ninguna.
+
+    Existe porque una sesión de medición cuesta diez minutos de operador y no se
+    puede rehacer idéntica —la postura, la luz y la distancia no vuelven a ser
+    las mismas—. Ya se perdió una así: se grabó la segunda toma con el mismo
+    nombre que la primera y la primera dejó de existir, con ella la única copia
+    de los datos de la cámara externa.
+
+    NO pregunta ni aborta a propósito: interrumpir con una pregunta en el
+    arranque es justo lo que no se quiere durante una sesión con el operador
+    sentado y calibrado. Aparta y sigue.
+    """
+    if not ruta.exists():
+        return None
+    apartado = ruta.with_name(f"{ruta.stem}_anterior{ruta.suffix}")
+    contador = 2
+    while apartado.exists():
+        apartado = ruta.with_name(f"{ruta.stem}_anterior{contador}{ruta.suffix}")
+        contador += 1
+    ruta.replace(apartado)
+    return apartado
 
 
 def _dibujar_orientacion(frame_bgr, origen, pan: float, tilt: float, largo=90.0) -> None:
@@ -779,6 +811,9 @@ def _demo(argv: list[str] | None = None) -> int:
     escritor = None
     etiqueta = 0
     if args.record:
+        apartado = apartar_si_existe(Path(args.record))
+        if apartado is not None:
+            print(f"AVISO: ese CSV ya existia. Se conserva como {apartado.name}.\n")
         registro = open(args.record, "w", newline="", encoding="utf-8")
         escritor = csv.writer(registro)
         escritor.writerow(

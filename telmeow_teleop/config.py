@@ -290,16 +290,12 @@ class HeadConfig:
     estimación no tiene la misma sensibilidad en los dos.
 
     El tilt lleva **dos ganancias, una por sentido**, porque hay dos asimetrías
-    que no coinciden. La del robot es firme: llega menos hacia abajo, −39°
-    frente a +42°. La del operador se creía en el mismo sentido, pero la
-    grabación de la que salió tenía el tilt invertido (H22 del plan), y leída ya
-    con el signo bueno dice lo contrario: al operador **le cuesta más levantar
-    la cabeza que bajarla**, 18° frente a 23°. Es decir que las dos asimetrías
-    no se suman, se compensan en parte. Pendiente de confirmar en el P4.2, que
-    es la primera medida tomada con el signo correcto.
-
-    Lo que no cambia es que hagan falta dos ganancias: con un único valor habría
-    que elegir entre pasarse por un lado o no llegar nunca por el otro.
+    y **van en el mismo sentido, así que se suman**: el robot llega menos hacia
+    abajo (−39° frente a +42°) y el operador también se queda más corto hacia
+    abajo. Medido con el protocolo del P4.2 en dos sesiones independientes:
+    26.5° arriba frente a 21.6° abajo con la cámara integrada, y 31.0° frente a
+    19.2° con la externa. Con un único valor habría que elegir entre pasarse por
+    arriba o no llegar nunca por abajo, que era la queja original del operador.
 
     Ambas suelen necesitar ser mayores que 1: el cabeceo se estima a partir de
     la profundidad de los landmarks, que MediaPipe entrega comprimida. El demo
@@ -307,7 +303,21 @@ class HeadConfig:
     ``python -m telmeow_teleop.head_tracker``.
 
     Amplificar tiene un precio: multiplica también el ruido de la estimación y
-    hace llegar antes al tope mecánico.
+    hace llegar antes al tope mecánico. Con estas ganancias, el temblor que
+    recibe el robot es de **0.09° en pan y 0.25° en tilt**, sobre rangos de ±50°
+    y −39/+42°.
+
+    LOS VALORES POR DEFECTO ESTÁN MEDIDOS, no elegidos. Salen de la sesión del
+    2026-09-06 con el protocolo del P4.2 —girar hasta que la pantalla deja de
+    leerse con comodidad y sostener la postura— analizada con
+    ``tools/analizar_registro.py``, en la configuración de operación: cámara
+    integrada a 640x480. Una repetición con la cámara externa da 1.69 / 1.35 /
+    2.03, y esa dispersión de ±15 % es la repetibilidad de la calibración.
+
+    **Son de ESTE operador y de ESTA geometría de pantalla.** Dependen de a qué
+    distancia se sienta y de cuánto ocupa el monitor en su campo de visión, no
+    de la cámara ni del robot. Otro operador, u otro puesto, exige repetir el
+    protocolo.
 
     ``invert_pan`` VIENE ACTIVADO, y el motivo es de diseño de interacción, no
     de visión. Con él, el operador girando a **su** derecha hace que el robot
@@ -323,9 +333,9 @@ class HeadConfig:
     """
 
     method: str = "mesh"
-    gain_pan: float = 1.15
-    gain_tilt_up: float = 1.0
-    gain_tilt_down: float = 1.0
+    gain_pan: float = 1.49
+    gain_tilt_up: float = 1.59
+    gain_tilt_down: float = 1.80
     invert_pan: bool = True
     invert_tilt: bool = False
     min_cutoff: float = 0.5

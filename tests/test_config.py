@@ -71,13 +71,18 @@ def test_defaults_camara():
 
 
 def test_defaults_cabeza():
-    """gain_pan 1.15 sale de una prueba con el operador real: con 1.0 el giro
-    lateral se quedaba algo corto."""
+    """Las tres ganancias están MEDIDAS, no elegidas.
+
+    Salen de la sesión del 2026-09-06 con el protocolo del P4.2 —girar hasta que
+    la pantalla deja de leerse y sostener la postura— en la configuración de
+    operación. Cambiarlas sin repetir esa medición invalida la calibración, y
+    por eso están fijadas en una prueba.
+    """
     head = HeadConfig()
     assert head.method == "mesh"
-    assert head.gain_pan == 1.15
-    assert head.gain_tilt_up == 1.0
-    assert head.gain_tilt_down == 1.0
+    assert head.gain_pan == 1.49
+    assert head.gain_tilt_up == 1.59
+    assert head.gain_tilt_down == 1.80
 
 
 def test_el_pan_viene_invertido_a_proposito():
@@ -91,8 +96,8 @@ def test_el_pan_viene_invertido_a_proposito():
 
 
 def test_el_tilt_tiene_una_ganancia_por_sentido():
-    """Dos asimetrías que no coinciden: el robot llega menos hacia abajo (−39
-    frente a +42) y el operador se queda más corto hacia arriba."""
+    """Dos asimetrías que se suman: el robot llega menos hacia abajo (−39 frente
+    a +42) y el operador también se queda más corto hacia abajo."""
     cfg = AppConfig.from_env(
         {"TELMEOW_HEAD_GAIN_TILT_UP": "1.4", "TELMEOW_HEAD_GAIN_TILT_DOWN": "2.2"}
     )
@@ -101,13 +106,18 @@ def test_el_tilt_tiene_una_ganancia_por_sentido():
 
 
 def test_las_ganancias_se_pueden_ajustar_por_entorno():
-    """Calibrar no debe requerir tocar código."""
+    """Calibrar no debe requerir tocar código.
+
+    Los valores de prueba se eligen DISTINTOS de los de por defecto a propósito:
+    con 1.80, que es el valor real de `gain_tilt_down`, la prueba pasaría en
+    verde aunque la variable de entorno se ignorase por completo.
+    """
     cfg = AppConfig.from_env(
-        {"TELMEOW_HEAD_GAIN_TILT_DOWN": "1.8", "TELMEOW_HEAD_INVERT_PAN": "false"}
+        {"TELMEOW_HEAD_GAIN_TILT_DOWN": "2.4", "TELMEOW_HEAD_INVERT_PAN": "false"}
     )
-    assert cfg.head.gain_tilt_down == 1.8
+    assert cfg.head.gain_tilt_down == 2.4
     assert cfg.head.invert_pan is False  # se puede volver al mapeo especular
-    assert cfg.head.gain_pan == 1.15  # sin tocar
+    assert cfg.head.gain_pan == 1.49  # sin tocar
 
 
 def test_orden_de_emociones_es_el_del_entrenamiento():

@@ -22,6 +22,7 @@ from telmeow_teleop.head_tracker import (
     MODEL_POINTS_3D,
     HeadTracker,
     _euler_from_rotation,
+    apartar_si_existe,
     camera_matrix,
     estimate_head_pose,
     landmarks_to_cloud,
@@ -695,3 +696,41 @@ def test_el_rango_de_tilt_del_robot_es_menor_que_el_de_una_persona():
     recorrido_pan = HEAD_PAN_RANGE[1] - HEAD_PAN_RANGE[0]
     recorrido_tilt = HEAD_TILT_RANGE[1] - HEAD_TILT_RANGE[0]
     assert recorrido_tilt < recorrido_pan / 2
+
+
+# --------------------------------------------------------------------------
+# No pisar una grabación anterior
+# --------------------------------------------------------------------------
+
+
+def test_apartar_si_existe_no_hace_nada_si_no_hay_nada(tmp_path):
+    assert apartar_si_existe(tmp_path / "pantalla.csv") is None
+
+
+def test_apartar_si_existe_conserva_la_grabacion_anterior(tmp_path):
+    """El caso que costó una sesión de medición: grabar encima de la anterior.
+
+    Una toma con el operador cuesta diez minutos y no se puede rehacer idéntica,
+    porque la postura, la luz y la distancia no vuelven a ser las mismas.
+    """
+    destino = tmp_path / "pantalla.csv"
+    destino.write_text("la primera sesion", encoding="utf-8")
+
+    apartado = apartar_si_existe(destino)
+
+    assert apartado == tmp_path / "pantalla_anterior.csv"
+    assert apartado.read_text(encoding="utf-8") == "la primera sesion"
+    assert not destino.exists()   # libre para que el demo escriba encima
+
+
+def test_apartar_si_existe_no_pisa_lo_ya_apartado(tmp_path):
+    """A la tercera toma, la segunda tampoco se puede perder."""
+    destino = tmp_path / "pantalla.csv"
+    (tmp_path / "pantalla_anterior.csv").write_text("primera", encoding="utf-8")
+    destino.write_text("segunda", encoding="utf-8")
+
+    apartado = apartar_si_existe(destino)
+
+    assert apartado == tmp_path / "pantalla_anterior2.csv"
+    assert apartado.read_text(encoding="utf-8") == "segunda"
+    assert (tmp_path / "pantalla_anterior.csv").read_text(encoding="utf-8") == "primera"

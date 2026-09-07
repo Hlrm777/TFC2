@@ -712,8 +712,27 @@ python -m telmeow_teleop.arm_tracker --publish --record brazos.csv
    `python tools/analizar_registro_brazos.py brazos.csv`. De ahí salen las tres
    cifras que faltan: el temblor por canal (respalda §3.3.1), la comparación
    mano/codo, y el porcentaje de frames en que se ven el codo y las caderas.
-4. **Medir el coste de BlazePose** en ms/frame con `model_complexity` 0, 1 y 2,
-   para ponerlo junto a los 5-7 ms de Face Mesh: en el P7 comparten bucle.
+4. **Medir el coste de BlazePose** con `model_complexity` 0, 1 y 2, **con el
+   operador delante**. Es lo que hay que aclarar antes del P7, donde BlazePose
+   comparte bucle con Face Mesh y con el clasificador de emoción.
+
+   Ya hay media medida, y hay que leerla con cuidado porque **es fácil creer
+   que dice más de lo que dice**: sin persona en cuadro, los tres niveles dan
+   **17.2 ms** idénticos. No significa que la complejidad no importe: significa
+   que sin persona solo corre el **detector**, que es común a los tres, y el
+   modelo de landmarks —que es lo que cambia— no llega a ejecutarse. Medirlo
+   así y concluir «da igual el nivel» sería el **H19** otra vez.
+
+   Lo que sí queda establecido: el detector solo cuesta **~17 ms/frame**, o sea
+   **tres veces** lo que cuesta Face Mesh entero (5-7 ms), y es el camino que
+   se toma en cada frame en que el operador no se detecta. Con 20 Hz de
+   publicación (50 ms de presupuesto) cabe, pero deja de sobrar.
+
+   ⚠️ **MediaPipe descarga los `.tflite` la primera vez que se usa un nivel**
+   (`pose_landmark_lite.tflite`, `pose_landmark_heavy.tflite`, dentro del
+   `.venv`). Con `model_complexity=1` no se nota porque el `full` ya viene en el
+   paquete. Dos consecuencias: la primera ejecución con un nivel distinto
+   **necesita red**, y para la Raspberry Pi del P11 hay que preverlo.
 
 ### Lo que hereda del P4 — leer antes de escribir código
 

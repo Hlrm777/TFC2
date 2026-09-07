@@ -9,6 +9,7 @@ Módulos:
     filters       -- suavizado temporal (One Euro, EMA, histéresis de clase)
     publisher     -- publicación de poses por MQTT hacia el visor
     head_tracker  -- pose de la cabeza por Face Mesh + solvePnP
+    arm_tracker   -- pose de los brazos por BlazePose (abducción y flexión)
 
 Los tres primeros usan solo biblioteca estándar, así que toda su lógica se puede
 validar sin instalar TensorFlow ni MediaPipe.
@@ -48,4 +49,11 @@ configure_video_backend()
 
 __version__ = "0.1.0"
 
-__all__ = ["config", "limits", "filters", "publisher", "head_tracker"]
+__all__ = [
+    "config",
+    "limits",
+    "filters",
+    "publisher",
+    "head_tracker",
+    "arm_tracker",
+]

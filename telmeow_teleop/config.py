@@ -37,6 +37,7 @@ __all__ = [
     "CameraConfig",
     "PathConfig",
     "HeadConfig",
+    "ArmConfig",
     "AppConfig",
     "add_cli_args",
     "load",
@@ -356,6 +357,132 @@ class HeadConfig:
 
 
 @dataclass(frozen=True)
+class ArmConfig:
+    """Mapeo de los brazos del operador a los del robot.
+
+    QUE MIDE CADA CANAL. El hombro del robot es un cardán de dos grados de
+    libertad que orienta un brazo rígido sin codo. Los nombres del contrato MQTT
+    son heredados y uno de ellos miente -- ``armLtw`` sugiere *twist*, o sea
+    torsión, pero el canal es flexión. Ver el docstring de ``limits.py``:
+
+    - ``armL`` / ``armR``     -> abducción (+) / aducción (−), plano frontal.
+    - ``armLtw`` / ``armRtw`` -> flexión (+) / extensión (−), plano sagital.
+
+    **El robot no tiene rotación interna/externa**, así que esa componente del
+    gesto no se reproduce (H28 del plan maestro).
+
+    ``target`` ELIGE EL PUNTO DE DESTINO del vector que orienta el brazo:
+
+    ``"mano"``
+        Centroide de los cuatro landmarks de la mano que BlazePose entrega
+        (muñeca, meñique, índice y pulgar). Es el valor por defecto y es un
+        **retargeting deliberado**, no el ángulo anatómico del hombro: el brazo
+        del robot es un eslabón rígido único, así que lo que hay que conservar
+        es hacia dónde apunta el brazo completo del operador. Además, sentado a
+        la mesa con la cámara integrada, la mano se ve mucho más fiablemente que
+        el codo.
+    ``"codo"``
+        Vector húmero (hombro→codo). Es el ángulo articular del hombro en
+        sentido estricto. Se conserva para poder comparar los dos con datos
+        sobre los mismos frames, igual que ``head_tracker`` conserva ``pnp``
+        junto a ``mesh``.
+
+    Consecuencia a declarar con ``"mano"``: la flexión de codo del operador no
+    tiene contrapartida en el robot y no se reproduce; con el codo doblado, la
+    mano del robot queda más lejos que la del operador porque su eslabón no se
+    acorta.
+
+    ``mirror`` DECIDE QUE BRAZO MANDA SOBRE CUAL. Con ``True`` (por defecto), el
+    brazo izquierdo **físico** del operador mueve el brazo izquierdo del robot.
+    Es la misma convención que ``HeadConfig.invert_pan``: el robot reproduce la
+    pose en **su propio** marco, que es lo que llega a los servos. El precio,
+    igual que con la cabeza, es que mirando al robot de frente en el visor se ve
+    especular.
+
+    Ojo con el detalle que lo hace no trivial: el frame se voltea
+    horizontalmente antes de estimar, así que las etiquetas ``LEFT_*`` de
+    BlazePose corresponden al lado **físicamente opuesto** del operador.
+
+    ``invert_flexion`` VIENE ACTIVADO, y el motivo es un hallazgo (H29): el
+    comentario del rig del visor dice que ``+armLtw`` lleva el brazo **hacia
+    adelante**, y la geometría dice que lo lleva **hacia atrás**. Tres anclas
+    independientes, dos de ellas ya verificadas con el operador delante:
+
+    1. El eje del servo del cuello es ``+x`` y está comprobado en vivo que un
+       tilt **negativo baja** la cabeza (H22). Eso obliga a que el robot mire
+       hacia ``+y``.
+    2. El eje del pan es ``-z`` y está comprobado en vivo que un pan
+       **positivo gira el robot a su derecha** (P4.1). Coincide: el robot mira
+       a ``+y`` y su derecha es ``+x``, que es donde está ``Brazo_Der``.
+    3. Con esos ejes y ``setJoint``, que aplica el ángulo sin negarlo,
+       ``+armLtw`` mueve el brazo hacia ``-y``. O sea, hacia atrás.
+
+    Con el robot mirando a ``+y``, el canal ``tw`` positivo es **extensión**, no
+    flexión. Invertirlo es lo que hace que el robot copie al operador. La
+    abducción no necesita inversión: ``+armR`` lleva el brazo hacia ``+x``, que
+    es hacia afuera para el brazo derecho.
+
+    ⚠️ **Falta la confirmación en vivo**, y es de un minuto: mover el slider
+    ``s-arRtw`` a +50 y mirar si el brazo va adelante o atrás. Si va adelante,
+    esta bandera vuelve a ``False`` y el hallazgo se retira. No se deja
+    deducido y ya porque en este proyecto ya hubo dos errores de signo que
+    pasaron todas las pruebas en verde (H17 y H22) — pero tampoco se deja en el
+    valor que la geometría dice que es el equivocado.
+
+    Las dos banderas se comparten entre los dos brazos porque la convención del
+    robot ya es simétrica —las tablas de ``limits.py`` usan el mismo sentido en
+    los dos lados—, y compartirlas reduce a la mitad la superficie del fallo.
+
+    LAS GANANCIAS VALEN 1.0 y están pendientes de calibrar. A diferencia de la
+    cabeza, aquí no hay motivo conocido para que hagan falta: la ganancia del
+    head tracker existe porque el operador no puede girar la cabeza sin perder
+    de vista el monitor, y ese problema no se replica en los brazos. Se dejan
+    implementadas y configurables, por sentido, para poder fijarlas si una
+    sesión de medición demuestra que el recorrido del operador no cubre el rango
+    del robot. Que se queden en 1.0 también es un resultado.
+
+    ``min_visibility`` es el umbral de la puntuación de visibilidad de BlazePose
+    por debajo del cual un landmark se considera no observado. Un brazo cuyos
+    landmarks no lleguen al umbral se descarta **por separado**, sin arrastrar
+    al otro.
+    """
+
+    target: str = "mano"
+    mirror: bool = True
+    invert_abduccion: bool = False
+    invert_flexion: bool = True
+    gain_abduccion: float = 1.0
+    gain_aduccion: float = 1.0
+    gain_flexion: float = 1.0
+    gain_extension: float = 1.0
+    min_cutoff: float = 0.5
+    beta: float = 0.5
+    min_visibility: float = 0.5
+    model_complexity: int = 1
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str]) -> "ArmConfig":
+        return cls(
+            target=_env_str(env, "ARM_TARGET", cls.target),
+            mirror=_env_bool(env, "ARM_MIRROR", cls.mirror),
+            invert_abduccion=_env_bool(
+                env, "ARM_INVERT_ABDUCCION", cls.invert_abduccion
+            ),
+            invert_flexion=_env_bool(env, "ARM_INVERT_FLEXION", cls.invert_flexion),
+            gain_abduccion=_env_float(env, "ARM_GAIN_ABDUCCION", cls.gain_abduccion),
+            gain_aduccion=_env_float(env, "ARM_GAIN_ADUCCION", cls.gain_aduccion),
+            gain_flexion=_env_float(env, "ARM_GAIN_FLEXION", cls.gain_flexion),
+            gain_extension=_env_float(env, "ARM_GAIN_EXTENSION", cls.gain_extension),
+            min_cutoff=_env_float(env, "ARM_MIN_CUTOFF", cls.min_cutoff),
+            beta=_env_float(env, "ARM_BETA", cls.beta),
+            min_visibility=_env_float(env, "ARM_MIN_VISIBILITY", cls.min_visibility),
+            model_complexity=_env_int(
+                env, "ARM_MODEL_COMPLEXITY", cls.model_complexity
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class PathConfig:
     """Rutas de modelos y recursos. Las relativas se resuelven contra
     ``PROJECT_ROOT``.
@@ -415,8 +542,9 @@ class AppConfig:
     camera: CameraConfig = field(default_factory=CameraConfig)
     paths: PathConfig = field(default_factory=PathConfig)
     head: HeadConfig = field(default_factory=HeadConfig)
+    arm: ArmConfig = field(default_factory=ArmConfig)
     log_level: str = "INFO"
-    balanceo_policy: str = "table"
+    abduccion_policy: str = "table"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "AppConfig":
@@ -432,8 +560,9 @@ class AppConfig:
             camera=CameraConfig.from_env(env),
             paths=PathConfig.from_env(env),
             head=HeadConfig.from_env(env),
+            arm=ArmConfig.from_env(env),
             log_level=_env_str(env, "LOG_LEVEL", cls.log_level),
-            balanceo_policy=_env_str(env, "BALANCEO_POLICY", cls.balanceo_policy),
+            abduccion_policy=_env_str(env, "ABDUCCION_POLICY", cls.abduccion_policy),
         )
 
 
@@ -463,7 +592,7 @@ _CLI_MAP: dict[str, tuple[str | None, str]] = {
     "emotion_model": ("paths", "emotion_model"),
     "face_cascade": ("paths", "face_cascade"),
     "log_level": (None, "log_level"),
-    "balanceo_policy": (None, "balanceo_policy"),
+    "abduccion_policy": (None, "abduccion_policy"),
 }
 
 
@@ -523,8 +652,8 @@ def add_cli_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         default=sup,
     )
     grp.add_argument(
-        "--balanceo-policy",
-        dest="balanceo_policy",
+        "--abduccion-policy",
+        dest="abduccion_policy",
         choices=("table", "intersection"),
         default=sup,
     )
@@ -580,8 +709,10 @@ if __name__ == "__main__":
                 "rates": cfg.rates.__dict__,
                 "camera": cfg.camera.__dict__,
                 "paths": {k: str(v) for k, v in cfg.paths.__dict__.items()},
+                "head": cfg.head.__dict__,
+                "arm": cfg.arm.__dict__,
                 "log_level": cfg.log_level,
-                "balanceo_policy": cfg.balanceo_policy,
+                "abduccion_policy": cfg.abduccion_policy,
             },
             indent=2,
             ensure_ascii=False,

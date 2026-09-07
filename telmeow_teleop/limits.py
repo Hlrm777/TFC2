@@ -1,10 +1,35 @@
 """Límites articulares del robot Telmeow y recorte (clamping) de poses.
 
+LOS DOS GRADOS DE LIBERTAD DEL HOMBRO, CON SU NOMBRE ANATÓMICO
+--------------------------------------------------------------
+El hombro del robot es un **cardán de dos grados de libertad** que orienta un
+brazo rígido de un solo eslabón (``Brazo_Der_W.stl`` / ``Brazo_Izq_W.stl``, sin
+codo). Leídos de los ejes del rig en ``telmeow_viewer/telmeow_viewer.html``:
+
+===============  =====================  ====================================
+Canal MQTT       Eje del servo          Movimiento
+===============  =====================  ====================================
+``armL``/``armR``   antero-posterior    **abducción (+) / aducción (−)**,
+                                        en el plano frontal
+``armLtw``/``armRtw`` latero-lateral    **flexión (+) / extensión (−)**,
+                                        en el plano sagital
+===============  =====================  ====================================
+
+**El robot NO tiene rotación interna/externa** (rotación axial del húmero). No
+hay un tercer grado de libertad en el hombro, así que esa componente del gesto
+del operador no se reproduce y se declara como limitación (H28 del plan
+maestro).
+
+El sufijo ``tw`` de ``armLtw`` significa *twist* y por tanto miente: nombra como
+torsión un canal que es flexión. Los nombres de campo del JSON no se pueden
+cambiar sin romper el contrato con el visor, pero el vocabulario de este módulo
+sí es el correcto.
+
 ORIGEN DE LOS DATOS
 -------------------
 Las tablas de este módulo provienen de un barrido con detección de colisión por
 BVH sobre el modelo CAD del robot, con paso de 5° y refinado a 1° en los
-extremos. Cada combinación (giro, balanceo) se evaluó buscando interferencia
+extremos. Cada combinación (flexión, abducción) se evaluó buscando interferencia
 entre el brazo y el tronco.
 
 Los barridos se midieron **con los demás grados de libertad en posición home**.
@@ -12,12 +37,13 @@ Por lo tanto NO cubren combinaciones simultáneas de todos los DOF: describen el
 espacio admisible de un brazo aislado, no el del robot completo en una postura
 arbitraria. Es una limitación conocida del método y se declara como tal.
 
-LA DEPENDENCIA BALANCEO-GIRO
-----------------------------
-El rango de balanceo admisible **depende del giro**. Con el brazo girado hacia
-afuera se despeja del tronco y puede abducir mucho más que con el brazo en
-posición neutra. Por eso el recorte del balanceo no puede hacerse contra un par
-de constantes: hay que interpolar la tabla 2D en el giro actual.
+LA DEPENDENCIA ABDUCCIÓN-FLEXIÓN
+--------------------------------
+El rango de abducción admisible **depende de la flexión**. Con el brazo flexado
+hacia adelante se despeja del tronco y puede abducir mucho más que con el brazo
+colgando en posición neutra. Por eso el recorte de la abducción no puede hacerse
+contra un par de constantes: hay que interpolar la tabla 2D en la flexión
+actual.
 
 Este módulo es la primera de dos capas de seguridad. El visor 3D vuelve a
 clampar por BVH y señaliza colisión si una pose inválida llegara a pasar.
@@ -38,19 +64,19 @@ from enum import Enum
 
 __all__ = [
     "Side",
-    "BalanceoPolicy",
+    "AbduccionPolicy",
     "AxisClamp",
     "ArmClamp",
     "HeadClamp",
-    "GIRO_RANGE",
+    "FLEXION_RANGE",
     "HEAD_PAN_RANGE",
     "HEAD_PAN_TARGET_RANGE",
     "HEAD_TILT_RANGE",
-    "ARM_BALANCEO_1D",
+    "ARM_ABDUCCION_1D",
     "clamp_scalar",
     "clamp_head",
     "clamp_arm",
-    "arm_balanceo_range",
+    "arm_abduccion_range",
 ]
 
 
@@ -60,6 +86,17 @@ class Side(str, Enum):
 
     L = "L"
     R = "R"
+
+    @property
+    def opposite(self) -> "Side":
+        """El otro lado.
+
+        Vive aquí y no en quien la use porque el arm tracker tiene que cruzar
+        lados dos veces —del espejo de la cámara y de la política de mapeo— y
+        una función de cruce escrita a mano en cada sitio es exactamente la
+        clase de duplicado que acaba desincronizándose.
+        """
+        return Side.R if self is Side.L else Side.L
 
     @classmethod
     def parse(cls, value: "Side | str") -> "Side":
@@ -91,14 +128,14 @@ _SIDE_ALIASES: dict[str, Side] = {
 }
 
 
-class BalanceoPolicy(Enum):
-    """Política de recorte del balanceo.
+class AbduccionPolicy(Enum):
+    """Política de recorte de la abducción.
 
     TABLE
-        Solo la tabla 2D interpolada en el giro actual. Es el comportamiento
+        Solo la tabla 2D interpolada en la flexión actual. Es el comportamiento
         del sistema y el valor por defecto.
     INTERSECTION
-        Además intersecta con ``ARM_BALANCEO_1D``. Política conservadora que se
+        Además intersecta con ``ARM_ABDUCCION_1D``. Política conservadora que se
         conserva para poder contrastarla en pruebas; NO la usa el pipeline.
     """
 
@@ -110,7 +147,7 @@ class BalanceoPolicy(Enum):
 # Rangos 1D
 # --------------------------------------------------------------------------
 
-GIRO_RANGE: tuple[float, float] = (-90.0, 90.0)
+FLEXION_RANGE: tuple[float, float] = (-90.0, 90.0)
 HEAD_PAN_RANGE: tuple[float, float] = (-90.0, 90.0)
 HEAD_TILT_RANGE: tuple[float, float] = (-39.0, 42.0)  # asimétrico
 
@@ -122,25 +159,25 @@ HEAD_TILT_RANGE: tuple[float, float] = (-39.0, 42.0)  # asimétrico
 #: visión. ``suggested_gains()`` usa este rango, no ``HEAD_PAN_RANGE``.
 HEAD_PAN_TARGET_RANGE: tuple[float, float] = (-50.0, 50.0)
 
-#: Balanceo admisible con el brazo en giro = 0°, como metadato documental.
+#: Abducción admisible con el brazo en flexión = 0°, como metadato documental.
 #:
-#: Los límites 1D de balanceo corresponden a la rebanada de la tabla 2D en
-#: giro = 0°, medida con barrido refinado a 1°. La tabla 2D usa pasos de 5°,
-#: por lo que a giro = 0° reporta (-55, +30) frente al (-55, +32) del barrido
+#: Los límites 1D de abducción corresponden a la rebanada de la tabla 2D en
+#: flexión = 0°, medida con barrido refinado a 1°. La tabla 2D usa pasos de 5°,
+#: por lo que a flexión = 0° reporta (-55, +30) frente al (-55, +32) del barrido
 #: fino: la diferencia está dentro de la resolución de medición y la tabla
-#: resulta ligeramente conservadora. No son límites globales -- a giros
-#: distintos de cero el brazo se despeja del tronco y el rango admisible
+#: resulta ligeramente conservadora. No son límites globales -- a flexiones
+#: distintas de cero el brazo se despeja del tronco y el rango admisible
 #: cambia, que es precisamente lo que el barrido 2D midió.
 #:
 #: Por eso ``clamp_arm`` NO los aplica bajo la política por defecto.
-ARM_BALANCEO_1D: dict[Side, tuple[float, float]] = {
+ARM_ABDUCCION_1D: dict[Side, tuple[float, float]] = {
     Side.L: (-55.0, 32.0),
     Side.R: (-55.0, 33.0),
 }
 
 
 # --------------------------------------------------------------------------
-# Tablas 2D: (giro, balanceo_min, balanceo_max), ordenadas por giro ascendente
+# Tablas 2D: (flexion, abduccion_min, abduccion_max), por flexion ascendente
 # --------------------------------------------------------------------------
 
 _TABLE_L: tuple[tuple[float, float, float], ...] = (
@@ -180,11 +217,11 @@ _ARM_TABLES: dict[Side, tuple[tuple[float, float, float], ...]] = {
     Side.R: _TABLE_R,
 }
 
-# Claves de giro precalculadas para la búsqueda binaria. Se busca SIEMPRE sobre
-# el giro, nunca sobre los valores de balanceo: bal_min no es monótona
+# Claves de flexión precalculadas para la búsqueda binaria. Se busca SIEMPRE sobre
+# la flexión, nunca sobre los valores de abducción: bal_min no es monótona
 # (-70 -> -75 -> -70 -> -55 -> -25 -> -5) y una búsqueda sobre ella daría
 # resultados sin sentido.
-_ARM_GIRO_KEYS: dict[Side, tuple[float, ...]] = {
+_ARM_FLEXION_KEYS: dict[Side, tuple[float, ...]] = {
     side: tuple(row[0] for row in table) for side, table in _ARM_TABLES.items()
 }
 
@@ -200,7 +237,7 @@ class AxisClamp:
 
     Lleva el rango aplicable en el instante del cálculo para que la interfaz
     del operador pueda dibujar la barra de posición sin recalcular nada. En el
-    balanceo, ``lower``/``upper`` son los valores YA interpolados para el giro
+    abducción, ``lower``/``upper`` son los valores YA interpolados para la flexión
     actual, de modo que la barra se estrecha y ensancha en vivo.
     """
 
@@ -225,19 +262,19 @@ class AxisClamp:
 
 @dataclass(frozen=True)
 class ArmClamp:
-    """Resultado del recorte de un brazo (balanceo + giro)."""
+    """Resultado del recorte de un brazo (abducción + flexión)."""
 
-    balanceo: AxisClamp
-    giro: AxisClamp
+    abduccion: AxisClamp
+    flexion: AxisClamp
     lado: Side
 
     @property
     def clamped(self) -> bool:
-        return self.balanceo.clamped or self.giro.clamped
+        return self.abduccion.clamped or self.flexion.clamped
 
     @property
     def as_tuple(self) -> tuple[float, float]:
-        return (self.balanceo.value, self.giro.value)
+        return (self.abduccion.value, self.flexion.value)
 
 
 @dataclass(frozen=True)
@@ -292,43 +329,43 @@ def clamp_scalar(value: float, lower: float, upper: float) -> AxisClamp:
     )
 
 
-def arm_balanceo_range(
-    giro: float,
+def arm_abduccion_range(
+    flexion: float,
     lado: Side | str,
     *,
-    policy: BalanceoPolicy = BalanceoPolicy.TABLE,
+    policy: AbduccionPolicy = AbduccionPolicy.TABLE,
 ) -> tuple[float, float]:
-    """Rango de balanceo admisible para un giro dado, interpolado linealmente.
+    """Rango de abducción admisible para una flexión dado, interpolado linealmente.
 
-    El giro se recorta previamente a ``GIRO_RANGE``: la tabla solo está definida
+    El flexion se recorta previamente a ``FLEXION_RANGE``: la tabla solo está definida
     en [-90, 90] y extrapolar fuera de ahí no tiene sentido físico.
 
     ``bal_min`` y ``bal_max`` se interpolan por separado, porque son dos
     envolventes lineales a trozos independientes.
 
     Es pública para que la interfaz del operador pueda dibujar la envolvente
-    completa muestreando el giro, sin construir un ``ArmClamp`` por muestra.
+    completa muestreando la flexión, sin construir un ``ArmClamp`` por muestra.
     """
     side = Side.parse(lado)
-    giro = _check_finite(giro, "giro")
-    giro = min(GIRO_RANGE[1], max(GIRO_RANGE[0], giro))
+    flexion = _check_finite(flexion, "flexion")
+    flexion = min(FLEXION_RANGE[1], max(FLEXION_RANGE[0], flexion))
 
-    keys = _ARM_GIRO_KEYS[side]
+    keys = _ARM_FLEXION_KEYS[side]
     table = _ARM_TABLES[side]
 
-    index = bisect.bisect_left(keys, giro)
-    if index < len(keys) and keys[index] == giro:
+    index = bisect.bisect_left(keys, flexion)
+    if index < len(keys) and keys[index] == flexion:
         # Nodo exacto: se devuelve tal cual, sin aritmética de punto flotante.
         lower, upper = table[index][1], table[index][2]
     else:
-        low_giro, low_min, low_max = table[index - 1]
-        high_giro, high_min, high_max = table[index]
-        t = (giro - low_giro) / (high_giro - low_giro)
+        low_flex, low_min, low_max = table[index - 1]
+        high_flex, high_min, high_max = table[index]
+        t = (flexion - low_flex) / (high_flex - low_flex)
         lower = low_min + t * (high_min - low_min)
         upper = low_max + t * (high_max - low_max)
 
-    if policy is BalanceoPolicy.INTERSECTION:
-        one_d_min, one_d_max = ARM_BALANCEO_1D[side]
+    if policy is AbduccionPolicy.INTERSECTION:
+        one_d_min, one_d_max = ARM_ABDUCCION_1D[side]
         lower = max(lower, one_d_min)
         upper = min(upper, one_d_max)
 
@@ -341,34 +378,34 @@ def arm_balanceo_range(
 
 
 def clamp_arm(
-    balanceo: float,
-    giro: float,
+    abduccion: float,
+    flexion: float,
     lado: Side | str,
     *,
-    policy: BalanceoPolicy = BalanceoPolicy.TABLE,
+    policy: AbduccionPolicy = AbduccionPolicy.TABLE,
 ) -> ArmClamp:
     """Recorta la pose de un brazo a su espacio admisible.
 
     El ORDEN de las operaciones importa:
 
-    1. Se recorta el GIRO con su límite duro de +-90°. Es un límite real del
-       mecanismo y además es el índice de la tabla 2D: buscar con un giro fuera
+    1. Se recorta la FLEXION con su límite duro de +-90°. Es un límite real del
+       mecanismo y además es el índice de la tabla 2D: buscar con una flexión fuera
        de rango no tendría sentido.
-    2. Con el giro ya recortado se interpola la tabla 2D para obtener el rango
-       de balanceo admisible EN ESE GIRO.
+    2. Con la flexión ya recortado se interpola la tabla 2D para obtener el rango
+       de abducción admisible EN ESA FLEXION.
     3. Se recorta el BALANCEO con ese rango.
 
-    Los límites 1D de ``ARM_BALANCEO_1D`` NO se aplican bajo la política por
-    defecto: son la rebanada de la tabla en giro = 0°, no un límite global.
+    Los límites 1D de ``ARM_ABDUCCION_1D`` NO se aplican bajo la política por
+    defecto: son la rebanada de la tabla en flexión = 0°, no un límite global.
     Aplicarlos colapsaría el rango y le quitaría al brazo el recorrido extra
     que gana al girar y despejarse del tronco.
 
     Args:
-        balanceo: abducción en el plano frontal, en grados. Positivo hacia
+        abduccion: abducción en el plano frontal, en grados. Positivo hacia
             afuera.
-        giro: rotación axial del brazo, en grados.
+        flexion: rotación axial del brazo, en grados.
         lado: 'L'/'R', 'left'/'right' o 'izq'/'der'.
-        policy: ver ``BalanceoPolicy``.
+        policy: ver ``AbduccionPolicy``.
 
     Returns:
         ArmClamp con ambos ejes recortados y el rango aplicado en cada uno.
@@ -378,19 +415,19 @@ def clamp_arm(
             reconoce.
     """
     side = Side.parse(lado)
-    balanceo = _check_finite(balanceo, "balanceo")
-    giro = _check_finite(giro, "giro")
+    abduccion = _check_finite(abduccion, "abduccion")
+    flexion = _check_finite(flexion, "flexion")
 
-    # 1. El giro primero: es límite duro y además índice de la tabla.
-    giro_clamp = clamp_scalar(giro, GIRO_RANGE[0], GIRO_RANGE[1])
+    # 1. El flexion primero: es límite duro y además índice de la tabla.
+    flexion_clamp = clamp_scalar(flexion, FLEXION_RANGE[0], FLEXION_RANGE[1])
 
-    # 2. Rango de balanceo admisible en el giro ya recortado.
-    lower, upper = arm_balanceo_range(giro_clamp.value, side, policy=policy)
+    # 2. Rango de abducción admisible en la flexión ya recortado.
+    lower, upper = arm_abduccion_range(flexion_clamp.value, side, policy=policy)
 
-    # 3. El balanceo, contra ese rango.
-    balanceo_clamp = clamp_scalar(balanceo, lower, upper)
+    # 3. El abduccion, contra ese rango.
+    abduccion_clamp = clamp_scalar(abduccion, lower, upper)
 
-    return ArmClamp(balanceo=balanceo_clamp, giro=giro_clamp, lado=side)
+    return ArmClamp(abduccion=abduccion_clamp, flexion=flexion_clamp, lado=side)
 
 
 def clamp_head(pan: float, tilt: float) -> HeadClamp:

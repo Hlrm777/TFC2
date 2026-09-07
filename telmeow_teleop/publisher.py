@@ -338,7 +338,7 @@ def _demo(duration: float = 10.0) -> None:
     transporte está resuelto y cualquier fallo posterior es de visión.
 
     Los valores del seno se eligen dentro del espacio admisible comprobándolos
-    con ``limits.clamp_arm``, no a ojo: a giro ~50° el balanceo admite hasta
+    con ``limits.clamp_arm``, no a ojo: a flexion ~50° la abducción admite hasta
     55°, así que armR = 30 +- 12 y armRtw = 50 +- 8 quedan holgados.
     """
     import math
@@ -385,8 +385,8 @@ def _demo(duration: float = 10.0) -> None:
                     tilt=0.0,
                     armL=0.0,
                     armLtw=0.0,
-                    armR=right.balanceo.value,
-                    armRtw=right.giro.value,
+                    armR=right.abduccion.value,
+                    armRtw=right.flexion.value,
                     emo="feliz",
                 )
                 # Si una pausa del sistema nos dejó atrás, se SALTAN las ranuras

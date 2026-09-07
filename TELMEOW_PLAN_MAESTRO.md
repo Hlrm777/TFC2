@@ -31,6 +31,18 @@ Tres cosas de esa jornada cambian lo que este documento decía:
   con poca. La limitación de tasa se retira y pasa a ser una condición de
   operación (§4.0.4).
 
+**La segunda sesión del 2026-09-06 escribe el PROMPT 5** y añade dos hallazgos
+más, los dos sobre los brazos:
+
+- **H28** — `giro` y `balanceo` eran nombres provisionales, y el enunciado del
+  P5 los interpretó mal: **el robot no tiene rotación axial**. Sus dos GDL de
+  hombro son **abducción/aducción** y **flexión/extensión**. Vocabulario
+  renombrado en Python y en el visor, y **§3.3.1 reescrita** — declaraba una
+  limitación sobre un grado de libertad inexistente.
+- **H29** — el canal `tw` va **al revés** de lo que afirma el comentario del
+  propio visor. Compensado con `ARM_INVERT_FLEXION`; **pendiente de confirmar en
+  el visor**, que es la única tarea que le queda al P5 (**P5.1**).
+
 Cómo leerlo:
 
 - **Partes 0 a 5** — el plan propiamente dicho, con los hallazgos ya integrados
@@ -54,7 +66,7 @@ cambia respecto al plan original.
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
-| **P5** — Arm tracker | ⬜ **siguiente** · lee «lo que hereda del P4» antes de empezar | |
+| **P5** — Arm tracker | 🟡 **código hecho** · falta **P5.1**, la verificación en el visor | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -62,7 +74,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**403 pruebas en verde.** Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**534 pruebas en verde.** Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -106,7 +118,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── filters.py            ✅ One Euro, EMA, histéresis · solo stdlib
 │   ├── publisher.py          ✅ MQTT, JSON único, QoS 0
 │   ├── head_tracker.py       ✅ Face Mesh + solvePnP
-│   ├── arm_tracker.py        ⬜ P5
+│   ├── arm_tracker.py        🟡 BlazePose · falta verificar signos en el visor
 │   ├── emotion_classifier.py ⬜ P6
 │   ├── control_panel.py      ⬜ P10
 │   └── main.py               ⬜ P7
@@ -122,7 +134,9 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── mqtt_monitor.py       ✅
 │   ├── dev_broker.py         ✅ broker sin privilegios de administrador
 │   ├── list_cameras.py       ✅ qué cámara y qué backend usar, con fps REALES
-│   ├── analizar_registro.py  ✅ analiza los CSV de `--record`, por percentil
+│   ├── analizar_registro.py  ✅ CSV del head tracker, por percentil
+│   ├── analizar_registro_brazos.py ✅ CSV del arm tracker: 4 canales,
+│   │                            mano/codo, visibilidad, ganancias
 │   ├── train_fer2013.py      ⬜ P8
 │   └── eval_emotion.py       ⬜ P9
 ├── tests/                    ✅ 403 pruebas
@@ -191,26 +205,43 @@ para la decisión pendiente.
 
 ## 0.5 Límites articulares
 
+**Nomenclatura corregida el 2026-09-06 (H28).** Lo que este documento llamaba
+`balanceo` y `giro` son, con su nombre anatómico, **abducción/aducción** y
+**flexión/extensión**. El código Python y los rótulos del visor ya usan los
+nombres correctos; los campos del JSON (`armL`, `armLtw`, …) no se pueden
+cambiar sin romper el contrato con el visor y siguen igual.
+
 ```
 pan          −90° … +90°
 tilt         −39° … +42°
-giro         −90° … +90°   (ambos brazos, límite duro)
+flexión      −90° … +90°   (ambos brazos, límite duro)   [campo armLtw/armRtw]
+abducción    depende de la flexión                       [campo armL/armR]
 ```
 
-**El balanceo depende del giro.** Las tablas 2D del barrido BVH (paso 5°,
+**La abducción depende de la flexión.** Las tablas 2D del barrido BVH (paso 5°,
 refinado 1°, demás DOF en home) son **la autoridad**; están en `limits.py`.
 
-Los valores 1D de balanceo (izq −55…+32, der −55…+33) **no se aplican**: son la
-rebanada de la tabla en giro = 0° medida con refinado a 1°, y se conservan solo
-como metadato documentado. Aplicarlos colapsaría el rango y le quitaría al brazo
-el recorrido extra que gana al girar y despejarse del tronco.
+Los valores 1D de abducción (izq −55…+32, der −55…+33) **no se aplican** como
+límite: son la rebanada de la tabla en flexión = 0° medida con refinado a 1°.
+Aplicarlos colapsaría el rango y le quitaría al brazo el recorrido extra que
+gana al flexionarse y despejarse del tronco. **Sí se usan como objetivo de
+calibración** de la ganancia de abducción, igual que `HEAD_PAN_TARGET_RANGE`
+para el pan: el rango de la tabla no sirve para eso porque cambia con la
+flexión y daría una ganancia distinta en cada frame.
 
-Orden de operaciones en `clamp_arm`: recortar el **giro** a ±90° primero (es
-límite duro y además índice de la tabla), luego interpolar la tabla en ese giro,
-y con ese rango recortar el **balanceo**.
+Orden de operaciones en `clamp_arm`: recortar la **flexión** a ±90° primero (es
+límite duro y además índice de la tabla), luego interpolar la tabla en esa
+flexión, y con ese rango recortar la **abducción**.
 
 La prueba que distingue la implementación correcta de la errónea:
-`clamp_arm(+70, giro=+90, 'izq')` debe dar **+70**, no +32.
+`clamp_arm(+70, flexion=+90, 'izq')` debe dar **+70**, no +32.
+
+**El cardán del robot no es ideal.** El eje del servo de flexión está girado
+**~9.9°** respecto al eje latero-lateral puro, alrededor del eje de abducción
+(se lee del rig: `(-0.985, 0, ∓0.17)`). Sin corregirlo, el retargeting arrastra
+diafonía entre canales: 1.3° de abducción parásita a 30° de flexión y ~10° a
+90°. `arm_tracker.arm_angles` lo deshace con una rotación previa, y hay una
+prueba que cuantifica lo que costaría no hacerlo.
 
 ## 0.6 Decisiones cerradas (eran «abiertas» en la v1)
 
@@ -249,7 +280,7 @@ tesis.
 | 2 | **P2** | Capa MQTT compatible con el viewer | ✅ · punto de control superado |
 | 3 | **P3** | Filtros temporales (One Euro, histéresis) | ✅ |
 | 4 | **P4** | Head tracker (Face Mesh + Kabsch/solvePnP, sin dlib) | ✅ **hecho y calibrado con el operador** |
-| 5 | **P5** | Arm tracker corregido (bugs 1–4) | ⬜ **siguiente** |
+| 5 | **P5** | Arm tracker corregido (bugs 1–4) | 🟡 código hecho · falta **P5.1** |
 | 6 | **P6** | Clasificador de emoción con backends intercambiables | ⬜ |
 | 7 | **P8** | Entrenamiento con FER-2013 | ⬜ ⚠️ revisar accuracy |
 | 8 | **P7** | Integración: captura única + HUD | ⬜ |
@@ -612,7 +643,77 @@ Commit: "refactor: head tracker con Face Mesh y solvePnP"
 
 ---
 
-## PROMPT 5 — Arm tracker ⬜ **siguiente**
+## PROMPT 5 — Arm tracker 🟡 **código hecho, falta P5.1**
+
+### Lo hecho el 2026-09-06
+
+`arm_tracker.py`, con BlazePose y `pose_world_landmarks`. Cadena por canal:
+dirección del brazo → descomposición en el cardán del robot → ganancia por
+sentido → inversión → One Euro → `clamp_arm`. Los cuatro bugs del legacy
+corregidos, cada uno con su prueba de regresión. **120 pruebas nuevas, 534 en
+total, todas en verde.**
+
+Cuatro decisiones que cambian lo que este documento decía:
+
+**1. `giro` no es rotación axial: es flexión (H28).** El enunciado de abajo
+pedía estimar la rotación axial del húmero desde el vector codo→muñeca y
+mandarla al canal `tw`. Los ejes del rig dicen que ese canal es un vaivén
+sagital, no una torsión, y que el robot no tiene ningún GDL de rotación axial.
+Nomenclatura corregida en `limits.py`, `arm_tracker.py`, las pruebas y los
+rótulos del visor; el contrato MQTT intacto. Ver §0.5 y §7.12.
+
+**2. El brazo se apunta con la MANO, no con el codo.** Decisión del operador y
+es la buena: el brazo del robot es un eslabón rígido sin codo, así que lo que
+hay que conservar es hacia dónde apunta el brazo entero; y sentado a la mesa con
+la integrada a 640x480, el codo se sale de cuadro mucho antes que la mano. Se
+usa el **centroide de los cuatro landmarks de mano** que BlazePose ya entrega
+(muñeca, meñique, índice y pulgar), que es gratis y más estable que la muñeca
+sola. `target="codo"` queda conmutable con una tecla para poder comparar los dos
+con datos, como `mesh`/`pnp` en el P4.
+
+*(Y una corrección a lo que yo mismo escribí al planificar: hombro→muñeca **no**
+es el BUG 4 en versión suave. El pecado del legacy era el pivote —medía respecto
+a la **cadera**—, no el punto de destino.)*
+
+**3. El canal `tw` va al revés de lo que dice el visor (H29).** Tres anclas
+independientes, dos ya verificadas en vivo, dicen que `+armRtw` lleva el brazo
+hacia **atrás**. `ARM_INVERT_FLEXION` viene activado para compensarlo, y el
+comentario del visor queda marcado como en revisión. **No se ha tocado ningún
+eje ni ningún valor del rig.** Ver §7.12.
+
+**4. Ganancias implementadas y a 1.0.** Cuatro, una por sentido. No hay motivo
+conocido para que hagan falta —el problema del P4, perder de vista el monitor,
+no se replica en los brazos— pero la infraestructura está, y el analizador las
+propone. Que se queden en 1.0 también es un resultado.
+
+### P5.1 — Verificación en el visor ⬜ **lo único que falta, y necesita al operador**
+
+Es la tarea que ninguna prueba automática puede hacer, y es la que en el P4
+destapó el tilt invertido con 400 pruebas en verde.
+
+```
+& "C:\Program Files\mosquitto\mosquitto.exe" -c mosquitto.conf -v
+python -m http.server 8000 --directory telmeow_viewer
+python -m telmeow_teleop.arm_tracker --publish --record brazos.csv
+```
+
+1. **Sin el tracker, solo con los sliders del visor.** Mover `s-arRtw` a +50 y
+   mirar si el brazo va adelante o atrás. Eso cierra el H29 en un minuto. Mover
+   **un solo slider cada vez** y no tocar la cámara del visor entre
+   observaciones: sigue deslizándose por amortiguación varios segundos y
+   comparar capturas de momentos distintos ya llevó a una conclusión falsa una
+   vez.
+2. **Con el tracker.** Las cuatro afirmaciones: separar el brazo izquierdo
+   físico → se separa el izquierdo del robot; levantarlo hacia adelante → va
+   hacia adelante; ídem con el derecho. Las teclas `b` y `f` alternan los signos
+   en caliente, y `m` el espejo, para no tener que relanzar.
+3. **Grabar dos o tres minutos** en postura de narración, alternando `t` entre
+   mano y codo, y pasar el CSV por
+   `python tools/analizar_registro_brazos.py brazos.csv`. De ahí salen las tres
+   cifras que faltan: el temblor por canal (respalda §3.3.1), la comparación
+   mano/codo, y el porcentaje de frames en que se ven el codo y las caderas.
+4. **Medir el coste de BlazePose** en ms/frame con `model_complexity` 0, 1 y 2,
+   para ponerlo junto a los 5-7 ms de Face Mesh: en el P7 comparten bucle.
 
 ### Lo que hereda del P4 — leer antes de escribir código
 
@@ -669,7 +770,21 @@ hombro se mapean directos a los DOF del robot; la ganancia del P4 existe porque
 el operador no puede girar la cabeza sin perder de vista el monitor, y ese
 problema no se replica en los brazos.
 
-### Enunciado
+### Enunciado original
+
+⚠️ **Se conserva como historia, y tres de sus puntos están SUPERADOS.** Vale
+para los cuatro bugs, que se corrigieron tal cual, y no vale en esto:
+
+| Dice | Lo que se hizo, y por qué |
+|---|---|
+| `giro` es la «rotación axial del brazo», derivada de codo→muñeca (punto 2) | **Es flexión sagital.** El robot no tiene rotación axial (**H28**). Estimarla y mandarla a ese canal movería el brazo adelante cuando el operador rota el antebrazo |
+| «documenta que esta estimación es la menos observable» (punto 2) | La conclusión se mantiene pero **cambia de razón**: la flexión depende de la coordenada de profundidad de BlazePose. Reescrito en §3.3.1 |
+| `balanceo`: ángulo del vector **hombro→codo** (punto 1) | **hombro→mano** por defecto, con el codo conmutable. Decisión del operador y es la buena: el brazo del robot es un eslabón rígido sin codo, y el codo se sale de cuadro antes que la mano |
+| «Salida `(armL, armLtw, armR, armRtw)`» (punto 7) | Un `ArmAngles` con cada canal `float \| None`, para que **un brazo fuera de cuadro no tumbe al otro** |
+
+Y el punto 11 —la convención de signos— resultó ser exactamente el riesgo que
+anunciaba, solo que el que estaba equivocado era el comentario del visor
+(**H29**).
 
 ```
 Crea `telmeow_teleop/arm_tracker.py` reemplazando legacy/Hands Tracking.py.
@@ -1214,9 +1329,27 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
 
 ## 3.3 Limitaciones a declarar en el documento
 
-1. **Observabilidad del giro del brazo.** La rotación axial del húmero no es
-   determinable de forma robusta desde landmarks de una sola cámara RGB. Su
-   incertidumbre es mayor que la del balanceo.
+1. **El robot no reproduce la rotación del brazo, y la flexión es el canal
+   menos fiable.** Son dos cosas y hasta el 2026-09-06 este punto las
+   confundía — decía que «la rotación axial del húmero no es determinable de
+   forma robusta desde landmarks monoculares», que describe un grado de
+   libertad **que el robot no tiene** (H28). Redacción corregida:
+
+   - **Rotación interna/externa: no se reproduce.** El hombro del robot es un
+     cardán de dos GDL que orienta un brazo rígido sin codo. No hay eje de
+     rotación axial, así que esa componente del gesto se pierde por diseño
+     mecánico, no por limitación del estimador. Se declara como tal.
+   - **La flexión es menos fiable que la abducción, y ahora por una razón
+     medible.** La abducción vive en el **plano de imagen**, donde MediaPipe es
+     preciso; la flexión depende de la **coordenada de profundidad**, que es la
+     componente débil de BlazePose en monocular. La cifra que lo respalda es la
+     razón de temblor entre los dos canales, que da
+     `tools/analizar_registro_brazos.py` sobre una grabación de reposo. **Falta
+     medirla** (P5.1).
+   - **La flexión de codo del operador tampoco se reproduce**, porque el brazo
+     del robot es un eslabón único. El mapeo usa la dirección hombro→mano, así
+     que se conserva hacia dónde apunta el brazo pero no su forma. Es un
+     retargeting deliberado, no un error de modelo.
 
 2. **Ausencia de ground truth angular.** No hay forma de validar que los ángulos
    estimados correspondan a los reales sin captura de movimiento. Lo defendible
@@ -1506,9 +1639,26 @@ equivalente en Python puro, sin privilegios de administrador.
   No hay ground truth con una sola cámara. Reportar repetibilidad y declarar la
   ausencia de validación absoluta como limitación.
 
-- **«¿Por qué el giro es menos confiable que el balanceo?»**
-  Porque la rotación axial del húmero es casi no observable desde landmarks
-  monoculares. Anticiparlo en el texto.
+- **«¿Por qué la flexión es menos confiable que la abducción?»** *(reformulada)*
+  Porque la abducción cae en el **plano de imagen**, donde MediaPipe es preciso,
+  mientras que la flexión depende de la **coordenada de profundidad**, que es la
+  componente débil de un estimador monocular. La respuesta anterior —«la
+  rotación axial del húmero es casi no observable»— describía un grado de
+  libertad que el robot no tiene, y se retira (H28).
+
+- **«¿Por qué su robot no reproduce la rotación del brazo?»** *(nueva)*
+  Porque no puede: el hombro tiene dos grados de libertad y el brazo es un
+  eslabón rígido sin codo. No es una limitación del estimador sino del
+  mecanismo, y se declara como tal. El sistema reproduce **hacia dónde apunta**
+  el brazo, no su forma.
+
+- **«¿Por qué mide el brazo entero y no el ángulo del hombro?»** *(nueva)*
+  Es un retargeting deliberado. El brazo del robot es un eslabón único, así que
+  lo que hay que conservar es la dirección de apuntado, que es lo que el
+  espectador interpreta. Y en la práctica manda el encuadre: sentado a la
+  distancia de trabajo, el codo del operador sale de cuadro mucho antes que la
+  mano. La alternativa (hombro→codo, el ángulo articular estricto) está
+  implementada y conmutable, y la elección se hizo con datos.
 
 - **«¿Su accuracy de emoción generaliza a otras personas?»**
   El modelo se entrena con FER-2013 (multi-sujeto), no con el dataset propio.
@@ -1591,18 +1741,27 @@ Prefijo de entorno `TELMEOW_`. Todo sobrescribible por entorno y CLI.
 ## `limits.py`
 
 ```python
-from telmeow_teleop.limits import clamp_arm, clamp_head, Side, arm_balanceo_range
+from telmeow_teleop.limits import (clamp_arm, clamp_head, Side,
+                                   arm_abduccion_range,
+                                   ARM_ABDUCCION_1D, FLEXION_RANGE)
 
-a = clamp_arm(balanceo, giro, "izq")   # ArmClamp
-a.balanceo.value / .lower / .upper / .fraction / .clamped
-a.giro.value ; a.as_tuple ; a.clamped
+a = clamp_arm(abduccion, flexion, "izq")   # ArmClamp
+a.abduccion.value / .lower / .upper / .fraction / .clamped
+a.flexion.value ; a.as_tuple ; a.clamped
 
 h = clamp_head(pan, tilt)              # HeadClamp
 h.pan.value ; h.tilt.value ; h.as_tuple ; h.clamped
 ```
 
 Lanzan `ValueError` ante NaN/infinito. `Side.parse` acepta L/R, left/right,
-izq/der.
+izq/der; `Side.opposite` da el otro lado.
+
+⚠️ **Renombrado el 2026-09-06 (H28).** `balanceo` → `abduccion`, `giro` →
+`flexion`, `GIRO_RANGE` → `FLEXION_RANGE`, `ARM_BALANCEO_1D` →
+`ARM_ABDUCCION_1D`, `arm_balanceo_range` → `arm_abduccion_range`,
+`BalanceoPolicy` → `AbduccionPolicy`, y la variable de entorno
+`TELMEOW_BALANCEO_POLICY` → `TELMEOW_ABDUCCION_POLICY`. **El contrato MQTT no
+cambia.**
 
 ## `filters.py`
 
@@ -1661,6 +1820,58 @@ Modo demo con instrumentación: `python -m telmeow_teleop.head_tracker
 --record archivo.csv`, y luego `python tools/analizar_registro.py archivo.csv`.
 Teclas: `c` neutro · `n` borrarlo · `r` reiniciar extremos · `z/Z` `v/V` `a/A`
 ganancias · `t` alternar método · ESPACIO cambiar de etiqueta · `q` salir.
+
+## `arm_tracker.py`
+
+```python
+from telmeow_teleop.arm_tracker import (ArmTracker, ArmAngles, arm_angles,
+                                        torso_basis, canal_del_robot,
+                                        LANDMARKS, INCLINACION_FLEXION, CANALES)
+
+t = ArmTracker(mirror=True,            # brazo izq. FISICO del operador -> armL
+               frame_espejado=True,    # = cfg.camera.flip · hecho, no politica
+               target="mano",          # "mano" (por defecto) o "codo"
+               invert_abduccion=False, invert_flexion=True)   # H29
+t.process(frame_rgb) -> ArmAngles | None      # None = no se detecto pose
+t.map_to_robot(canal, abduccion, flexion, timestamp=None)  # sin camara: testeable
+t.last_clamp        # {Side: ArmClamp} · lower/upper/fraction/clamped para el HUD
+t.raw_angles        # {Side: (abduccion, flexion)} crudos del operador
+t.raw_extremes ; t.reset_extremes() ; t.suggested_gains()
+t.visibilidades     # {landmark: score} · el dato que decide mano-vs-codo
+t.tronco_de_caderas # False = se esta usando la vertical de imagen de reserva
+t.landmarks_imagen  # para dibujar el esqueleto
+t.frames_sin_pose ; t.degenerate_dt_count
+t.close()           # o usarlo como gestor de contexto
+
+# Funciones puras, probables sin camara ni MediaPipe:
+torso_basis(hombro, hombro_contrario, superior) -> (u_lat, u_ant, u_sup) | None
+arm_angles(hombro, destino, base, inclinacion=0.0) -> (abduccion, flexion) | None
+canal_del_robot(etiqueta, frame_espejado=, mirror=) -> Side
+```
+
+`ArmAngles` lleva `armL`, `armLtw`, `armR`, `armRtw`, cada uno `float | None`,
+más `.as_tuple` y `.vacio`. **Un canal en `None` se omite del JSON y el visor
+conserva su último valor**, que es como se cumple «reutilizar el último valor
+válido» sin mantener estado (P7 punto 12).
+
+Tres cosas que conviene saber antes de tocarlo:
+
+- **`arm_angles` puede devolver la flexión como `None`** aunque la abducción sea
+  válida: es la singularidad del cardán, con el brazo horizontal hacia el
+  costado. Sin esa guarda, `atan2(0, -0.0)` devuelve **180°** —no un valor
+  ruidoso: 180 exactos— y el robot pega un tirón. El tracker conserva la última
+  flexión válida de ese canal.
+- **`canal_del_robot` es el único sitio donde un lado del operador se ata a un
+  canal del robot.** Todo lo demás —filtros, recorte, CSV, JSON— viaja ya en el
+  marco del robot, así que la grabación y lo publicado no pueden discrepar.
+- **`suggested_gains()` divide la abducción por `ARM_ABDUCCION_1D`**, no por el
+  rango de la tabla, porque ese depende de la flexión. Es la misma separación
+  que el P4.3 tuvo que introducir para el pan.
+
+Modo demo: `python -m telmeow_teleop.arm_tracker --publish --record brazos.csv`,
+y luego `python tools/analizar_registro_brazos.py brazos.csv`.
+Teclas: `m` espejo · `t` mano/codo · `b` `f` invertir signos · `r` extremos ·
+`z/Z x/X v/V n/N` ganancias · ESPACIO etiqueta · `q` salir.
 
 ## `publisher.py`
 
@@ -1945,6 +2156,71 @@ Dos lecciones, y la segunda es la que más va a doler si se olvida:
   era real y está corregido: la herramienta ahora mide con el formato del
   pipeline por defecto y acepta `--fourcc` para comparar.
 
+## 7.12 El PROMPT 5: los brazos no hacen lo que el plan decía (H28, H29)
+
+**H28 — El robot no tiene rotación axial, y `giro` es flexión.** El enunciado
+del PROMPT 5 pedía estimar la «rotación axial del húmero» desde el vector
+codo→muñeca y mandarla al canal `tw`. Los ejes del rig
+(`telmeow_viewer.html:270-277`) dicen otra cosa:
+
+| Canal | Eje del servo | Plano | Movimiento |
+|---|---|---|---|
+| `armL`/`armR` | antero-posterior `V(0,∓1,0)` | frontal | **abducción / aducción** |
+| `armLtw`/`armRtw` | latero-lateral `V(-0.985,0,±0.17)` | sagital | **flexión / extensión** |
+
+Un eje latero-lateral en el hombro no puede producir rotación axial: produce
+vaivén. El hombro es un **cardán de 2 GDL** que orienta un brazo rígido de un
+solo eslabón, y no hay tercer eje. Tres confirmaciones independientes:
+
+1. §0.5 ya decía que el brazo «gana recorrido al **despejarse del tronco**». Una
+   torsión no despeja nada; un vaivén sí.
+2. Las tablas 2D lo cuantifican: con `tw`=0 el otro canal llega a +30, con
+   `tw`=±90 llega a +70/75.
+3. El saludo del visor combina `armRtw`=50 con `armR`=30, que como flexión +
+   abducción es un saludo y como torsión de 50° no lo sería.
+
+Consecuencias: se renombró el vocabulario en Python y en los rótulos del visor
+(§6, `limits.py`), y se **reescribió la limitación §3.3.1**, que describía un
+grado de libertad inexistente. La conclusión práctica sobrevive —la flexión es
+el canal menos fiable— pero por una razón que además es **medible**: la
+abducción vive en el plano de imagen y la flexión en la coordenada de
+profundidad, que es la componente débil de BlazePose.
+
+El sufijo `tw` (*twist*) queda como vocabulario heredado en el JSON, porque
+cambiarlo rompería el contrato con el visor. Está documentado en los tres sitios
+donde alguien podría tropezar con él.
+
+**H29 — El canal `tw` va al revés de lo que dice el propio visor.** El
+comentario del rig afirma «invertido: +θ = adelante en ambos brazos». La
+geometría dice que `+armRtw` lleva el brazo hacia **atrás**, por tres vías:
+
+1. `neckTilt` gira sobre `+x`, y está verificado **en vivo** que un tilt
+   negativo baja la cabeza (H22) ⇒ el robot mira hacia `+y`.
+2. `neckPan` gira sobre `−z`, y está verificado **en vivo** que un pan positivo
+   gira el robot a su derecha (P4.1) ⇒ coincide: mira a `+y`, su derecha es
+   `+x`, que es donde está `Brazo_Der`. Dos anclas distintas dando lo mismo.
+3. Con esos ejes y `setJoint()`, que aplica el ángulo **sin negarlo**, un
+   `armRtw` positivo mueve el brazo hacia `−y`.
+
+Si es así, el saludo del demo está agitando el brazo por detrás del cuerpo.
+
+**No se ha tocado ningún eje ni ningún valor.** Se hicieron tres cosas
+reversibles: `ARM_INVERT_FLEXION` viene activado para compensarlo, el comentario
+del visor queda marcado como en revisión, y la prueba que ata el estimador al
+rig lo fija en una constante con nombre (`SENTIDO_FLEXION_VISOR`) que es lo
+único que hay que cambiar si la comprobación dice lo contrario.
+
+Falta esa comprobación, y es de un minuto: mover `s-arRtw` a +50 y mirar. Es
+**P5.1**. Merece la pena decir por qué no se dio por cerrado sobre el papel: es
+literalmente el modo de fallo del H17 y del H22, y las dos veces el papel decía
+que todo estaba bien.
+
+**Lo que sí se decidió sin esperar**, porque su ancla no está en duda: la
+**abducción no se invierte**. `armR` positivo lleva el brazo hacia `+x`, que es
+hacia afuera para el brazo derecho, y eso coincide con el «+θ eleva» del
+comentario. De ahí que la corrección de la inclinación del eje (§0.5) se pueda
+aplicar ya: su signo depende del sentido de la abducción, no del de la flexión.
+
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
@@ -1976,6 +2252,8 @@ Dos lecciones, y la segunda es la que más va a doler si se olvida:
 | **H25** | El temblor crudo y el filtrado **ordenan las cámaras al revés** | §4.0.4, §7.10 |
 | **H26** | Una grabación con el protocolo equivocado no se rescata releyéndola | P4.4, §7.10 |
 | **H27** | El techo de captura lo pone **la luz**, no el sensor: 30 fps con buena iluminación, 10 con poca | §0.4, §4.0.4, §7.10 |
+| **H28** | El robot **no tiene rotación axial**: `giro` es flexión y `balanceo` es abducción. Vocabulario renombrado y §3.3.1 reescrita | §0.5, §3.3.1, P5, §6, §7.12 |
+| **H29** | El canal `tw` va **al revés** de lo que dice el comentario del visor: `+armRtw` lleva el brazo atrás. Compensado con `ARM_INVERT_FLEXION`, pendiente de confirmar | P5.1, §7.12 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la
 investigación de la cámara que salió de él. H19 y H20 son **correcciones a

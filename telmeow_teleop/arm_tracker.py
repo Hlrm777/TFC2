@@ -1,0 +1,1324 @@
+"""Estimación de la pose de los brazos del operador y mapeo a los DOF del robot.
+
+Reemplaza a ``legacy/Hands Tracking.py``, que tenía cuatro defectos concretos.
+Los cuatro están corregidos aquí y cada uno tiene su prueba de regresión:
+
+BUG 1
+    El bloque de impresión IZQUIERDO usaba ``right_red_angle`` y
+    ``right_green_angle``: los ángulos del brazo izquierdo se calculaban y se
+    descartaban. Aquí hay **una sola función parametrizada por lado**, así que
+    no existe el sitio donde equivocarse.
+BUG 2
+    Las guardas ``if float(x) == float('nan')`` nunca se cumplen, porque NaN no
+    es igual a nada, ni a sí mismo. Aquí la comprobación la hace
+    ``limits.clamp_arm``, que lanza ``ValueError``, y el brazo afectado se
+    descarta reutilizando su último valor válido.
+BUG 3
+    ``arccos(arm_length / max_arm_length)`` devuelve NaN en cuanto el cociente
+    supera 1, cosa que ocurre siempre que la muñeca se aleja del hombro más que
+    la distancia hombro-cadera. Aquí no hay cocientes de longitudes: los ángulos
+    salen de productos escalares entre **vectores unitarios**, acotados a
+    [-1, 1] antes del arcoseno.
+BUG 4
+    ``angle_green`` medía la muñeca respecto a la **cadera**, que no es un
+    ángulo de la articulación del hombro. Aquí el pivote es siempre el hombro.
+
+LOS DOS GRADOS DE LIBERTAD, CON SU NOMBRE ANATOMICO
+---------------------------------------------------
+El hombro del robot es un **cardán de dos grados de libertad** que orienta un
+brazo rígido de un solo eslabón, sin codo. Leídos de los ejes del rig en
+``telmeow_viewer/telmeow_viewer.html`` (H28 del plan maestro):
+
+- ``armL`` / ``armR``      -> **abducción (+) / aducción (−)**, plano frontal.
+- ``armLtw`` / ``armRtw``  -> **flexión (+) / extensión (−)**, plano sagital.
+
+**El robot no tiene rotación interna/externa** (rotación axial del húmero). El
+enunciado original del PROMPT 5 pedía estimar esa rotación desde el vector
+codo→muñeca y enviarla al canal ``tw``; eso describe un grado de libertad que el
+robot no tiene, y hacerlo movería el brazo hacia adelante en respuesta a que el
+operador rota el antebrazo. El sufijo ``tw`` (*twist*) es vocabulario heredado
+del visor y no se puede cambiar sin romper el contrato MQTT.
+
+Consecuencia para el documento: la rotación axial del brazo del operador **no se
+reproduce**, y se declara. La limitación que sí queda, y que sí es medible, es
+otra: la abducción vive en el **plano de imagen** mientras que la flexión
+depende de la **coordenada de profundidad** de BlazePose, que es su componente
+débil en monocular. Por eso la flexión es el canal menos fiable de los cuatro.
+
+EL VECTOR QUE ORIENTA EL BRAZO
+------------------------------
+``target="mano"`` (por defecto) usa el centroide de los cuatro landmarks de la
+mano que BlazePose entrega —muñeca, meñique, índice y pulgar—; ``target="codo"``
+usa el vector húmero. Ver ``config.ArmConfig`` para el razonamiento y para lo
+que hay que declarar al usar cada uno.
+
+Los dos se conservan conmutables, igual que ``head_tracker`` conserva ``pnp``
+junto a ``mesh``, para que la elección sea un resultado medido y no una decisión
+sin justificar.
+
+COMO SE EVITAN LOS ERRORES DE SIGNO
+-----------------------------------
+Este módulo tiene cuatro canales con signo más una decisión de espejo, o sea
+cuatro veces la superficie del fallo que en el PROMPT 4 dejó el cabeceo
+invertido pasando 400 pruebas en verde (H22). Tres medidas deliberadas:
+
+1. **La terna del tronco es invariante al espejo.** Ninguno de sus tres vectores
+   sale de un producto vectorial, porque espejar la imagen invierte la
+   quiralidad y con ella el signo de todo producto vectorial. Ver
+   ``torso_basis``.
+2. **El cruce de lados vive en un solo sitio**, ``canal_del_robot``, con su
+   tabla de verdad escrita. Todo lo que va después —filtros, recorte, CSV,
+   JSON— viaja ya en el marco del robot.
+3. **El sentido de cada canal es un parámetro, no una constante.** Los ejes del
+   rig, derivados sobre el papel, contradicen a los comentarios del propio
+   visor. Se resuelve moviendo un solo slider en el visor y mirando, no
+   deduciéndolo: ``invert_abduccion`` e ``invert_flexion`` son lo único que hay
+   que tocar, y el demo las alterna en caliente con las teclas ``b`` y ``f``.
+
+Modo demo::
+
+    python -m telmeow_teleop.arm_tracker --publish --record brazos.csv
+"""
+
+from __future__ import annotations
+
+import math
+import time
+from collections import deque
+from pathlib import Path
+
+import cv2
+import mediapipe as mp
+import numpy as np
+
+from .config import AppConfig
+from .filters import EMAFilter, OneEuroFilter
+from .head_tracker import apartar_si_existe
+from .limits import (
+    ARM_ABDUCCION_1D,
+    FLEXION_RANGE,
+    ArmClamp,
+    Side,
+    clamp_arm,
+)
+
+__all__ = [
+    "ArmTracker",
+    "ArmAngles",
+    "torso_basis",
+    "arm_angles",
+    "canal_del_robot",
+    "LANDMARKS",
+    "PUNTOS_MANO",
+    "EJE_ANTERIOR",
+    "INCLINACION_FLEXION",
+    "CANALES",
+]
+
+
+# --------------------------------------------------------------------------
+# Landmarks de BlazePose
+# --------------------------------------------------------------------------
+
+#: Índices de ``mp.solutions.pose.PoseLandmark`` por lado.
+#:
+#: Se escriben literales en vez de leerse del enum para que las funciones puras
+#: de este módulo se puedan probar sin instanciar MediaPipe. Hay una prueba que
+#: los contrasta contra el enum real, que es la que impide que se desincronicen.
+LANDMARKS: dict[Side, dict[str, int]] = {
+    Side.L: {
+        "hombro": 11,
+        "codo": 13,
+        "muneca": 15,
+        "menique": 17,
+        "indice": 19,
+        "pulgar": 21,
+        "cadera": 23,
+    },
+    Side.R: {
+        "hombro": 12,
+        "codo": 14,
+        "muneca": 16,
+        "menique": 18,
+        "indice": 20,
+        "pulgar": 22,
+        "cadera": 24,
+    },
+}
+
+#: Los cuatro puntos que forman la mano en ``target="mano"``.
+PUNTOS_MANO: tuple[str, ...] = ("muneca", "menique", "indice", "pulgar")
+
+#: Dirección ANTERIOR del operador (hacia dónde mira) en el sistema de
+#: coordenadas de ``pose_world_landmarks``.
+#:
+#: MediaPipe entrega ese sistema con x hacia la derecha de la imagen, y hacia
+#: abajo y z hacia el fondo de la escena, así que la dirección hacia la cámara
+#: —que es hacia donde mira un operador sentado de frente— es −z.
+#:
+#: Voltear el frame horizontalmente niega la x, no la z, así que este eje **no
+#: se ve afectado por el espejo**. Y si el signo estuviera al revés, lo corrige
+#: ``invert_flexion`` sin tocar código: por eso el sentido se confirma en el
+#: visor y no aquí.
+EJE_ANTERIOR: np.ndarray = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+
+#: Dirección SUPERIOR de reserva, en el mismo sistema: −y es hacia arriba.
+#:
+#: Solo se usa si las caderas nunca llegaron a verse. Asume al operador sentado
+#: y erguido, y hay que declararlo si acaba siendo el camino habitual.
+EJE_SUPERIOR_RESERVA: np.ndarray = np.array([0.0, -1.0, 0.0], dtype=np.float64)
+
+#: Nombre del campo MQTT de cada (lado del robot, eje).
+CANALES: dict[Side, tuple[str, str]] = {
+    Side.L: ("armL", "armLtw"),
+    Side.R: ("armR", "armRtw"),
+}
+
+#: Alfa del suavizado de la vertical del tronco.
+#:
+#: La orientación del tronco es cuasi-estática: el operador narra sentado y no
+#: se dobla treinta veces por segundo. Un alfa bajo la estabiliza sin coste de
+#: retardo perceptible, y evita que el ruido de los landmarks de cadera —que son
+#: los peor observados de todos, porque a menudo caen fuera de cuadro— se
+#: propague a los cuatro canales a la vez.
+ALFA_TRONCO: float = 0.05
+
+#: Componente sagital por debajo de la cual la flexión deja de estar definida.
+#:
+#: Es ``cos(abduccion)``, así que 0.02 corresponde a ±88.9° de abducción: el
+#: brazo prácticamente horizontal hacia el costado, alineado con el eje de la
+#: articulación hija del cardán. Ver la nota de singularidad de ``arm_angles``.
+#: No se pone más pequeño porque el problema no es solo el cero exacto: en un
+#: entorno de la singularidad la flexión ya es una división de dos ruidos.
+_SAGITAL_MINIMA: float = 0.02
+
+#: Inclinación del eje de flexión respecto al eje latero-lateral ideal, en
+#: grados y en el sentido POSITIVO DE LA ABDUCCION, por canal del robot.
+#:
+#: El cardán del robot no es ideal: el eje del servo de flexión no es puramente
+#: lateral, sino que está girado ~10° respecto a él. Sale de los ejes del rig
+#: (``telmeow_viewer.html:274`` y ``:276``): ``(-0.985, 0, ∓0.17)`` es el eje
+#: lateral ``(-1, 0, 0)`` rotado ``asin(0.17) ≈ 9.9°`` alrededor del eje de
+#: abducción de ese brazo. La simetría entre los dos lados no es casual: el
+#: hombro es la misma pieza reflejada.
+#:
+#: Sin corregirlo, el retargeting arrastra una diafonía entre canales: ~1.3° de
+#: abducción parásita a 30° de flexión y ~10° a 90°. Con él, la ida y la vuelta
+#: cierran exactamente, que es lo que permite que la prueba contra el rig sea
+#: estrecha y siga sirviendo para detectar errores.
+#:
+#: El signo depende del sentido de la ABDUCCION, no del de la flexión, así que
+#: no queda pendiente de la verificación en el visor. Si algún día
+#: ``invert_abduccion`` se pusiera a True, esta inclinación cambia de signo con
+#: ella; ``ArmTracker`` ya lo hace.
+INCLINACION_FLEXION: dict[Side, float] = {
+    Side.L: math.degrees(math.asin(0.174)),
+    Side.R: math.degrees(math.asin(0.170)),
+}
+
+
+# --------------------------------------------------------------------------
+# Geometría (funciones puras, probables sin cámara ni MediaPipe)
+# --------------------------------------------------------------------------
+
+
+def _normalizar(vector: np.ndarray) -> np.ndarray | None:
+    norma = float(np.linalg.norm(vector))
+    if not math.isfinite(norma) or norma < 1e-9:
+        return None
+    return vector / norma
+
+
+def torso_basis(
+    hombro: np.ndarray,
+    hombro_contrario: np.ndarray,
+    superior: np.ndarray,
+    eje_anterior: np.ndarray = EJE_ANTERIOR,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Terna ortonormal del tronco vista desde UN brazo.
+
+    Devuelve ``(u_lat, u_ant, u_sup)``, donde ``u_lat`` apunta **hacia afuera
+    del brazo en cuestión**, ``u_ant`` hacia el frente del operador y ``u_sup``
+    hacia su cabeza. Devuelve ``None`` si la geometría es degenerada (puntos
+    coincidentes, vectores paralelos, coordenadas no finitas).
+
+    POR QUE NINGUN VECTOR SALE DE UN PRODUCTO VECTORIAL
+    ---------------------------------------------------
+    Es la decisión que hace este módulo inmune al espejo, y conviene entenderla
+    porque es contraintuitiva: lo natural sería sacar ``u_ant`` como
+    ``u_lat × u_sup``, y sería un error.
+
+    Voltear el frame horizontalmente niega la coordenada x de todos los
+    landmarks, lo que convierte un sistema de mano derecha en uno de mano
+    izquierda. Un producto vectorial **cambia de signo** bajo esa
+    transformación; un producto escalar no. Así que un ``u_ant`` obtenido por
+    producto vectorial apuntaría hacia adelante o hacia atrás según si la cámara
+    está espejada, y la flexión saldría invertida sin que nada lo delate.
+
+    Los tres vectores se construyen aquí de forma que cada uno **conserva su
+    significado** bajo el espejo:
+
+    - ``u_sup`` sale de landmarks (cadera → hombros), y espejar no cambia hacia
+      dónde está la cabeza.
+    - ``u_lat`` sale del hombro contrario hacia el propio, así que apunta hacia
+      afuera de ESE brazo sea cual sea la etiqueta que BlazePose le ponga.
+    - ``u_ant`` sale del eje óptico, que un volteo horizontal no toca.
+
+    Los tres se ortogonalizan por Gram-Schmidt en ese orden.
+    """
+    u_sup = _normalizar(np.asarray(superior, dtype=np.float64))
+    if u_sup is None:
+        return None
+
+    lateral = np.asarray(hombro, dtype=np.float64) - np.asarray(
+        hombro_contrario, dtype=np.float64
+    )
+    u_lat = _normalizar(lateral - float(np.dot(lateral, u_sup)) * u_sup)
+    if u_lat is None:
+        return None
+
+    anterior = np.asarray(eje_anterior, dtype=np.float64)
+    anterior = (
+        anterior
+        - float(np.dot(anterior, u_sup)) * u_sup
+        - float(np.dot(anterior, u_lat)) * u_lat
+    )
+    u_ant = _normalizar(anterior)
+    if u_ant is None:
+        return None
+
+    return (u_lat, u_ant, u_sup)
+
+
+def arm_angles(
+    hombro: np.ndarray,
+    destino: np.ndarray,
+    base: tuple[np.ndarray, np.ndarray, np.ndarray],
+    inclinacion: float = 0.0,
+) -> tuple[float, float | None] | None:
+    """Descompone la dirección del brazo en ``(abduccion, flexion)``, en grados.
+
+    Es la **cinemática inversa exacta del cardán del robot**, en su mismo orden
+    de composición: la flexión es la articulación padre y la abducción la hija,
+    tal como están anidadas en el rig del visor
+    (``gArmRbal = makeJoint(gArmRtwist, ...)``). Por eso la ida y la vuelta
+    cierran exactamente, y hay una prueba que lo comprueba contra una
+    transcripción independiente de esos ejes.
+
+    Con ``h`` la dirección unitaria hombro→destino, y llamando ``p``, ``q`` y
+    ``a`` a sus componentes hacia abajo, hacia afuera y hacia adelante::
+
+        abduccion = asin(q)
+        flexion   = atan2(a, p)
+
+    Nada de cocientes de longitudes: los dos ángulos salen de productos
+    escalares entre vectores unitarios, y el argumento del arcoseno se acota a
+    [-1, 1] antes de evaluarlo. Es la corrección del BUG 3, por construcción y
+    no por parche.
+
+    ``inclinacion`` CORRIGE QUE EL CARDAN DEL ROBOT NO ES IDEAL. Su eje de
+    flexión está girado ~10° respecto al eje lateral, alrededor del eje de
+    abducción (ver ``INCLINACION_FLEXION``). Deshacerlo es una rotación de
+    ``-inclinacion`` en el plano (abajo, afuera) antes de descomponer, y sumarla
+    de vuelta a la abducción::
+
+        p' =  p·cos(i) + q·sin(i)
+        q' = -p·sin(i) + q·cos(i)
+        abduccion = asin(q') + i
+        flexion   = atan2(a, p')
+
+    Con la inclinación a 0 se reduce al cardán ideal, que es lo que usan las
+    pruebas de postura. Sin ella, el robot arrastra ~10° de abducción parásita
+    con el brazo a 90° de flexión.
+
+    SINGULARIDAD, y no es teórica. Con el brazo sobre ``u_lat`` —abducción
+    ±90°, o sea el brazo horizontal hacia el costado— el eje de la articulación
+    hija se alinea con la dirección del brazo y **la flexión deja de estar
+    definida**: es la singularidad de cualquier cardán. El operador sí puede
+    adoptar esa postura, aunque el robot no pueda seguirla (la tabla 2D no deja
+    pasar de +75° de abducción).
+
+    Ahí el ``atan2`` no devuelve un valor ruidoso sino uno **falso y grande**:
+    con los dos argumentos en cero da 0 o ±180 según el signo del cero en coma
+    flotante, y ese ±180 recortaría al tope y daría un tirón visible en el
+    robot. Por eso, cuando la componente sagital cae por debajo de
+    ``_SAGITAL_MINIMA``, se devuelve la flexión como ``None``: es información
+    que no existe, y quien llama debe conservar el último valor válido en vez de
+    inventarse uno.
+
+    Returns:
+        ``(abduccion, flexion)``, con ``flexion`` a ``None`` en la
+        singularidad. ``None`` entero si el brazo tiene longitud nula o si algo
+        no es finito.
+    """
+    h = _normalizar(
+        np.asarray(destino, dtype=np.float64) - np.asarray(hombro, dtype=np.float64)
+    )
+    if h is None:
+        return None
+
+    u_lat, u_ant, u_sup = base
+    hacia_afuera = float(np.dot(h, u_lat))
+    hacia_abajo = -float(np.dot(h, u_sup))
+    hacia_adelante = float(np.dot(h, u_ant))
+
+    # Deshacer la inclinación del eje de flexión. Es una rotación en el plano de
+    # la abducción —el que contiene «abajo» y «afuera»—, así que su signo
+    # depende del sentido de la abducción y no del de la flexión.
+    if inclinacion:
+        radianes = math.radians(inclinacion)
+        coseno, seno = math.cos(radianes), math.sin(radianes)
+        hacia_abajo, hacia_afuera = (
+            hacia_abajo * coseno + hacia_afuera * seno,
+            -hacia_abajo * seno + hacia_afuera * coseno,
+        )
+
+    lateral = min(1.0, max(-1.0, hacia_afuera))
+    abduccion = math.degrees(math.asin(lateral)) + inclinacion
+    if not math.isfinite(abduccion):
+        return None
+
+    if math.hypot(hacia_adelante, hacia_abajo) < _SAGITAL_MINIMA:
+        return (abduccion, None)
+
+    flexion = math.degrees(math.atan2(hacia_adelante, hacia_abajo))
+    if not math.isfinite(flexion):
+        return (abduccion, None)
+    return (abduccion, flexion)
+
+
+def canal_del_robot(
+    etiqueta: Side, *, frame_espejado: bool, mirror: bool
+) -> Side:
+    """Traduce la etiqueta de lado de BlazePose al canal del robot.
+
+    **Este es el único punto del módulo donde un lado del operador se ata a un
+    canal del robot.** Todo lo que viene después —ganancias, filtros, recorte,
+    CSV y JSON— viaja ya en el marco del robot, así que no hay forma de que la
+    grabación y lo que se publica por MQTT discrepen.
+
+    Son dos cruces distintos y se escriben por separado a propósito:
+
+    1. **Etiqueta de BlazePose → lado FISICO del operador.** BlazePose etiqueta
+       según la persona que ve. Si el frame llega espejado (``cv2.flip``, que es
+       lo habitual para que el operador se vea como en un espejo), la persona
+       que ve es la imagen especular del operador, así que sus ``LEFT_*`` son el
+       lado físico **derecho**. Sin espejo, coinciden.
+    2. **Lado físico del operador → canal del robot.** Con ``mirror=True`` (por
+       defecto) coinciden: el brazo izquierdo físico del operador mueve
+       ``armL``. Es la misma convención cerrada para la cabeza en el P4.1 — el
+       robot reproduce la pose en su propio marco, que es lo que llega a los
+       servos. Con ``mirror=False`` se cruzan, y el robot imita como un espejo.
+
+    Tabla de verdad completa, con ``mirror=True``::
+
+        etiqueta  frame_espejado  ->  lado fisico   canal
+        L         False               izquierdo     armL
+        L         True                derecho       armR
+        R         False               derecho       armR
+        R         True                izquierdo     armL
+
+    Con ``mirror=False`` la última columna se cruza en las cuatro filas.
+    """
+    fisico = etiqueta.opposite if frame_espejado else etiqueta
+    return fisico if mirror else fisico.opposite
+
+
+# --------------------------------------------------------------------------
+# Resultado
+# --------------------------------------------------------------------------
+
+
+class ArmAngles:
+    """Los cuatro canales del robot, con ``None`` para los que no se pudieron
+    estimar en este frame.
+
+    No es una 4-tupla —que es lo que pedía el enunciado— porque los brazos se
+    descartan **por separado**: uno fuera de cuadro, o con un landmark NaN, no
+    puede tumbar al otro. Un canal en ``None`` se omite del JSON, y el visor
+    conserva su último valor (``PosePublisher.publish`` ya omite los ``None``).
+    Así, «reutilizar el último valor válido» no necesita que nadie mantenga
+    estado.
+    """
+
+    __slots__ = ("armL", "armLtw", "armR", "armRtw")
+
+    def __init__(
+        self,
+        armL: float | None = None,
+        armLtw: float | None = None,
+        armR: float | None = None,
+        armRtw: float | None = None,
+    ) -> None:
+        self.armL = armL
+        self.armLtw = armLtw
+        self.armR = armR
+        self.armRtw = armRtw
+
+    @property
+    def as_tuple(self) -> tuple[float | None, float | None, float | None, float | None]:
+        return (self.armL, self.armLtw, self.armR, self.armRtw)
+
+    @property
+    def vacio(self) -> bool:
+        """True si no se pudo estimar ningún canal."""
+        return all(v is None for v in self.as_tuple)
+
+    def __repr__(self) -> str:
+        def fmt(v: float | None) -> str:
+            return "--" if v is None else f"{v:+.1f}"
+
+        return (
+            f"ArmAngles(armL={fmt(self.armL)}, armLtw={fmt(self.armLtw)}, "
+            f"armR={fmt(self.armR)}, armRtw={fmt(self.armRtw)})"
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ArmAngles):
+            return NotImplemented
+        return self.as_tuple == other.as_tuple
+
+
+# --------------------------------------------------------------------------
+# El tracker
+# --------------------------------------------------------------------------
+
+
+class ArmTracker:
+    """Estima los cuatro canales de brazo del robot desde frames RGB.
+
+    Cadena por canal: estimar la dirección del brazo → descomponerla en el
+    cardán → ganancia por sentido → invertir si toca → One Euro → ``clamp_arm``.
+
+    Args:
+        mirror: Con ``True`` el brazo izquierdo físico del operador manda sobre
+            ``armL``. Ver ``canal_del_robot``.
+        frame_espejado: Si el frame que llega a ``process`` ya viene volteado
+            horizontalmente. Debe coincidir con ``cfg.camera.flip``: es un
+            **hecho sobre la entrada**, no una preferencia, y va separado de
+            ``mirror``, que sí es una política.
+        target: ``"mano"`` (centroide de los cuatro landmarks de la mano) o
+            ``"codo"`` (vector húmero). Ver ``config.ArmConfig``.
+        invert_abduccion, invert_flexion: sentido de cada eje, compartido por
+            los dos brazos porque la convención del robot es simétrica.
+            **Pendientes de verificar contra el visor.**
+        gain_*: multiplicadores por sentido. 1.0 copia el gesto.
+        min_visibility: umbral por debajo del cual un landmark se considera no
+            observado.
+    """
+
+    def __init__(
+        self,
+        *,
+        mirror: bool = True,
+        frame_espejado: bool = True,
+        target: str = "mano",
+        invert_abduccion: bool = False,
+        invert_flexion: bool = False,
+        gain_abduccion: float = 1.0,
+        gain_aduccion: float = 1.0,
+        gain_flexion: float = 1.0,
+        gain_extension: float = 1.0,
+        min_cutoff: float = 0.5,
+        beta: float = 0.5,
+        min_visibility: float = 0.5,
+        model_complexity: int = 1,
+        clock=time.perf_counter,
+    ) -> None:
+        if target not in ("mano", "codo"):
+            raise ValueError(f"target debe ser 'mano' o 'codo', se recibió {target!r}")
+        ganancias = (gain_abduccion, gain_aduccion, gain_flexion, gain_extension)
+        if min(ganancias) <= 0.0:
+            raise ValueError("las ganancias deben ser positivas")
+        if not 0.0 <= min_visibility <= 1.0:
+            raise ValueError("min_visibility debe estar entre 0 y 1")
+
+        self.mirror = mirror
+        self.frame_espejado = frame_espejado
+        self.target = target
+        self.invert_abduccion = invert_abduccion
+        self.invert_flexion = invert_flexion
+        self.gain_abduccion = gain_abduccion
+        self.gain_aduccion = gain_aduccion
+        self.gain_flexion = gain_flexion
+        self.gain_extension = gain_extension
+        self.min_visibility = min_visibility
+
+        self._clock = clock
+        self._pose = mp.solutions.pose.Pose(
+            static_image_mode=False,
+            model_complexity=model_complexity,
+            # Deliberadamente DESACTIVADO. MediaPipe trae su propio suavizado
+            # temporal, y dejarlo puesto encadenaría dos filtros: la reducción de
+            # temblor que se midiera dejaría de ser atribuible al One Euro, que
+            # es la cifra que este proyecto reporta (P3, P4.5). Con esto, el One
+            # Euro es el único filtro temporal del camino.
+            smooth_landmarks=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+
+        # Un filtro por canal del robot y eje: cuatro en total.
+        self._filtros: dict[tuple[Side, str], OneEuroFilter] = {
+            (lado, eje): OneEuroFilter(min_cutoff, beta, clock=clock)
+            for lado in (Side.L, Side.R)
+            for eje in ("abduccion", "flexion")
+        }
+        # Vertical del tronco, suavizada componente a componente.
+        self._filtros_tronco = tuple(EMAFilter(ALFA_TRONCO) for _ in range(3))
+
+        self._u_sup: np.ndarray | None = None
+        self._tronco_de_caderas = False
+        self._frames_sin_pose = 0
+        self._raw: dict[Side, tuple[float, float]] = {}
+        self._flexion_valida: dict[Side, float] = {}
+        self._clamps: dict[Side, ArmClamp] = {}
+        self._visibilidades: dict[str, float] = {}
+        self._landmarks_imagen = None
+        self._extremos: dict[Side, dict[str, list[float]]] = {
+            lado: {"abduccion": [0.0, 0.0], "flexion": [0.0, 0.0]}
+            for lado in (Side.L, Side.R)
+        }
+
+    # -- estado para el HUD y la calibración -------------------------------
+
+    @property
+    def last_clamp(self) -> dict[Side, ArmClamp]:
+        """Último recorte por canal del robot, con ``lower``/``upper``/
+        ``fraction``/``clamped`` listos para las barras del HUD.
+
+        En el brazo, ``lower`` y ``upper`` de la abducción son los interpolados
+        PARA LA FLEXION ACTUAL, así que la barra se estrecha y se ensancha en
+        vivo. Es el comportamiento correcto, no un defecto.
+        """
+        return dict(self._clamps)
+
+    @property
+    def raw_angles(self) -> dict[Side, tuple[float, float]]:
+        """``(abduccion, flexion)`` crudos del operador, por canal del robot,
+        antes de ganancia, inversión, filtro y recorte."""
+        return dict(self._raw)
+
+    @property
+    def visibilidades(self) -> dict[str, float]:
+        """Puntuación de visibilidad del último frame, por landmark.
+
+        Es el dato que decide si el codo se ve lo bastante como para usar
+        ``target="codo"`` y si las caderas sostienen la vertical del tronco. Va
+        al CSV desde la primera grabación a propósito: una sesión grabada sin
+        estas columnas no se recupera releyéndola (H26).
+        """
+        return dict(self._visibilidades)
+
+    @property
+    def tronco_de_caderas(self) -> bool:
+        """True si la vertical del tronco sale de las caderas observadas.
+
+        En ``False`` se está usando la reserva (vertical de imagen), que asume
+        al operador sentado y erguido y hay que declararla.
+        """
+        return self._tronco_de_caderas
+
+    @property
+    def landmarks_imagen(self):
+        """Landmarks en coordenadas de imagen del último frame, para dibujar.
+
+        Son los normalizados de ``pose_landmarks``, no los de
+        ``pose_world_landmarks`` que usa la estimación: los primeros están en el
+        plano de la imagen y sirven para pintar el esqueleto encima; los
+        segundos están en metros con origen en la cadera y no se pueden pintar.
+        """
+        return self._landmarks_imagen
+
+    @property
+    def frames_sin_pose(self) -> int:
+        return self._frames_sin_pose
+
+    @property
+    def degenerate_dt_count(self) -> int:
+        """``dt`` no positivos que los filtros tuvieron que sustituir.
+
+        Con ``time.monotonic()`` en Windows serían muchos: su resolución de
+        ~15.6 ms es comparable a los 33 ms de un frame a 30 fps, así que dos
+        frames seguidos pueden leer el mismo instante y dar ``dt = 0``, que en el
+        filtro es una división por cero. Con ``perf_counter`` debería quedarse en
+        cero; si sube, algo está pasando el reloj equivocado.
+        """
+        return sum(f.degenerate_dt_count for f in self._filtros.values())
+
+    @property
+    def raw_extremes(self) -> dict[Side, dict[str, tuple[float, float]]]:
+        """Recorrido acumulado del operador por canal, para calibrar."""
+        return {
+            lado: {eje: (lo, hi) for eje, (lo, hi) in ejes.items()}
+            for lado, ejes in self._extremos.items()
+        }
+
+    def reset_extremes(self) -> None:
+        for ejes in self._extremos.values():
+            for extremo in ejes.values():
+                extremo[0] = 0.0
+                extremo[1] = 0.0
+
+    def suggested_gains(self) -> dict[str, float | None]:
+        """Ganancias que harían falta para que el recorrido observado cubra el
+        rango del robot, por sentido.
+
+        DIFERENCIA IMPORTANTE RESPECTO A LA CABEZA, y es estructural: el rango
+        de abducción **no es constante**, depende de la flexión. Dividir por el
+        rango de la tabla daría un número distinto en cada frame. Como objetivo
+        de calibración se usa ``ARM_ABDUCCION_1D``, la rebanada a flexión 0°,
+        igual que el P4.3 separó ``HEAD_PAN_TARGET_RANGE`` del tope mecánico del
+        pan. La flexión sí usa su rango mecánico completo, ±90°.
+
+        Se toma el recorrido del brazo que MAS haya alcanzado en cada sentido:
+        una ganancia por canal y no por brazo, porque el robot es simétrico y
+        dos ganancias distintas por lado harían que el mismo gesto saliera
+        asimétrico.
+
+        Devuelve ``None`` en los sentidos donde el operador apenas se movió: una
+        excursión de 2° propondría una ganancia de 25, que no significa nada.
+        """
+        minimo_excursion = 5.0
+        peor: dict[str, float] = {}
+        for lado, ejes in self._extremos.items():
+            objetivo_abd = ARM_ABDUCCION_1D[lado]
+            for clave, valor, tope in (
+                ("abduccion", ejes["abduccion"][1], objetivo_abd[1]),
+                ("aduccion", ejes["abduccion"][0], objetivo_abd[0]),
+                ("flexion", ejes["flexion"][1], FLEXION_RANGE[1]),
+                ("extension", ejes["flexion"][0], FLEXION_RANGE[0]),
+            ):
+                if abs(valor) <= minimo_excursion:
+                    continue
+                propuesta = abs(tope / valor)
+                # El mínimo entre los dos brazos: la ganancia tiene que servir
+                # al que más lejos llega, o ese se pasaría de tope.
+                peor[clave] = min(peor.get(clave, propuesta), propuesta)
+
+        return {
+            clave: peor.get(clave)
+            for clave in ("abduccion", "aduccion", "flexion", "extension")
+        }
+
+    # -- proceso -----------------------------------------------------------
+
+    def _punto(self, mundo, lado: Side, nombre: str) -> np.ndarray:
+        lm = mundo[LANDMARKS[lado][nombre]]
+        return np.array([lm.x, lm.y, lm.z], dtype=np.float64)
+
+    def _visibilidad(self, mundo, lado: Side, nombre: str) -> float:
+        return float(getattr(mundo[LANDMARKS[lado][nombre]], "visibility", 1.0))
+
+    def _destino(self, mundo, lado: Side) -> tuple[np.ndarray, float]:
+        """Punto que orienta el brazo y su visibilidad, según ``target``."""
+        if self.target == "codo":
+            return self._punto(mundo, lado, "codo"), self._visibilidad(
+                mundo, lado, "codo"
+            )
+        # Promediar los cuatro landmarks de la mano en vez de usar solo la
+        # muñeca: son cuatro estimaciones del mismo sitio, y el promedio cancela
+        # parte de su ruido independiente. Es la versión barata —sin añadir
+        # ningún modelo— de pedir más puntos en la mano.
+        puntos = [self._punto(mundo, lado, n) for n in PUNTOS_MANO]
+        visibles = [self._visibilidad(mundo, lado, n) for n in PUNTOS_MANO]
+        return np.mean(puntos, axis=0), min(visibles)
+
+    def _actualizar_tronco(self, mundo) -> np.ndarray | None:
+        """Vertical del tronco, suavizada, o la reserva si no hay caderas."""
+        vis_cadera = min(
+            self._visibilidad(mundo, Side.L, "cadera"),
+            self._visibilidad(mundo, Side.R, "cadera"),
+        )
+        self._visibilidades["cadera"] = vis_cadera
+
+        if vis_cadera >= self.min_visibility:
+            hombros = (
+                self._punto(mundo, Side.L, "hombro")
+                + self._punto(mundo, Side.R, "hombro")
+            ) / 2.0
+            caderas = (
+                self._punto(mundo, Side.L, "cadera")
+                + self._punto(mundo, Side.R, "cadera")
+            ) / 2.0
+            crudo = hombros - caderas
+            if np.all(np.isfinite(crudo)):
+                suave = np.array(
+                    [f(float(v)) for f, v in zip(self._filtros_tronco, crudo)],
+                    dtype=np.float64,
+                )
+                normalizado = _normalizar(suave)
+                if normalizado is not None:
+                    self._u_sup = normalizado
+                    self._tronco_de_caderas = True
+
+        if self._u_sup is None:
+            # Nunca se vieron las caderas: se asume operador sentado y erguido.
+            self._tronco_de_caderas = False
+            return EJE_SUPERIOR_RESERVA
+        return self._u_sup
+
+    def process(self, frame_rgb: np.ndarray) -> ArmAngles | None:
+        """Estima los cuatro canales del robot desde un frame RGB.
+
+        Returns:
+            Un ``ArmAngles`` con ``None`` en los canales que no se pudieron
+            estimar, o ``None`` si no se detectó ninguna pose. Cada brazo se
+            descarta por separado.
+        """
+        resultado = self._pose.process(frame_rgb)
+        mundo = getattr(resultado, "pose_world_landmarks", None)
+        if mundo is None:
+            self._frames_sin_pose += 1
+            self._landmarks_imagen = None
+            return None
+        mundo = mundo.landmark
+        self._landmarks_imagen = resultado.pose_landmarks
+
+        self._frames_sin_pose = 0
+        self._raw.clear()
+        u_sup = self._actualizar_tronco(mundo)
+        if u_sup is None:
+            return ArmAngles()
+
+        salida = ArmAngles()
+        ahora = self._clock()
+        for etiqueta in (Side.L, Side.R):
+            canal = canal_del_robot(
+                etiqueta, frame_espejado=self.frame_espejado, mirror=self.mirror
+            )
+            angulos = self._brazo(mundo, etiqueta, canal, u_sup, ahora)
+            if angulos is None:
+                continue
+            campo_abd, campo_flex = CANALES[canal]
+            setattr(salida, campo_abd, angulos[0])
+            setattr(salida, campo_flex, angulos[1])
+        return salida
+
+    def _brazo(
+        self,
+        mundo,
+        etiqueta: Side,
+        canal: Side,
+        u_sup: np.ndarray,
+        timestamp: float,
+    ) -> tuple[float, float] | None:
+        """Un brazo, de landmarks a ángulos del robot. ``None`` = descartarlo."""
+        vis_hombro = self._visibilidad(mundo, etiqueta, "hombro")
+        destino, vis_destino = self._destino(mundo, etiqueta)
+        # Las visibilidades se registran con el nombre del CANAL DEL ROBOT, no
+        # con la etiqueta de BlazePose: el CSV tiene que poder leerse sin volver
+        # a razonar sobre el espejo.
+        self._visibilidades[f"hombro_{canal.value}"] = vis_hombro
+        self._visibilidades[f"destino_{canal.value}"] = vis_destino
+        self._visibilidades[f"codo_{canal.value}"] = self._visibilidad(
+            mundo, etiqueta, "codo"
+        )
+        if min(vis_hombro, vis_destino) < self.min_visibility:
+            return None
+
+        base = torso_basis(
+            self._punto(mundo, etiqueta, "hombro"),
+            self._punto(mundo, etiqueta.opposite, "hombro"),
+            u_sup,
+        )
+        if base is None:
+            return None
+
+        # La inclinación del eje de flexión es del rig del CANAL que este brazo
+        # manda, no del lado del operador. Y acompaña al sentido de la
+        # abducción: si se invirtiera, la corrección tiene que invertirse con
+        # ella o pasaría de restar 10° a sumarlos.
+        inclinacion = INCLINACION_FLEXION[canal]
+        if self.invert_abduccion:
+            inclinacion = -inclinacion
+
+        crudo = arm_angles(
+            self._punto(mundo, etiqueta, "hombro"), destino, base, inclinacion
+        )
+        if crudo is None:
+            return None
+
+        abduccion, flexion = crudo
+        if flexion is None:
+            # Singularidad del cardán: el brazo está horizontal hacia el
+            # costado y la flexión no existe. Se conserva la última válida de
+            # ESTE canal en vez de inventarse una, porque la flexión también es
+            # el índice de la tabla 2D: sin ella no se puede saber cuánta
+            # abducción admite el robot, y un valor falso encogería o ensancharía
+            # el rango sin motivo.
+            anterior = self._flexion_valida.get(canal)
+            flexion = 0.0 if anterior is None else anterior
+        else:
+            self._flexion_valida[canal] = flexion
+
+        self._raw[canal] = (abduccion, flexion)
+        for eje, valor in (("abduccion", abduccion), ("flexion", flexion)):
+            extremo = self._extremos[canal][eje]
+            extremo[0] = min(extremo[0], valor)
+            extremo[1] = max(extremo[1], valor)
+
+        return self.map_to_robot(canal, abduccion, flexion, timestamp)
+
+    def map_to_robot(
+        self,
+        canal: Side | str,
+        abduccion: float,
+        flexion: float,
+        timestamp: float | None = None,
+    ) -> tuple[float, float] | None:
+        """Convierte los ángulos del operador en los del robot, para un canal.
+
+        Cadena: ganancia por sentido → inversión → One Euro → ``clamp_arm``.
+
+        Está separada de ``process`` para poder probarla sin cámara ni
+        MediaPipe: es donde viven las ganancias, los signos y el recorte, que
+        son las decisiones que hay que poder verificar.
+
+        Devuelve ``None`` si algún ángulo no es finito, en cuyo caso quien llame
+        debe **reutilizar el último valor válido de ese brazo** — que se
+        consigue omitiendo sus campos del JSON, no publicando ceros.
+        """
+        canal = Side.parse(canal)
+        # Se comprueba AQUI, antes de tocar nada. Si se dejara para después, el
+        # filtro de abducción podría procesar su muestra y el de flexión reventar
+        # con la suya, dejando los dos ejes del mismo brazo desincronizados.
+        if not (math.isfinite(abduccion) and math.isfinite(flexion)):
+            return None
+
+        # La ganancia se elige por el signo del movimiento DEL OPERADOR, antes de
+        # invertir: se calibran contra lo que él alcanza cómodamente, no contra
+        # lo que acabe haciendo el robot. Las dos funciones son continuas en 0,
+        # así que no hay salto al cruzar.
+        g_abd = self.gain_abduccion if abduccion >= 0.0 else self.gain_aduccion
+        g_flex = self.gain_flexion if flexion >= 0.0 else self.gain_extension
+
+        valor_abd = abduccion * g_abd * (-1.0 if self.invert_abduccion else 1.0)
+        valor_flex = flexion * g_flex * (-1.0 if self.invert_flexion else 1.0)
+
+        ahora = self._clock() if timestamp is None else timestamp
+        valor_abd = self._filtros[(canal, "abduccion")](valor_abd, ahora)
+        valor_flex = self._filtros[(canal, "flexion")](valor_flex, ahora)
+
+        try:
+            recorte = clamp_arm(valor_abd, valor_flex, canal)
+        except ValueError:
+            # clamp_arm rechaza NaN e infinitos a propósito, para que no lleguen
+            # al robot. BlazePose los produce. Se descarta ESTE brazo; el otro
+            # sigue su camino. Es la respuesta correcta al BUG 2.
+            return None
+
+        self._clamps[canal] = recorte
+        return recorte.as_tuple
+
+    def close(self) -> None:
+        self._pose.close()
+
+    def __enter__(self) -> "ArmTracker":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+
+# --------------------------------------------------------------------------
+# Modo demo
+# --------------------------------------------------------------------------
+
+#: Altura y del bloque inferior del HUD.
+ALTO_TEXTO = 160
+
+#: Ancho en píxeles de las barras de rango.
+ANCHO_BARRA = 150
+
+
+def _dibujar_barra(frame_bgr, x: int, y: int, fraccion: float, recortado: bool) -> None:
+    """Barra de posición dentro del rango ADMISIBLE del canal.
+
+    En el brazo, el rango de abducción se interpola para la flexión actual, así
+    que la barra se estrecha y se ensancha en vivo. Es el comportamiento
+    correcto: enseña que el brazo gana recorrido al flexionarse y despejarse del
+    tronco.
+    """
+    color = (0, 0, 255) if recortado else (0, 200, 0)
+    cv2.rectangle(frame_bgr, (x, y - 8), (x + ANCHO_BARRA, y + 2), (90, 90, 90), 1)
+    posicion = int(x + max(0.0, min(1.0, fraccion)) * ANCHO_BARRA)
+    cv2.rectangle(frame_bgr, (posicion - 2, y - 8), (posicion + 2, y + 2), color, -1)
+
+
+def _demo(argv: list[str] | None = None) -> int:
+    import argparse
+    import csv
+
+    parser = argparse.ArgumentParser(prog="arm_tracker")
+    parser.add_argument(
+        "--record",
+        metavar="CSV",
+        help="Registra cada frame en un CSV, con los angulos crudos del "
+        "operador y los publicados al robot. Si el archivo ya existe, la "
+        "grabacion anterior se conserva con el sufijo _anterior.",
+    )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="Publica la pose en el broker MQTT, para ver los brazos moverse "
+        "en el visor 3D. Es la unica forma de verificar el SENTIDO de cada "
+        "canal: el HUD da el signo, pero no hacia donde se mueve el robot.",
+    )
+    args = parser.parse_args(argv)
+
+    cfg = AppConfig.from_env()
+    backends = {"dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF, "any": cv2.CAP_ANY}
+    cap = cv2.VideoCapture(cfg.camera.index, backends[cfg.camera.backend])
+    # El formato ANTES que la resolución: pedirlo después no siempre se aplica.
+    if cfg.camera.fourcc:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*cfg.camera.fourcc))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.camera.width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.camera.height)
+    cap.set(cv2.CAP_PROP_FPS, cfg.camera.fps)
+    if not cap.isOpened():
+        print(f"No se pudo abrir la camara {cfg.camera.index}.")
+        return 1
+
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(
+        f"Camara {cfg.camera.index} ({cfg.camera.backend}) a {width}x{height}, "
+        f"{cap.get(cv2.CAP_PROP_FPS):.0f} fps nominales.\n"
+    )
+
+    print(
+        "ENCUADRE\n"
+        "  El arm tracker necesita HOMBROS y MANOS en cuadro, y a ser posible\n"
+        "  tambien las caderas: de ellas sale la vertical del tronco. Si no se\n"
+        "  ven, se usa la vertical de imagen como reserva, que asume que estas\n"
+        "  sentado y erguido. El HUD dice cual de las dos esta activa.\n\n"
+        "VERIFICAR EL SENTIDO DE CADA CANAL (esto es lo importante)\n"
+        "  Lanza con --publish y mira el visor. Mueve UN SOLO brazo cada vez y\n"
+        "  comprueba las cuatro afirmaciones:\n"
+        "    1. Separas tu brazo IZQUIERDO del cuerpo -> se separa el izquierdo\n"
+        "       del robot (con el espejo en izq->izq).\n"
+        "    2. Lo levantas hacia ADELANTE -> el del robot va hacia adelante.\n"
+        "    3. y 4. Idem con el derecho.\n"
+        "  Si un canal va al reves, corrigelo con 'b' (abduccion) o 'f'\n"
+        "  (flexion) y anota el valor: son ARM_INVERT_ABDUCCION y\n"
+        "  ARM_INVERT_FLEXION. NO deduzcas el signo mirando el HUD.\n\n"
+        "  Ojo al comparar: el visor renderiza a pocos fps cuando no esta en\n"
+        "  primer plano, y su camara sigue deslizandose por amortiguacion\n"
+        "  varios segundos despues de un arrastre. Comparar dos capturas de\n"
+        "  momentos distintos NO es fiable; ya llevo a una conclusion falsa una\n"
+        "  vez. Mueve una sola cosa y no toques la camara entre medias.\n\n"
+        "TECLAS\n"
+        "  m = alternar espejo (que brazo manda sobre cual)\n"
+        "  t = alternar destino (mano <-> codo)\n"
+        "  b = invertir abduccion    f = invertir flexion\n"
+        "  r = reiniciar extremos\n"
+        "  z/Z = ganancia ABDUCCION -/+     x/X = ganancia ADUCCION  -/+\n"
+        "  v/V = ganancia FLEXION   -/+     n/N = ganancia EXTENSION -/+\n"
+        "  ESPACIO = cambiar de etiqueta (solo con --record)\n"
+        "  q = salir\n"
+    )
+
+    tracker = ArmTracker(
+        mirror=cfg.arm.mirror,
+        frame_espejado=cfg.camera.flip,
+        target=cfg.arm.target,
+        invert_abduccion=cfg.arm.invert_abduccion,
+        invert_flexion=cfg.arm.invert_flexion,
+        gain_abduccion=cfg.arm.gain_abduccion,
+        gain_aduccion=cfg.arm.gain_aduccion,
+        gain_flexion=cfg.arm.gain_flexion,
+        gain_extension=cfg.arm.gain_extension,
+        min_cutoff=cfg.arm.min_cutoff,
+        beta=cfg.arm.beta,
+        min_visibility=cfg.arm.min_visibility,
+        model_complexity=cfg.arm.model_complexity,
+    )
+
+    # Import perezoso a propósito: el módulo tiene que poder usarse sin
+    # paho-mqtt instalado y sin broker levantado, que es como corre en pruebas.
+    publicador = None
+    if args.publish:
+        from .publisher import PosePublisher
+
+        publicador = PosePublisher(cfg.mqtt, cfg.rates).connect()
+        if publicador.wait_connected(timeout=5.0):
+            print(
+                f"Publicando en {cfg.mqtt.host}:{cfg.mqtt.port} "
+                f"topic '{cfg.mqtt.topic_pose}' a {cfg.rates.publish_hz:g} Hz\n"
+            )
+        else:
+            print(
+                f"AVISO: no hay enlace con el broker en {cfg.mqtt.host}:"
+                f"{cfg.mqtt.port}. Se sigue reintentando; mira el contador "
+                f"'perdidos' del HUD.\n"
+            )
+
+    registro = None
+    escritor = None
+    etiqueta = 0
+    if args.record:
+        apartado = apartar_si_existe(Path(args.record))
+        if apartado is not None:
+            print(f"AVISO: ese CSV ya existia. Se conserva como {apartado.name}.\n")
+        registro = open(args.record, "w", newline="", encoding="utf-8")
+        escritor = csv.writer(registro)
+        # Los sufijos _L y _R son SIEMPRE el canal del robot, también en las
+        # columnas crudo_* y vis_*. Es deliberado: el CSV tiene que poder leerse
+        # sin volver a razonar sobre el espejo, y la columna 'espejo' deja
+        # constancia de con qué política se grabó.
+        escritor.writerow(
+            [
+                "t", "etiqueta", "target", "espejo", "frame_espejado",
+                "crudo_abd_L", "crudo_flex_L", "crudo_abd_R", "crudo_flex_R",
+                "armL", "armLtw", "armR", "armRtw",
+                "recortado_L", "recortado_R",
+                "vis_hombro_L", "vis_destino_L", "vis_codo_L",
+                "vis_hombro_R", "vis_destino_R", "vis_codo_R",
+                "vis_cadera", "tronco_caderas",
+                "gain_abduccion", "gain_aduccion",
+                "gain_flexion", "gain_extension",
+                "ancho", "alto",
+            ]
+        )
+        print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
+
+    t0 = time.perf_counter()
+    marcas_fps: deque[float] = deque(maxlen=30)
+    dibujo = mp.solutions.drawing_utils
+    conexiones = mp.solutions.pose.POSE_CONNECTIONS
+
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if cfg.camera.flip:
+                frame = cv2.flip(frame, 1)
+
+            marcas_fps.append(time.perf_counter())
+            fps_real = (
+                (len(marcas_fps) - 1) / (marcas_fps[-1] - marcas_fps[0])
+                if len(marcas_fps) > 1 and marcas_fps[-1] > marcas_fps[0]
+                else 0.0
+            )
+
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pose = tracker.process(rgb)
+
+            if tracker.landmarks_imagen is not None:
+                dibujo.draw_landmarks(frame, tracker.landmarks_imagen, conexiones)
+
+            crudos = tracker.raw_angles
+            recortes = tracker.last_clamp
+            for fila, canal in enumerate((Side.L, Side.R)):
+                campo_abd, campo_flex = CANALES[canal]
+                valor_abd = getattr(pose, campo_abd) if pose is not None else None
+                valor_flex = getattr(pose, campo_flex) if pose is not None else None
+                recorte = recortes.get(canal)
+                if recorte is not None and recorte.clamped:
+                    color = (0, 0, 255)
+                elif valor_abd is not None:
+                    color = (0, 255, 0)
+                else:
+                    color = (120, 120, 120)
+                texto_abd = "  --  " if valor_abd is None else f"{valor_abd:+7.2f}"
+                texto_flex = "  --  " if valor_flex is None else f"{valor_flex:+7.2f}"
+                y = 30 + fila * 52
+                cv2.putText(
+                    frame,
+                    f"{campo_abd:5s} abd {texto_abd}   flex {texto_flex}",
+                    (10, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.62, color, 2,
+                )
+                if recorte is not None:
+                    _dibujar_barra(
+                        frame, 10, y + 20,
+                        recorte.abduccion.fraction, recorte.abduccion.clamped,
+                    )
+                    _dibujar_barra(
+                        frame, 10 + ANCHO_BARRA + 20, y + 20,
+                        recorte.flexion.fraction, recorte.flexion.clamped,
+                    )
+                crudo = crudos.get(canal)
+                if crudo is not None:
+                    cv2.putText(
+                        frame,
+                        f"crudo {crudo[0]:+6.1f} {crudo[1]:+6.1f}",
+                        (10 + 2 * ANCHO_BARRA + 40, y + 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1,
+                    )
+
+            espejo = "izq->izq" if tracker.mirror else "izq->der"
+            signos = (
+                f"abd{'-' if tracker.invert_abduccion else '+'}"
+                f" flex{'-' if tracker.invert_flexion else '+'}"
+            )
+            cv2.putText(
+                frame,
+                f"{tracker.target}  {espejo}  {signos}   {fps_real:4.1f} fps",
+                (10, 134),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                (255, 255, 0) if fps_real >= 20 else (0, 165, 255), 2,
+            )
+
+            vis = tracker.visibilidades
+            origen = "caderas" if tracker.tronco_de_caderas else "RESERVA vertical"
+            cv2.putText(
+                frame,
+                f"tronco: {origen}   cadera {vis.get('cadera', 0.0):.2f}   "
+                f"codo L {vis.get('codo_L', 0.0):.2f} R {vis.get('codo_R', 0.0):.2f}",
+                (10, ALTO_TEXTO),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                (180, 255, 180) if tracker.tronco_de_caderas else (0, 165, 255), 1,
+            )
+
+            sugeridas = tracker.suggested_gains()
+
+            def _sug(clave: str) -> str:
+                valor = sugeridas[clave]
+                return "--" if valor is None else f"{valor:.2f}"
+
+            cv2.putText(
+                frame,
+                f"ganancias {tracker.gain_abduccion:.2f}/{tracker.gain_aduccion:.2f}"
+                f" {tracker.gain_flexion:.2f}/{tracker.gain_extension:.2f}"
+                f"   sugeridas {_sug('abduccion')}/{_sug('aduccion')}"
+                f" {_sug('flexion')}/{_sug('extension')}",
+                (10, ALTO_TEXTO + 22),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 255, 180), 1,
+            )
+
+            if tracker.frames_sin_pose:
+                cv2.putText(
+                    frame,
+                    f"sin pose ({tracker.frames_sin_pose})",
+                    (10, ALTO_TEXTO + 44),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2,
+                )
+
+            if publicador is not None and pose is not None:
+                publicador.publish(
+                    armL=pose.armL, armLtw=pose.armLtw,
+                    armR=pose.armR, armRtw=pose.armRtw,
+                )
+
+            if escritor is not None and pose is not None:
+                nada = (float("nan"), float("nan"))
+                cl = crudos.get(Side.L, nada)
+                cr = crudos.get(Side.R, nada)
+                rl = recortes.get(Side.L)
+                rr = recortes.get(Side.R)
+
+                def _f(valor: float | None) -> str:
+                    return "" if valor is None else f"{valor:.4f}"
+
+                escritor.writerow(
+                    [
+                        f"{time.perf_counter() - t0:.4f}", etiqueta,
+                        tracker.target, int(tracker.mirror),
+                        int(tracker.frame_espejado),
+                        f"{cl[0]:.4f}", f"{cl[1]:.4f}",
+                        f"{cr[0]:.4f}", f"{cr[1]:.4f}",
+                        _f(pose.armL), _f(pose.armLtw),
+                        _f(pose.armR), _f(pose.armRtw),
+                        int(bool(rl and rl.clamped)), int(bool(rr and rr.clamped)),
+                        f"{vis.get('hombro_L', float('nan')):.3f}",
+                        f"{vis.get('destino_L', float('nan')):.3f}",
+                        f"{vis.get('codo_L', float('nan')):.3f}",
+                        f"{vis.get('hombro_R', float('nan')):.3f}",
+                        f"{vis.get('destino_R', float('nan')):.3f}",
+                        f"{vis.get('codo_R', float('nan')):.3f}",
+                        f"{vis.get('cadera', float('nan')):.3f}",
+                        int(tracker.tronco_de_caderas),
+                        f"{tracker.gain_abduccion:.2f}",
+                        f"{tracker.gain_aduccion:.2f}",
+                        f"{tracker.gain_flexion:.2f}",
+                        f"{tracker.gain_extension:.2f}",
+                        width, height,
+                    ]
+                )
+                cv2.putText(
+                    frame,
+                    f"etiqueta {etiqueta}",
+                    (10, ALTO_TEXTO + 66),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 100), 2,
+                )
+
+            if publicador is not None:
+                enlace = "MQTT" if publicador.connected else "MQTT SIN ENLACE"
+                cv2.putText(
+                    frame,
+                    f"{enlace}  {publicador.effective_hz:4.1f} Hz  "
+                    f"enviados {publicador.message_count}  "
+                    f"perdidos {publicador.failed_count}",
+                    (10, ALTO_TEXTO + 88),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                    (0, 255, 0) if publicador.connected else (0, 0, 255), 1,
+                )
+
+            cv2.imshow("Telmeow - arm tracker", frame)
+
+            tecla = cv2.waitKey(1) & 0xFF
+            if tecla == ord("q"):
+                break
+            elif tecla == ord(" "):
+                etiqueta += 1
+                print(f"--- etiqueta {etiqueta} ---")
+            elif tecla == ord("m"):
+                tracker.mirror = not tracker.mirror
+                print(f"espejo: {'izq->izq' if tracker.mirror else 'izq->der'}")
+            elif tecla == ord("t"):
+                tracker.target = "codo" if tracker.target == "mano" else "mano"
+                tracker.reset_extremes()
+                print(f"destino = {tracker.target}")
+            elif tecla == ord("b"):
+                tracker.invert_abduccion = not tracker.invert_abduccion
+                print(f"invert_abduccion = {tracker.invert_abduccion}")
+            elif tecla == ord("f"):
+                tracker.invert_flexion = not tracker.invert_flexion
+                print(f"invert_flexion = {tracker.invert_flexion}")
+            elif tecla == ord("r"):
+                tracker.reset_extremes()
+                print("extremos reiniciados")
+            elif tecla in (ord("z"), ord("Z")):
+                paso = 0.05 if tecla == ord("Z") else -0.05
+                tracker.gain_abduccion = max(
+                    0.05, round(tracker.gain_abduccion + paso, 2)
+                )
+                print(f"ganancia ABDUCCION = {tracker.gain_abduccion:.2f}")
+            elif tecla in (ord("x"), ord("X")):
+                paso = 0.05 if tecla == ord("X") else -0.05
+                tracker.gain_aduccion = max(
+                    0.05, round(tracker.gain_aduccion + paso, 2)
+                )
+                print(f"ganancia ADUCCION = {tracker.gain_aduccion:.2f}")
+            elif tecla in (ord("v"), ord("V")):
+                paso = 0.05 if tecla == ord("V") else -0.05
+                tracker.gain_flexion = max(0.05, round(tracker.gain_flexion + paso, 2))
+                print(f"ganancia FLEXION = {tracker.gain_flexion:.2f}")
+            elif tecla in (ord("n"), ord("N")):
+                paso = 0.05 if tecla == ord("N") else -0.05
+                tracker.gain_extension = max(
+                    0.05, round(tracker.gain_extension + paso, 2)
+                )
+                print(f"ganancia EXTENSION = {tracker.gain_extension:.2f}")
+    finally:
+        tracker.close()
+        cap.release()
+        cv2.destroyAllWindows()
+        if publicador is not None:
+            print(
+                f"\nMQTT: {publicador.message_count} enviados, "
+                f"{publicador.dropped_count} descartados por tasa, "
+                f"{publicador.failed_count} perdidos sin enlace"
+            )
+            publicador.disconnect()
+        if registro is not None:
+            registro.close()
+            print(f"\nRegistro guardado en {args.record}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_demo())

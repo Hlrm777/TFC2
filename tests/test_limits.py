@@ -11,14 +11,14 @@ import math
 import pytest
 
 from telmeow_teleop.limits import (
-    ARM_BALANCEO_1D,
-    GIRO_RANGE,
+    ARM_ABDUCCION_1D,
+    FLEXION_RANGE,
     HEAD_PAN_RANGE,
     HEAD_PAN_TARGET_RANGE,
     HEAD_TILT_RANGE,
-    BalanceoPolicy,
+    AbduccionPolicy,
     Side,
-    arm_balanceo_range,
+    arm_abduccion_range,
     clamp_arm,
     clamp_head,
     clamp_scalar,
@@ -63,35 +63,35 @@ NODOS_IGUALES = tuple(g for g in TABLA_IZQ if g not in NODOS_DISTINTOS)
 
 
 @pytest.mark.parametrize("lado", ["izq", "der"])
-def test_balanceo_70_con_giro_0_se_recorta_a_55(lado):
-    """Obligatorio: -70° de balanceo con el brazo sin girar se recorta a -55°."""
-    resultado = clamp_arm(balanceo=-70.0, giro=0.0, lado=lado)
-    assert resultado.balanceo.value == -55.0
-    assert resultado.balanceo.clamped is True
-    assert (resultado.balanceo.lower, resultado.balanceo.upper) == (-55.0, 30.0)
+def test_abduccion_70_con_flexion_0_se_recorta_a_55(lado):
+    """Obligatorio: -70° de abducción con el brazo sin girar se recorta a -55°."""
+    resultado = clamp_arm(abduccion=-70.0, flexion=0.0, lado=lado)
+    assert resultado.abduccion.value == -55.0
+    assert resultado.abduccion.clamped is True
+    assert (resultado.abduccion.lower, resultado.abduccion.upper) == (-55.0, 30.0)
 
 
 @pytest.mark.parametrize("lado", ["izq", "der"])
-def test_balanceo_70_con_giro_menos_90_no_se_recorta(lado):
+def test_abduccion_70_con_flexion_menos_90_no_se_recorta(lado):
     """Obligatorio: con el brazo girado a -90° la tabla admite -70°."""
-    resultado = clamp_arm(balanceo=-70.0, giro=-90.0, lado=lado)
-    assert resultado.balanceo.value == -70.0
-    assert resultado.balanceo.clamped is False
-    assert (resultado.balanceo.lower, resultado.balanceo.upper) == (-70.0, 5.0)
+    resultado = clamp_arm(abduccion=-70.0, flexion=-90.0, lado=lado)
+    assert resultado.abduccion.value == -70.0
+    assert resultado.abduccion.clamped is False
+    assert (resultado.abduccion.lower, resultado.abduccion.upper) == (-70.0, 5.0)
 
 
 def test_la_tabla_2d_manda_sobre_los_limites_1d():
     """Caso discriminante: separa esta implementación de la incorrecta.
 
-    Con giro +90° la tabla del brazo izquierdo admite hasta +75° de balanceo.
+    Con flexion +90° la tabla del brazo izquierdo admite hasta +75° de abducción.
     Si el resultado fuera +32 (el límite 1D), significaría que clamp_arm está
-    aplicando ARM_BALANCEO_1D, que es justo lo que NO debe hacer: esos valores
-    son la rebanada de la tabla en giro = 0°, no un límite global.
+    aplicando ARM_ABDUCCION_1D, que es justo lo que NO debe hacer: esos valores
+    son la rebanada de la tabla en flexión = 0°, no un límite global.
     """
-    resultado = clamp_arm(balanceo=70.0, giro=90.0, lado="izq")
-    assert resultado.balanceo.value == 70.0
-    assert resultado.balanceo.clamped is False
-    assert resultado.balanceo.value != ARM_BALANCEO_1D[Side.L][1]
+    resultado = clamp_arm(abduccion=70.0, flexion=90.0, lado="izq")
+    assert resultado.abduccion.value == 70.0
+    assert resultado.abduccion.clamped is False
+    assert resultado.abduccion.value != ARM_ABDUCCION_1D[Side.L][1]
 
 
 # --------------------------------------------------------------------------
@@ -100,19 +100,19 @@ def test_la_tabla_2d_manda_sobre_los_limites_1d():
 
 
 @pytest.mark.parametrize("lado", [Side.L, Side.R])
-@pytest.mark.parametrize("giro", sorted(TABLA_IZQ))
-def test_nodos_de_la_tabla(lado, giro):
-    assert arm_balanceo_range(float(giro), lado) == TABLAS[lado][giro]
+@pytest.mark.parametrize("flexion", sorted(TABLA_IZQ))
+def test_nodos_de_la_tabla(lado, flexion):
+    assert arm_abduccion_range(float(flexion), lado) == TABLAS[lado][flexion]
 
 
-@pytest.mark.parametrize("giro", NODOS_DISTINTOS)
-def test_nodos_donde_los_brazos_difieren(giro):
-    assert arm_balanceo_range(float(giro), Side.L) != arm_balanceo_range(float(giro), Side.R)
+@pytest.mark.parametrize("flexion", NODOS_DISTINTOS)
+def test_nodos_donde_los_brazos_difieren(flexion):
+    assert arm_abduccion_range(float(flexion), Side.L) != arm_abduccion_range(float(flexion), Side.R)
 
 
-@pytest.mark.parametrize("giro", NODOS_IGUALES)
-def test_nodos_donde_los_brazos_coinciden(giro):
-    assert arm_balanceo_range(float(giro), Side.L) == arm_balanceo_range(float(giro), Side.R)
+@pytest.mark.parametrize("flexion", NODOS_IGUALES)
+def test_nodos_donde_los_brazos_coinciden(flexion):
+    assert arm_abduccion_range(float(flexion), Side.L) == arm_abduccion_range(float(flexion), Side.R)
 
 
 def test_las_tablas_cubren_todo_el_rango_en_pasos_de_5():
@@ -126,7 +126,7 @@ def test_las_tablas_cubren_todo_el_rango_en_pasos_de_5():
 
 
 @pytest.mark.parametrize(
-    "giro, lado, esperado",
+    "flexion, lado, esperado",
     [
         # Punto medio entre 10:(-45,30) y 15:(-25,35) -> izquierdo
         (12.5, Side.L, (-35.0, 32.5)),
@@ -140,45 +140,45 @@ def test_las_tablas_cubren_todo_el_rango_en_pasos_de_5():
         (2.5, Side.R, (-55.0, 30.0)),
     ],
 )
-def test_interpolacion_lineal(giro, lado, esperado):
-    resultado = arm_balanceo_range(giro, lado)
+def test_interpolacion_lineal(flexion, lado, esperado):
+    resultado = arm_abduccion_range(flexion, lado)
     assert resultado == pytest.approx(esperado)
 
 
 def test_interpolacion_es_continua_en_los_nodos():
     """Acercarse a un nodo por la izquierda debe converger a su valor exacto."""
-    for giro in (-55.0, 10.0, 40.0):
-        cerca = arm_balanceo_range(giro - 1e-9, Side.L)
-        exacto = arm_balanceo_range(giro, Side.L)
+    for flexion in (-55.0, 10.0, 40.0):
+        cerca = arm_abduccion_range(flexion - 1e-9, Side.L)
+        exacto = arm_abduccion_range(flexion, Side.L)
         assert cerca == pytest.approx(exacto, abs=1e-6)
 
 
 # --------------------------------------------------------------------------
-# Recorte del giro
+# Recorte de la flexión
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "giro_entrada, giro_esperado",
+    "flexion_entrada, flexion_esperado",
     [(120.0, 90.0), (-150.0, -90.0), (90.0, 90.0), (-90.0, -90.0)],
 )
-def test_el_giro_se_recorta_antes_de_consultar_la_tabla(giro_entrada, giro_esperado):
-    resultado = clamp_arm(balanceo=0.0, giro=giro_entrada, lado="izq")
-    assert resultado.giro.value == giro_esperado
-    assert resultado.giro.clamped is (giro_entrada != giro_esperado)
-    # El rango de balanceo debe ser el del extremo, no una extrapolación.
-    assert (resultado.balanceo.lower, resultado.balanceo.upper) == TABLA_IZQ[int(giro_esperado)]
+def test_la_flexion_se_recorta_antes_de_consultar_la_tabla(flexion_entrada, flexion_esperado):
+    resultado = clamp_arm(abduccion=0.0, flexion=flexion_entrada, lado="izq")
+    assert resultado.flexion.value == flexion_esperado
+    assert resultado.flexion.clamped is (flexion_entrada != flexion_esperado)
+    # El rango de abducción debe ser el del extremo, no una extrapolación.
+    assert (resultado.abduccion.lower, resultado.abduccion.upper) == TABLA_IZQ[int(flexion_esperado)]
 
 
-def test_el_giro_reporta_su_propio_rango():
-    resultado = clamp_arm(balanceo=0.0, giro=200.0, lado="der")
-    assert (resultado.giro.lower, resultado.giro.upper) == GIRO_RANGE
+def test_la_flexion_reporta_su_propio_rango():
+    resultado = clamp_arm(abduccion=0.0, flexion=200.0, lado="der")
+    assert (resultado.flexion.lower, resultado.flexion.upper) == FLEXION_RANGE
 
 
 def test_clamped_agregado():
-    dentro = clamp_arm(balanceo=0.0, giro=0.0, lado="izq")
+    dentro = clamp_arm(abduccion=0.0, flexion=0.0, lado="izq")
     assert dentro.clamped is False
-    fuera = clamp_arm(balanceo=0.0, giro=200.0, lado="izq")
+    fuera = clamp_arm(abduccion=0.0, flexion=200.0, lado="izq")
     assert fuera.clamped is True
 
 
@@ -188,17 +188,17 @@ def test_clamped_agregado():
 
 
 def test_valor_interior_no_se_toca():
-    resultado = clamp_arm(balanceo=10.0, giro=0.0, lado="izq")
-    assert resultado.balanceo.value == resultado.balanceo.raw == 10.0
-    assert resultado.balanceo.clamped is False
+    resultado = clamp_arm(abduccion=10.0, flexion=0.0, lado="izq")
+    assert resultado.abduccion.value == resultado.abduccion.raw == 10.0
+    assert resultado.abduccion.clamped is False
 
 
 @pytest.mark.parametrize("lado", [Side.L, Side.R])
-@pytest.mark.parametrize("balanceo", [-120.0, -55.0, 0.0, 37.0, 120.0])
-@pytest.mark.parametrize("giro", [-130.0, -37.5, 0.0, 12.5, 130.0])
-def test_idempotencia(balanceo, giro, lado):
+@pytest.mark.parametrize("abduccion", [-120.0, -55.0, 0.0, 37.0, 120.0])
+@pytest.mark.parametrize("flexion", [-130.0, -37.5, 0.0, 12.5, 130.0])
+def test_idempotencia(abduccion, flexion, lado):
     """Recortar una pose ya recortada no debe cambiarla."""
-    una_vez = clamp_arm(balanceo, giro, lado)
+    una_vez = clamp_arm(abduccion, flexion, lado)
     dos_veces = clamp_arm(*una_vez.as_tuple, lado)
     assert dos_veces.as_tuple == pytest.approx(una_vez.as_tuple)
     assert dos_veces.clamped is False
@@ -219,10 +219,10 @@ def test_fraction_con_rango_degenerado_no_divide_entre_cero():
     assert clamp_scalar(5.0, 5.0, 5.0).fraction == 0.5
 
 
-def test_el_rango_del_balanceo_sigue_al_giro():
-    """La barra del HUD debe estrecharse y ensancharse según el giro."""
-    estrecho = clamp_arm(0.0, 0.0, "izq").balanceo
-    ancho = clamp_arm(0.0, -90.0, "izq").balanceo
+def test_el_rango_de_la_abduccion_sigue_a_la_flexion():
+    """La barra del HUD debe estrecharse y ensancharse según la flexión."""
+    estrecho = clamp_arm(0.0, 0.0, "izq").abduccion
+    ancho = clamp_arm(0.0, -90.0, "izq").abduccion
     assert (ancho.upper - ancho.lower) < (estrecho.upper - estrecho.lower)
 
 
@@ -263,9 +263,9 @@ def test_side_es_serializable_como_str():
 @pytest.mark.parametrize("malo", [float("nan"), float("inf"), float("-inf")])
 def test_clamp_arm_rechaza_no_finitos(malo):
     with pytest.raises(ValueError):
-        clamp_arm(balanceo=malo, giro=0.0, lado="izq")
+        clamp_arm(abduccion=malo, flexion=0.0, lado="izq")
     with pytest.raises(ValueError):
-        clamp_arm(balanceo=0.0, giro=malo, lado="izq")
+        clamp_arm(abduccion=0.0, flexion=malo, lado="izq")
 
 
 @pytest.mark.parametrize("malo", [float("nan"), float("inf")])
@@ -289,17 +289,17 @@ def test_la_guarda_legacy_de_nan_era_inservible():
 
 
 def test_politica_interseccion_si_aplica_los_limites_1d():
-    tabla = clamp_arm(-70.0, -90.0, "izq", policy=BalanceoPolicy.TABLE)
-    interseccion = clamp_arm(-70.0, -90.0, "izq", policy=BalanceoPolicy.INTERSECTION)
-    assert tabla.balanceo.value == -70.0
-    assert interseccion.balanceo.value == -55.0
-    assert tabla.balanceo.value != interseccion.balanceo.value
+    tabla = clamp_arm(-70.0, -90.0, "izq", policy=AbduccionPolicy.TABLE)
+    interseccion = clamp_arm(-70.0, -90.0, "izq", policy=AbduccionPolicy.INTERSECTION)
+    assert tabla.abduccion.value == -70.0
+    assert interseccion.abduccion.value == -55.0
+    assert tabla.abduccion.value != interseccion.abduccion.value
 
 
 def test_la_politica_por_defecto_es_la_tabla():
     por_defecto = clamp_arm(-70.0, -90.0, "izq")
-    explicita = clamp_arm(-70.0, -90.0, "izq", policy=BalanceoPolicy.TABLE)
-    assert por_defecto.balanceo.value == explicita.balanceo.value
+    explicita = clamp_arm(-70.0, -90.0, "izq", policy=AbduccionPolicy.TABLE)
+    assert por_defecto.abduccion.value == explicita.abduccion.value
 
 
 # --------------------------------------------------------------------------

@@ -130,25 +130,25 @@
       </div>
 
       <div class="dof">
-        <div class="row"><span class="name">Brazo izq · balanceo</span><span class="val" id="v-arL">0.0°</span></div>
+        <div class="row"><span class="name">Brazo izq · abducción</span><span class="val" id="v-arL">0.0°</span></div>
         <input type="range" id="s-arL" min="-90" max="90" value="0" step="0.5">
         <div class="lim"><span>−90°</span><span>+90°</span></div>
       </div>
 
       <div class="dof">
-        <div class="row"><span class="name">Brazo izq · giro</span><span class="val" id="v-arLtw">0.0°</span></div>
+        <div class="row"><span class="name">Brazo izq · flexión</span><span class="val" id="v-arLtw">0.0°</span></div>
         <input type="range" id="s-arLtw" min="-90" max="90" value="0" step="0.5">
         <div class="lim"><span>−90°</span><span>+90°</span></div>
       </div>
 
       <div class="dof">
-        <div class="row"><span class="name">Brazo der · balanceo</span><span class="val" id="v-arR">0.0°</span></div>
+        <div class="row"><span class="name">Brazo der · abducción</span><span class="val" id="v-arR">0.0°</span></div>
         <input type="range" id="s-arR" min="-90" max="90" value="0" step="0.5">
         <div class="lim"><span>−90°</span><span>+90°</span></div>
       </div>
 
       <div class="dof">
-        <div class="row"><span class="name">Brazo der · giro</span><span class="val" id="v-arRtw">0.0°</span></div>
+        <div class="row"><span class="name">Brazo der · flexión</span><span class="val" id="v-arRtw">0.0°</span></div>
         <input type="range" id="s-arRtw" min="-90" max="90" value="0" step="0.5">
         <div class="lim"><span>−90°</span><span>+90°</span></div>
       </div>
@@ -237,8 +237,9 @@
      el CUERPO del motor gira junto con la pieza móvil.
        Cuello:  [M_Cuello_Base fijo] → tilt(pitch) mueve unión
                 → pan(yaw): M_Cuello_Sup + cabeza giran; la unión NO.
-       Brazo:   [M_Hombro_Sup fijo al cuerpo] → giro mueve unión + M_Hombro_Base
-                → balanceo: brazo + M_Hombro_Base giran respecto a la unión.
+       Brazo:   [M_Hombro_Sup fijo al cuerpo] → flexión mueve unión +
+                M_Hombro_Base → abducción: brazo + M_Hombro_Base giran
+                respecto a la unión.
      Cada pieza lleva su matriz de mundo W (de Fusion). Ejes de rotación
      tomados del eje de salida real de cada servo (medidos en mundo).
      ============================================================ */
@@ -265,21 +266,54 @@
 
   // --- Pivotes (centro del servo, mm) y ejes de rotación (mundo, unitarios) ---
   // Cada DOF pivota sobre el eje de salida del servo que lo ejecuta:
-  //   tilt/giro → servo fijo a la estructura del cuerpo (no rota nunca)
-  //   pan/balanceo → servo alojado en la pieza móvil (su cuerpo gira con ella)
+  //   tilt/flexión → servo fijo a la estructura del cuerpo (no rota nunca)
+  //   pan/abducción → servo en la pieza móvil (su cuerpo gira con ella)
+  /* NOMENCLATURA ANATÓMICA de los dos GDL del hombro (H28).
+     Los campos del JSON son heredados y uno de ellos miente: el sufijo `tw`
+     significa *twist*, o sea torsión, pero ese canal NO es torsión.
+
+       armL / armR      eje antero-posterior  → abducción (+) / aducción (−)
+       armLtw / armRtw  eje latero-lateral    → flexión / extensión
+
+     El robot NO tiene rotación interna/externa: el hombro es un cardán de dos
+     GDL que orienta un brazo rígido sin codo, y nada más. Los nombres de campo
+     no se pueden cambiar sin romper el contrato MQTT; los rótulos y estos
+     comentarios sí, y son los correctos.
+
+     ⚠️ EL SENTIDO DEL CANAL `tw` ESTÁ EN REVISIÓN (H29). Este comentario
+     afirmaba que «+θ = adelante en ambos brazos». La geometría dice lo
+     contrario, por tres vías independientes:
+
+       1. neckTilt gira sobre +x y está verificado EN VIVO que un tilt negativo
+          baja la cabeza (H22) ⇒ el robot mira hacia +y.
+       2. neckPan gira sobre −z y está verificado EN VIVO que un pan positivo
+          gira el robot a su derecha (P4.1) ⇒ coincide: mira a +y, su derecha
+          es +x, que es donde está Brazo_Der.
+       3. Con esos ejes y setJoint(), que aplica el ángulo sin negarlo, un
+          armRtw positivo lleva el brazo hacia −y. O sea, hacia ATRÁS.
+
+     Si es así, `tw` positivo es extensión y no flexión, y el saludo del demo
+     (armRtw = 50, comentado «adelante») está moviendo el brazo hacia atrás. NO
+     se ha cambiado ningún eje ni ningún valor: la geometría se deja intacta y
+     el pipeline lo compensa con ARM_INVERT_FLEXION, que ya viene activado.
+     Falta la comprobación de un minuto: mover s-arRtw a +50 y mirar. Si el
+     brazo va adelante, se retira este aviso y esa bandera vuelve a False.
+
+     La abducción no está en duda: armR positivo lleva el brazo hacia +x, que
+     es hacia afuera para el brazo derecho, y eso sí coincide con «+θ eleva». */
   const RIG = {
     neckPan:   { piv:V(0.1,-8.4,262.0),  axis:V(0,0,-1) },          // eje del M_Cuello_Sup (motor en la cabeza)
     neckTilt:  { piv:V(0.1,-10.9,215.1), axis:V(1,0,0) },           // eje del M_Cuello_Base (fijo al cuerpo)
-    armR_bal:  { piv:V(109.4,-0.1,142.3),axis:V(0,-1,0) }, // eje del M_HombroDer_Base (motor en el brazo) · +θ eleva
-    armR_twist:{ piv:V(63.1,-0.1,134.4), axis:V(-0.985,0,-0.170) }, // eje del M_HombroDer_Sup (fijo) · invertido: +θ = adelante en ambos brazos
-    armL_bal:  { piv:V(-109.3,0.1,142.5),axis:V(0,1,0) }, // eje del M_HombroIzq_Base (motor en el brazo) · signo invertido para que +θ también eleve
-    armL_twist:{ piv:V(-63.0,0.1,134.3), axis:V(-0.985,0,0.174) },  // eje del M_HombroIzq_Sup (fijo al cuerpo)
+    armR_bal:  { piv:V(109.4,-0.1,142.3),axis:V(0,-1,0) }, // eje del M_HombroDer_Base (motor en el brazo) · +θ abduce (eleva lateralmente)
+    armR_twist:{ piv:V(63.1,-0.1,134.4), axis:V(-0.985,0,-0.170) }, // eje del M_HombroDer_Sup (fijo) · flexión/extensión · sentido en revisión (H29)
+    armL_bal:  { piv:V(-109.3,0.1,142.5),axis:V(0,1,0) }, // eje del M_HombroIzq_Base (motor en el brazo) · signo invertido para que +θ también abduzca
+    armL_twist:{ piv:V(-63.0,0.1,134.3), axis:V(-0.985,0,0.174) },  // eje del M_HombroIzq_Sup (fijo al cuerpo) · flexión/extensión
   };
 
   const CM=0x4f5a70, CMS=0x7c8aa6, CU=0xf5a623; // colores motor base / sup / union
   // archivo, grupo lógico, color, matriz W
   // grupos: 'neckPan' (cuelga de tilt), 'neckTilt',
-  //         'armRbal' (cuelga de giro/twist), 'armRtwist', idem izq, 'static'
+  //         'armRbal' (cuelga de la flexión), 'armRtwist', idem izq, 'static'
   const PARTS = [
     // Cuello — M_Cuello_Base fijo al cuerpo (ejecuta el pitch).
     // La unión solo acompaña al pitch (inhabilitada para yaw).
@@ -290,9 +324,9 @@
     ['M_Cuello_Union.stl','neckTilt',CU, W.cuelloUnion],
     ['M_Cuello_Base.stl','static',  CM, W.cuelloBase],   // base fija al cuerpo
 
-    // Brazo derecho — M_HombroDer_Sup fijo al cuerpo (ejecuta el giro).
-    // En giro rotan: unión + M_HombroDer_Base (motor alojado en el brazo).
-    // En balanceo rotan: brazo + M_HombroDer_Base respecto a la unión.
+    // Brazo derecho — M_HombroDer_Sup fijo al cuerpo (ejecuta la flexión).
+    // En flexión rotan: unión + M_HombroDer_Base (motor en el brazo).
+    // En abducción rotan: brazo + M_HombroDer_Base respecto a la unión.
     ['Brazo_Der_W.stl','armRbal', 0xcfd5e0, W.brazoR],
     ['M_HombroDer_Base.stl','armRbal', CM, W.hdBase],     // viaja con el brazo
     ['M_HombroDer_Union.stl','armRtwist',CU, W.hdUnion],
@@ -358,7 +392,7 @@
   /* ---------- grupos pivote (jerarquía cinemática) ----------
      Cada grupo se ubica en el pivote de su servo. Las mallas, ya en coords
      de mundo, se insertan con offset -pivote para rotar sobre el eje real.
-     Anidamiento: tilt→pan→(cabeza); giro→balanceo→(brazo). El offset entre
+     Anidamiento: tilt→pan→(cabeza); flexión→abducción→(brazo). El offset entre
      un grupo padre y su hijo compensa la diferencia de pivote. */
   function makeJoint(parent, rig){
     const g = new THREE.Group();
@@ -376,10 +410,10 @@
   // Cuello: tilt (motor base fijo al cuerpo, cuelga de root) → pan (motor sup)
   const gNeckTilt = makeJoint(sceneRoot, RIG.neckTilt);
   const gNeckPan  = makeJoint(gNeckTilt, RIG.neckPan);
-  // Brazo derecho: giro (motor sup fijo al cuerpo) → balanceo (motor en el brazo)
+  // Brazo derecho: flexión (motor sup, fijo al cuerpo) → abducción (en el brazo)
   const gArmRtwist = makeJoint(sceneRoot,  RIG.armR_twist);
   const gArmRbal   = makeJoint(gArmRtwist, RIG.armR_bal);
-  // Brazo izquierdo: giro → balanceo
+  // Brazo izquierdo: flexión → abducción
   const gArmLtwist = makeJoint(sceneRoot,  RIG.armL_twist);
   const gArmLbal   = makeJoint(gArmLtwist, RIG.armL_bal);
 
@@ -656,10 +690,10 @@
     // [clave pose, etiqueta, par de colisión, mín slider, máx slider]
     ['pan',   'Cuello · pan (yaw)',     'cabeza',    -90, 90],
     ['tilt',  'Cuello · tilt (pitch)',  'cabeza',    -45, 45],
-    ['armL',  'Brazo izq · balanceo',   'brazo izq', -90, 90],
-    ['armLtw','Brazo izq · giro',       'brazo izq', -90, 90],
-    ['armR',  'Brazo der · balanceo',   'brazo der', -90, 90],
-    ['armRtw','Brazo der · giro',       'brazo der', -90, 90],
+    ['armL',  'Brazo izq · abducción',   'brazo izq', -90, 90],
+    ['armLtw','Brazo izq · flexión',       'brazo izq', -90, 90],
+    ['armR',  'Brazo der · abducción',   'brazo der', -90, 90],
+    ['armRtw','Brazo der · flexión',       'brazo der', -90, 90],
   ];
   const nextFrame = ()=>new Promise(r=>requestAnimationFrame(r));
 
@@ -725,10 +759,10 @@
   function applyPose(){
     setJoint(gNeckPan,   pose.pan);
     setJoint(gNeckTilt,  pose.tilt);
-    setJoint(gArmRbal,   pose.armR);      // balanceo brazo derecho
-    setJoint(gArmRtwist, pose.armRtw);    // giro brazo derecho
-    setJoint(gArmLbal,   pose.armL);      // balanceo brazo izquierdo
-    setJoint(gArmLtwist, pose.armLtw);    // giro brazo izquierdo
+    setJoint(gArmRbal,   pose.armR);      // abducción brazo derecho
+    setJoint(gArmRtwist, pose.armRtw);    // flexión brazo derecho
+    setJoint(gArmLbal,   pose.armL);      // abducción brazo izquierdo
+    setJoint(gArmLtwist, pose.armLtw);    // flexión brazo izquierdo
     poseDirty = true;
   }
 
@@ -849,10 +883,15 @@
         if(k>=1){ phase='wave'; t0=now; }
       }else{
         const t = (now-t0)/1000*3.64;              // misma cadencia que antes
-        // Saludo dentro del espacio admisible (mapa 2D): brazo derecho al
-        // frente (giro+ = adelante, convención unificada) y balanceo moderado
-        pose.armRtw = 50 + Math.sin(t*4)*8;        // 42..58 (adelante)
-        pose.armR   = 30 + Math.sin(t*1.2)*12;     // 18..42 (bal.máx≈55 en ese giro)
+        // Saludo dentro del espacio admisible (mapa 2D): brazo derecho fuera
+        // del plano del tronco y abducción moderada.
+        // ⚠️ H29: este bloque se escribió creyendo que armRtw+ era hacia
+        // adelante. Si el sentido resulta ser el contrario (ver la nota del
+        // RIG), el saludo está agitando el brazo por DETRÁS del cuerpo y hay
+        // que negar esta línea. Se deja como está hasta comprobarlo, para no
+        // cambiar dos cosas a la vez.
+        pose.armRtw = 50 + Math.sin(t*4)*8;        // 42..58
+        pose.armR   = 30 + Math.sin(t*1.2)*12;     // 18..42 (abd.máx≈55 ahí)
         pose.pan    = Math.sin(t*1.5)*12;
         pose.tilt   = 8 + Math.sin(t*1.5)*5;
       }

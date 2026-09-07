@@ -16,6 +16,10 @@ venv/
 # Pytest
 .pytest_cache/
 
+# Ajustes locales de Claude Code (permisos de esta maquina). launch.json SI se
+# versiona: define como levantar el visor y sirve a cualquiera que clone.
+.claude/settings.local.json
+
 # Los CSV de --record NO se ignoran a proposito: son la evidencia de las
 # mediciones que se reportan en la tesis (repetibilidad, temblor, recorrido
 # del operador). Pesan poco y sin ellos las cifras no serian reproducibles.

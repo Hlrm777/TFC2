@@ -76,22 +76,51 @@ def base_der():
     return torso_basis(HOMBRO_DER, HOMBRO_IZQ, SUPERIOR)
 
 
-def destino(base, abduccion_grados, flexion_grados, hombro=HOMBRO_IZQ):
+def _rotar_en_el_plano_frontal(vector, base, grados):
+    """Rota ``vector`` en el plano frontal, el de la abducción.
+
+    Es la inversa exacta de lo que ``arm_angles`` hace para deshacer la
+    inclinación del eje de flexión, escrita aquí por separado para que el modelo
+    directo de las pruebas siga siendo independiente del código bajo prueba.
+    """
+    u_lat, _, u_sup = base
+    radianes = math.radians(grados)
+    coseno, seno = math.cos(radianes), math.sin(radianes)
+    lateral = float(np.dot(vector, u_lat))
+    superior = float(np.dot(vector, u_sup))
+    resto = vector - lateral * u_lat - superior * u_sup
+    return (
+        resto
+        + (lateral * coseno - superior * seno) * u_lat
+        + (lateral * seno + superior * coseno) * u_sup
+    )
+
+
+def destino(base, abduccion_grados, flexion_grados, hombro=HOMBRO_IZQ,
+            inclinacion=0.0):
     """Punto de destino que produce esos ángulos, según la parametrización.
 
     Es la composición DIRECTA del cardán, escrita a partir de la fórmula del
-    docstring de ``arm_angles``. Se usa solo en las pruebas que necesitan
-    construir una postura concreta; las de signo usan el rig del visor, que es
-    una fuente independiente.
+    docstring de ``arm_angles``. **El reposo es el brazo en horizontal hacia
+    afuera** (``u_lat``), no colgando: ver H30. Se usa solo en las pruebas que
+    necesitan construir una postura concreta; las de signo usan el rig del
+    visor, que es una fuente independiente.
+
+    ``inclinacion`` reproduce que el eje de flexión del robot no es el
+    latero-lateral puro: se aplica como una rotación en el plano frontal DESPUES
+    de componer el cardán ideal, que es justo lo que ``arm_angles`` deshace
+    antes de descomponer.
     """
     u_lat, u_ant, u_sup = base
     a = math.radians(abduccion_grados)
     f = math.radians(flexion_grados)
     direccion = (
-        math.sin(a) * u_lat
-        + math.cos(a) * math.sin(f) * u_ant
-        + math.cos(a) * math.cos(f) * (-u_sup)
+        math.cos(a) * u_lat
+        + math.sin(a) * math.cos(f) * u_sup
+        + math.sin(a) * math.sin(f) * u_ant
     )
+    if inclinacion:
+        direccion = _rotar_en_el_plano_frontal(direccion, base, inclinacion)
     return hombro + LARGO_BRAZO * direccion
 
 
@@ -134,14 +163,36 @@ def _rodrigues(eje, grados):
     return np.eye(3) + math.sin(t) * K + (1 - math.cos(t)) * (K @ K)
 
 
+#: Dirección del brazo del robot EN REPOSO, en coordenadas del visor.
+#:
+#: **Está en horizontal, hacia afuera, no colgando.** Verificado mirando el
+#: visor el 2026-09-07 (H30): con los seis canales a cero el robot tiene los
+#: brazos en cruz. La primera versión de estas pruebas usaba ``(0,0,-1)`` —el
+#: brazo colgando— y por eso cerraba consigo misma siendo falsa: es el mismo
+#: mecanismo del H17 y del H22, una prueba sintética que fija su propia
+#: referencia no puede ver que la referencia sea la equivocada.
+#:
+#: Va sobre el eje de la flexión, y eso NO es casualidad: por eso en reposo la
+#: flexión no mueve el brazo. Es la singularidad del cardán, y en este robot
+#: cae justo en su postura de reposo.
+#:
+#: El SIGNO no se hereda del eje: en el rig los dos ejes de flexión están
+#: escritos apuntando al mismo lado (``-0.985`` en x los dos), lo cual es una
+#: convención de la rotación, no un hecho sobre el brazo. Los dos brazos
+#: descansan hacia AFUERA, así que el derecho lleva el eje negado.
+REPOSO_VISOR = {
+    Side.L: EJE_FLEXION_VISOR[Side.L] / np.linalg.norm(EJE_FLEXION_VISOR[Side.L]),
+    Side.R: -EJE_FLEXION_VISOR[Side.R] / np.linalg.norm(EJE_FLEXION_VISOR[Side.R]),
+}
+
+
 def direccion_del_visor(lado, abduccion, flexion):
     """Dirección del brazo del ROBOT, en coordenadas del visor (z arriba).
 
-    Reproduce la composición del rig: el brazo en reposo cuelga (-z en Fusion),
-    la abducción actúa primero por ser la articulación hija, y la flexión la
-    envuelve.
+    Reproduce la composición del rig: se parte del brazo en reposo, la abducción
+    actúa primero por ser la articulación hija, y la flexión la envuelve.
     """
-    reposo = np.array([0.0, 0.0, -1.0])
+    reposo = REPOSO_VISOR[lado]
     r_abd = _rodrigues(EJE_ABDUCCION_VISOR[lado], abduccion)
     r_flex = _rodrigues(EJE_FLEXION_VISOR[lado], flexion)
     return r_flex @ (r_abd @ reposo)
@@ -184,8 +235,8 @@ def visor_a_mediapipe(vector):
 
 
 @pytest.mark.parametrize("lado", [Side.L, Side.R])
-@pytest.mark.parametrize("abduccion", [-40.0, -15.0, 0.0, 20.0, 55.0])
-@pytest.mark.parametrize("flexion", [-60.0, -20.0, 0.0, 30.0, 75.0])
+@pytest.mark.parametrize("abduccion", [-55.0, -40.0, -15.0, 10.0, 30.0])
+@pytest.mark.parametrize("flexion", [-80.0, -60.0, -20.0, 0.0, 30.0, 75.0])
 def test_ida_y_vuelta_contra_el_rig_del_visor(lado, abduccion, flexion):
     """El estimador invierte exactamente la cinemática que el visor aplica.
 
@@ -216,9 +267,47 @@ def test_ida_y_vuelta_contra_el_rig_del_visor(lado, abduccion, flexion):
     abd_est, flex_est = estimado
     assert flex_est is not None
     assert abd_est == pytest.approx(abduccion, abs=0.2)
-    # El canal del visor y la flexión del operador van en sentido contrario:
-    # es el hallazgo H29, y esta linea es lo que lo fija.
-    assert flex_est == pytest.approx(SENTIDO_FLEXION_VISOR * flexion, abs=0.2)
+    assert flex_est == pytest.approx(flexion, abs=0.2)
+
+
+@pytest.mark.parametrize("lado", [Side.L, Side.R])
+@pytest.mark.parametrize("abduccion", [-40.0, 25.0])
+def test_en_los_topes_de_flexion_las_dos_ramas_son_la_misma_postura(lado, abduccion):
+    """A flexión ±90 el cardán tiene DOS soluciones para la misma dirección.
+
+    ``(a, +90)`` y ``(-a, -90)`` colocan el brazo exactamente en el mismo sitio:
+    con ``cos(±90) = 0``, la componente que distingue el signo de la abducción
+    desaparece. No es un defecto del estimador ni del robot, es una propiedad de
+    cualquier cardán en su tope; lo que importa es que la POSTURA coincida, y por
+    eso aquí se compara la dirección reconstruida y no los ángulos.
+
+    Esta prueba existe porque la de arriba, comparando ángulos, marcaba estos
+    casos como fallos siendo correctos. Dejarla escrita evita que alguien
+    «arregle» el estimador para que devuelva la otra rama.
+    """
+    if lado is Side.L:
+        hombro, base = HOMBRO_IZQ, torso_basis(HOMBRO_IZQ, HOMBRO_DER, SUPERIOR)
+    else:
+        hombro, base = HOMBRO_DER, torso_basis(HOMBRO_DER, HOMBRO_IZQ, SUPERIOR)
+
+    for signo in (1.0, -1.0):
+        direccion = visor_a_mediapipe(
+            direccion_del_visor(lado, abduccion, signo * 90.0)
+        )
+        estimado = arm_angles(
+            hombro, hombro + LARGO_BRAZO * direccion, base,
+            INCLINACION_FLEXION[lado],
+        )
+        assert estimado is not None and estimado[1] is not None
+        # Se recompone la postura desde lo estimado y se compara la DIRECCION.
+        rehecho = (
+            destino(
+                base, estimado[0], estimado[1], hombro, INCLINACION_FLEXION[lado]
+            )
+            - hombro
+        )
+        rehecho = rehecho / np.linalg.norm(rehecho)
+        assert rehecho == pytest.approx(direccion, abs=1e-3)
 
 
 def test_la_inclinacion_del_eje_sale_de_los_ejes_del_rig():
@@ -240,36 +329,40 @@ def test_la_inclinacion_del_eje_sale_de_los_ejes_del_rig():
         assert 9.0 < valor < 11.0
 
 
-def test_sin_corregir_la_inclinacion_aparece_diafonia_entre_canales():
+def test_sin_corregir_la_inclinacion_el_reposo_del_robot_no_lee_cero():
     """Cuantifica lo que compra la corrección, en vez de solo afirmarlo.
 
-    Con el brazo del robot a 90° del canal ``tw`` y abducción 0, un cardán ideal
-    lee ~10° de abducción que no existe. Es diafonía pura: un canal
-    contaminando al otro. La prueba fija esa magnitud para que, si alguien quita
-    la corrección creyendo que es cosmética, quede claro qué cuesta.
-    """
-    direccion = visor_a_mediapipe(direccion_del_visor(Side.L, 0.0, 90.0))
-    destino_punto = HOMBRO_IZQ + LARGO_BRAZO * direccion
-    base = torso_basis(HOMBRO_IZQ, HOMBRO_DER, SUPERIOR)
+    Con el robot en su postura de reposo —abducción 0, brazos en cruz— un cardán
+    ideal lee **+10° de abducción que no existe**, porque la dirección de reposo
+    del brazo va sobre el eje de flexión y ese eje está inclinado esos 10°
+    respecto al latero-lateral puro.
 
-    sin_corregir, _ = arm_angles(HOMBRO_IZQ, destino_punto, base)
-    corregido, _ = arm_angles(
-        HOMBRO_IZQ, destino_punto, base, INCLINACION_FLEXION[Side.L]
-    )
-    assert abs(sin_corregir) == pytest.approx(10.0, abs=0.5)
+    Es un sesgo, no un ruido: con él, el operador tendría que subir el brazo 10°
+    por encima de la horizontal solo para que el robot se quedara quieto.
+    """
+    base = torso_basis(HOMBRO_IZQ, HOMBRO_DER, SUPERIOR)
+    direccion = visor_a_mediapipe(direccion_del_visor(Side.L, 0.0, 0.0))
+    punto = HOMBRO_IZQ + LARGO_BRAZO * direccion
+
+    sin_corregir, _ = arm_angles(HOMBRO_IZQ, punto, base)
+    corregido, _ = arm_angles(HOMBRO_IZQ, punto, base, INCLINACION_FLEXION[Side.L])
+    assert sin_corregir == pytest.approx(10.0, abs=0.5)
     assert corregido == pytest.approx(0.0, abs=0.2)
 
 
-def test_la_diafonia_sin_corregir_crece_con_la_flexion():
-    """A 30° apenas 1.3°, a 90° unos 10°. Por eso no se ve hasta que se busca."""
+def test_el_sesgo_de_la_inclinacion_es_constante_no_depende_de_la_flexion():
+    """Y por eso es fácil de pasar por alto: no crece ni oscila, siempre son 10°.
+
+    Un error que varía con la postura se nota moviéndose; uno constante se
+    confunde con «el neutro del operador» y se calibra encima, que es peor.
+    """
     base = torso_basis(HOMBRO_IZQ, HOMBRO_DER, SUPERIOR)
-    esperados = {0.0: 0.0, 30.0: 1.3, 60.0: 4.9, 90.0: 10.0}
-    for flexion, esperado in esperados.items():
+    for flexion in (0.0, 30.0, 60.0, 90.0):
         direccion = visor_a_mediapipe(direccion_del_visor(Side.L, 0.0, flexion))
         abduccion, _ = arm_angles(
             HOMBRO_IZQ, HOMBRO_IZQ + LARGO_BRAZO * direccion, base
         )
-        assert abs(abduccion) == pytest.approx(esperado, abs=0.4)
+        assert abduccion == pytest.approx(10.0, abs=0.2)
 
 
 # --------------------------------------------------------------------------
@@ -399,40 +492,84 @@ def test_el_espejo_manda_cada_brazo_a_un_canal_distinto():
 # --------------------------------------------------------------------------
 
 
-def test_el_brazo_colgando_da_cero_en_los_dos_canales(base_izq):
-    punto = HOMBRO_IZQ + np.array([0.0, LARGO_BRAZO, 0.0])  # +y es hacia abajo
+def test_el_brazo_en_cruz_es_el_CERO_de_la_abduccion(base_izq):
+    """El cero es el brazo en horizontal hacia afuera, no colgando (H30).
+
+    Es la afirmación más importante de este archivo y la que costó una sesión
+    con el visor delante. Fijarla aquí es lo que impide que alguien vuelva a
+    escribir un modelo directo con el brazo colgando —que fue lo que hizo que
+    la prueba contra el rig cerrara consigo misma siendo falsa.
+    """
+    punto = HOMBRO_IZQ + np.array([LARGO_BRAZO, 0.0, 0.0])  # +x = afuera del izq
     abduccion, flexion = arm_angles(HOMBRO_IZQ, punto, base_izq)
     assert abduccion == pytest.approx(0.0, abs=1e-9)
+    # Y ahí mismo la flexión no existe: es la singularidad del cardán.
+    assert flexion is None
+
+
+def test_el_brazo_colgando_pide_noventa_grados_que_el_robot_no_tiene(base_izq):
+    """El operador con el brazo caído pide −90°, y el robot solo llega a −55°.
+
+    No es un error del estimador: es el mecanismo. El robot **no puede dejar los
+    brazos colgando**, y el recorte lo deja en su tope. Conviene tenerlo escrito
+    porque es la postura de reposo del operador y, por tanto, la que más va a
+    aparecer.
+    """
+    punto = HOMBRO_IZQ + np.array([0.0, LARGO_BRAZO, 0.0])  # +y es hacia abajo
+    abduccion, flexion = arm_angles(HOMBRO_IZQ, punto, base_izq)
+    assert abduccion == pytest.approx(-90.0, abs=1e-9)
     assert flexion == pytest.approx(0.0, abs=1e-9)
+    assert ARM_ABDUCCION_1D[Side.L][0] > abduccion
 
 
-def test_el_brazo_hacia_el_costado_es_abduccion_positiva(base_izq):
-    """Separar el brazo del cuerpo da abducción positiva. Es la definición."""
-    # +x es hacia la derecha de la imagen, y el hombro izquierdo está en +x, así
-    # que alejarse en +x es alejarse del cuerpo.
+def test_bajar_el_brazo_desde_la_horizontal_da_abduccion_negativa(base_izq):
     punto = HOMBRO_IZQ + np.array([LARGO_BRAZO * 0.7, LARGO_BRAZO * 0.7, 0.0])
-    abduccion, _ = arm_angles(HOMBRO_IZQ, punto, base_izq)
-    assert abduccion == pytest.approx(45.0, abs=0.5)
-
-
-def test_el_brazo_cruzando_el_cuerpo_es_aduccion_negativa(base_izq):
-    punto = HOMBRO_IZQ + np.array([-LARGO_BRAZO * 0.7, LARGO_BRAZO * 0.7, 0.0])
     abduccion, _ = arm_angles(HOMBRO_IZQ, punto, base_izq)
     assert abduccion == pytest.approx(-45.0, abs=0.5)
 
 
-def test_el_brazo_al_frente_es_flexion_positiva(base_izq):
-    """Levantar el brazo hacia adelante es flexión. -z es hacia la cámara."""
-    punto = HOMBRO_IZQ + np.array([0.0, 0.0, -LARGO_BRAZO])
+def test_subir_el_brazo_desde_la_horizontal_da_abduccion_positiva(base_izq):
+    """+30° es todo lo que el robot sube antes de chocar con la cabeza."""
+    punto = HOMBRO_IZQ + np.array([LARGO_BRAZO * 0.7, -LARGO_BRAZO * 0.7, 0.0])
+    abduccion, _ = arm_angles(HOMBRO_IZQ, punto, base_izq)
+    assert abduccion == pytest.approx(45.0, abs=0.5)
+
+
+def test_el_brazo_al_frente_sale_del_plano_frontal(base_izq):
+    """Señalar al frente exige salirse del plano frontal por los dos canales.
+
+    Con el brazo horizontal hacia adelante, la solución del cardán es abducción
+    90 y flexión 90: hay que «subir» el brazo y luego rotarlo al frente. Es una
+    consecuencia directa de que el reposo esté sobre el eje de flexión, y
+    explica por qué el gesto de señalar no es gratis en este mecanismo.
+    """
+    punto = HOMBRO_IZQ + np.array([0.0, 0.0, -LARGO_BRAZO])  # -z hacia la camara
     abduccion, flexion = arm_angles(HOMBRO_IZQ, punto, base_izq)
+    assert abduccion == pytest.approx(90.0, abs=0.5)
     assert flexion == pytest.approx(90.0, abs=0.5)
-    assert abduccion == pytest.approx(0.0, abs=0.5)
 
 
-def test_el_brazo_hacia_atras_es_extension_negativa(base_izq):
+def test_el_brazo_hacia_atras_invierte_la_flexion(base_izq):
     punto = HOMBRO_IZQ + np.array([0.0, 0.0, LARGO_BRAZO])
-    _, flexion = arm_angles(HOMBRO_IZQ, punto, base_izq)
+    abduccion, flexion = arm_angles(HOMBRO_IZQ, punto, base_izq)
+    assert abduccion == pytest.approx(90.0, abs=0.5)
     assert flexion == pytest.approx(-90.0, abs=0.5)
+
+
+def test_el_sentido_antero_posterior_depende_de_la_abduccion(base_izq):
+    """«flexión+ = adelante» NO es cierto: depende del signo de la abducción.
+
+    La componente hacia adelante vale ``sin(abduccion)·sin(flexion)``, así que
+    con el brazo por debajo de la horizontal el sentido se invierte. Es lo que
+    hace que el comentario del rig del visor —«+θ = adelante en ambos
+    brazos»— no pueda ser cierto tal como está escrito, y lo que retracta la
+    primera formulación de este hallazgo (H29 -> H30).
+    """
+    _, u_ant, _ = base_izq
+    arriba = destino(base_izq, 20.0, 60.0) - HOMBRO_IZQ
+    abajo = destino(base_izq, -50.0, 60.0) - HOMBRO_IZQ
+    assert float(np.dot(arriba, u_ant)) > 0.0   # brazo alto: +flexion va adelante
+    assert float(np.dot(abajo, u_ant)) < 0.0    # brazo bajo: +flexion va atras
 
 
 def test_los_dos_ejes_no_se_contaminan_entre_si(base_izq):
@@ -442,13 +579,18 @@ def test_los_dos_ejes_no_se_contaminan_entre_si(base_izq):
     y tilt. Aquí importa más todavía, porque la abducción es el índice implícito
     de la tabla de límites de la flexión.
     """
-    for grados in (-50.0, -20.0, 25.0, 60.0):
+    # La abducción se recorre con la flexión fija.
+    for grados in (-50.0, -20.0, 25.0, 40.0):
         solo_abd = arm_angles(HOMBRO_IZQ, destino(base_izq, grados, 0.0), base_izq)
         assert solo_abd[0] == pytest.approx(grados, abs=1e-6)
         assert solo_abd[1] == pytest.approx(0.0, abs=1e-6)
 
-        solo_flex = arm_angles(HOMBRO_IZQ, destino(base_izq, 0.0, grados), base_izq)
-        assert solo_flex[0] == pytest.approx(0.0, abs=1e-6)
+    # Y la flexión con la abducción fija. NO se puede partir de abducción 0:
+    # ahí está la singularidad del cardán y la flexión no existe, que es
+    # precisamente lo que comprueba la prueba del brazo en cruz.
+    for grados in (-60.0, -20.0, 25.0, 70.0):
+        solo_flex = arm_angles(HOMBRO_IZQ, destino(base_izq, -40.0, grados), base_izq)
+        assert solo_flex[0] == pytest.approx(-40.0, abs=1e-6)
         assert solo_flex[1] == pytest.approx(grados, abs=1e-6)
 
 
@@ -460,9 +602,18 @@ def test_el_brazo_derecho_usa_su_propio_lado(base_der):
     esta prueba saldría con el signo cambiado — que es exactamente el BUG 1 en
     su versión geométrica.
     """
+    # -x es hacia afuera para el brazo derecho, +y es hacia abajo: brazo bajado
+    # 45° desde la horizontal, o sea abducción -45 en los dos lados.
     punto = HOMBRO_DER + np.array([-LARGO_BRAZO * 0.7, LARGO_BRAZO * 0.7, 0.0])
     abduccion, _ = arm_angles(HOMBRO_DER, punto, base_der)
-    assert abduccion == pytest.approx(45.0, abs=0.5)
+    assert abduccion == pytest.approx(-45.0, abs=0.5)
+
+    # La postura simétrica del brazo izquierdo tiene que dar el MISMO ángulo.
+    espejo = HOMBRO_IZQ + np.array([LARGO_BRAZO * 0.7, LARGO_BRAZO * 0.7, 0.0])
+    izquierda, _ = arm_angles(
+        HOMBRO_IZQ, espejo, torso_basis(HOMBRO_IZQ, HOMBRO_DER, SUPERIOR)
+    )
+    assert izquierda == pytest.approx(abduccion, abs=1e-9)
 
 
 # --------------------------------------------------------------------------
@@ -531,8 +682,12 @@ def test_el_destino_solo_importa_por_su_direccion(base_izq):
 # --------------------------------------------------------------------------
 
 
-def test_el_brazo_horizontal_lateral_deja_la_flexion_indefinida(base_izq):
+def test_en_el_reposo_del_robot_la_flexion_se_declara_ausente(base_izq):
     """En la singularidad, la flexión se declara ausente en vez de inventarse.
+
+    Y aquí duele especialmente, porque la singularidad de este cardán **cae en
+    la postura de reposo del robot**: brazos en cruz. Comprobado en el visor —
+    con ``armR = 0``, barrer ``armRtw`` no mueve el brazo.
 
     Sin esta guarda, ``atan2(0, -0.0)`` devuelve **180°** —no cero, ni un valor
     ruidoso: 180 exactos, por el signo del cero en coma flotante— y eso recorta
@@ -540,13 +695,18 @@ def test_el_brazo_horizontal_lateral_deja_la_flexion_indefinida(base_izq):
     """
     punto = HOMBRO_IZQ + LARGO_BRAZO * base_izq[0]  # exactamente sobre u_lat
     abduccion, flexion = arm_angles(HOMBRO_IZQ, punto, base_izq)
-    assert abduccion == pytest.approx(90.0, abs=1e-6)
+    assert abduccion == pytest.approx(0.0, abs=1e-6)
     assert flexion is None
 
 
 def test_fuera_de_la_singularidad_la_flexion_si_existe(base_izq):
-    """A 85° de abducción la flexión sigue siendo un número, no None."""
-    punto = destino(base_izq, 85.0, 0.0)
+    """A 5° de abducción la flexión ya es un número, no None.
+
+    El umbral es estrecho a propósito: el brazo sale de la singularidad en
+    cuanto se separa un poco de la horizontal, y el robot tiene 55° de recorrido
+    hacia abajo para hacerlo.
+    """
+    punto = destino(base_izq, 5.0, 0.0)
     _, flexion = arm_angles(HOMBRO_IZQ, punto, base_izq)
     assert flexion is not None
     assert flexion == pytest.approx(0.0, abs=0.5)

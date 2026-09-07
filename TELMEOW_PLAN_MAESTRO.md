@@ -39,9 +39,20 @@ más, los dos sobre los brazos:
   hombro son **abducción/aducción** y **flexión/extensión**. Vocabulario
   renombrado en Python y en el visor, y **§3.3.1 reescrita** — declaraba una
   limitación sobre un grado de libertad inexistente.
-- **H29** — el canal `tw` va **al revés** de lo que afirma el comentario del
-  propio visor. Compensado con `ARM_INVERT_FLEXION`; **pendiente de confirmar en
-  el visor**, que es la única tarea que le queda al P5 (**P5.1**).
+- **H29** — ⚠️ **RETRACTADO el 2026-09-07.** Afirmé que el canal `tw` iba al
+  revés de lo que dice el comentario del visor. La sesión con el visor delante
+  lo desmontó y lo sustituye el **H30**.
+
+**La sesión del 2026-09-07 (P5.1) corrige el propio P5**, y con él la geometría
+que este documento daba por buena desde el principio:
+
+- **H30** — **la postura de reposo del robot tiene los brazos EN CRUZ**, no
+  colgando, y la dirección de reposo va **sobre el propio eje de la flexión**.
+  De ahí salen tres cosas: los topes de `limits.py` son elevación respecto a la
+  horizontal (el robot **no puede** bajar los brazos del todo), la
+  **singularidad del cardán cae en la postura de reposo**, y «flexión positiva =
+  adelante» **no es una propiedad del signo** sino que se invierte con la
+  abducción. Obligó a reparametrizar el estimador entero.
 
 Cómo leerlo:
 
@@ -66,7 +77,7 @@ cambia respecto al plan original.
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
-| **P5** — Arm tracker | 🟡 **código hecho** · falta **P5.1**, la verificación en el visor | |
+| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · falta la sesión con cámara | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -74,7 +85,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**534 pruebas en verde.** Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**550 pruebas en verde.** Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -118,7 +129,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── filters.py            ✅ One Euro, EMA, histéresis · solo stdlib
 │   ├── publisher.py          ✅ MQTT, JSON único, QoS 0
 │   ├── head_tracker.py       ✅ Face Mesh + solvePnP
-│   ├── arm_tracker.py        🟡 BlazePose · falta verificar signos en el visor
+│   ├── arm_tracker.py        🟡 BlazePose · signos verificados · falta medir
 │   ├── emotion_classifier.py ⬜ P6
 │   ├── control_panel.py      ⬜ P10
 │   └── main.py               ⬜ P7
@@ -218,6 +229,15 @@ flexión      −90° … +90°   (ambos brazos, límite duro)   [campo armLtw/a
 abducción    depende de la flexión                       [campo armL/armR]
 ```
 
+**EL CERO ES EL BRAZO EN CRUZ, NO COLGANDO (H30).** Verificado en el visor el
+2026-09-07. La abducción es la **elevación respecto a la horizontal**: 0° = brazo
+extendido hacia el lado, −55° es lo que baja y +30° lo que sube antes de chocar
+con la cabeza. **El robot no puede dejar los brazos caídos** — el operador en
+reposo pide −90° y se queda en −55°—, y hay que declararlo. Además, la dirección
+de reposo va sobre el propio eje de la flexión, así que **la singularidad del
+cardán cae en la postura de reposo**: con el brazo en cruz, la flexión no lo
+mueve.
+
 **La abducción depende de la flexión.** Las tablas 2D del barrido BVH (paso 5°,
 refinado 1°, demás DOF en home) son **la autoridad**; están en `limits.py`.
 
@@ -238,10 +258,11 @@ La prueba que distingue la implementación correcta de la errónea:
 
 **El cardán del robot no es ideal.** El eje del servo de flexión está girado
 **~9.9°** respecto al eje latero-lateral puro, alrededor del eje de abducción
-(se lee del rig: `(-0.985, 0, ∓0.17)`). Sin corregirlo, el retargeting arrastra
-diafonía entre canales: 1.3° de abducción parásita a 30° de flexión y ~10° a
-90°. `arm_tracker.arm_angles` lo deshace con una rotación previa, y hay una
-prueba que cuantifica lo que costaría no hacerlo.
+(se lee del rig: `(-0.985, 0, ∓0.17)`). Como la dirección de reposo del brazo va
+sobre ese mismo eje, no corregirlo no produce diafonía sino algo peor: un
+**sesgo constante de 10°**, con el que la postura de reposo del robot leería
++10° de abducción en vez de 0. `arm_tracker.arm_angles` lo deshace con una
+rotación previa en el plano frontal, y hay una prueba que fija esa magnitud.
 
 ## 0.6 Decisiones cerradas (eran «abiertas» en la v1)
 
@@ -280,7 +301,7 @@ tesis.
 | 2 | **P2** | Capa MQTT compatible con el viewer | ✅ · punto de control superado |
 | 3 | **P3** | Filtros temporales (One Euro, histéresis) | ✅ |
 | 4 | **P4** | Head tracker (Face Mesh + Kabsch/solvePnP, sin dlib) | ✅ **hecho y calibrado con el operador** |
-| 5 | **P5** | Arm tracker corregido (bugs 1–4) | 🟡 código hecho · falta **P5.1** |
+| 5 | **P5** | Arm tracker corregido (bugs 1–4) | 🟡 signos verificados · falta medir con cámara |
 | 6 | **P6** | Clasificador de emoción con backends intercambiables | ⬜ |
 | 7 | **P8** | Entrenamiento con FER-2013 | ⬜ ⚠️ revisar accuracy |
 | 8 | **P7** | Integración: captura única + HUD | ⬜ |
@@ -686,10 +707,31 @@ conocido para que hagan falta —el problema del P4, perder de vista el monitor,
 no se replica en los brazos— pero la infraestructura está, y el analizador las
 propone. Que se queden en 1.0 también es un resultado.
 
-### P5.1 — Verificación en el visor ⬜ **lo único que falta, y necesita al operador**
+### P5.1 — Verificación en el visor ✅ **cerrada el 2026-09-07**
 
-Es la tarea que ninguna prueba automática puede hacer, y es la que en el P4
-destapó el tilt invertido con 400 pruebas en verde.
+Se hizo moviendo un slider cada vez, con el visor delante, y **desmontó la
+geometría que este documento daba por buena**: el reposo del robot tiene los
+brazos en cruz, no colgando (**H30**, §7.13). Eso obligó a reparametrizar el
+estimador entero y a **retractar el H29**, que era una deducción de papel
+impecable levantada sobre un supuesto falso.
+
+Lo que quedó fijado, todo medido y no deducido:
+
+| Comprobación | Resultado |
+|---|---|
+| Postura de reposo | **brazos en cruz**, horizontales |
+| `armR` −50 / +30 | baja el brazo / lo sube ⇒ abducción, sentido global ✓ |
+| `armRtw` con `armR`=0 | **no mueve el brazo**: singularidad en el reposo |
+| `armRtw` −60 con `armR`=−50 | brazo hacia **adelante** |
+| `armRtw` +60 con `armR`=+20 | brazo hacia **adelante** ⇒ el sentido depende de la abducción |
+| `tilt` −39 | baja la cabeza ✓ (reconfirma H22) |
+| Ida y vuelta contra el rig | cierra a **<0.2°** en los cuatro canales |
+
+Las dos banderas de inversión quedan en `False`: el estimador reproduce la
+cinemática inversa exacta del cardán, así que lo que sale de él ya son los
+valores articulares del robot.
+
+### P5.2 — Sesión con cámara ⬜ **lo que falta, y necesita al operador**
 
 ```
 & "C:\Program Files\mosquitto\mosquitto.exe" -c mosquitto.conf -v
@@ -697,21 +739,22 @@ python -m http.server 8000 --directory telmeow_viewer
 python -m telmeow_teleop.arm_tracker --publish --record brazos.csv
 ```
 
-1. **Sin el tracker, solo con los sliders del visor.** Mover `s-arRtw` a +50 y
-   mirar si el brazo va adelante o atrás. Eso cierra el H29 en un minuto. Mover
-   **un solo slider cada vez** y no tocar la cámara del visor entre
-   observaciones: sigue deslizándose por amortiguación varios segundos y
-   comparar capturas de momentos distintos ya llevó a una conclusión falsa una
-   vez.
-2. **Con el tracker.** Las cuatro afirmaciones: separar el brazo izquierdo
-   físico → se separa el izquierdo del robot; levantarlo hacia adelante → va
-   hacia adelante; ídem con el derecho. Las teclas `b` y `f` alternan los signos
-   en caliente, y `m` el espejo, para no tener que relanzar.
-3. **Grabar dos o tres minutos** en postura de narración, alternando `t` entre
+1. **Las cuatro afirmaciones con el operador delante.** Separar el brazo
+   izquierdo físico → se separa el izquierdo del robot; levantarlo → sube; ídem
+   con el derecho. Es lo único que ata el marco del OPERADOR al del robot: la
+   verificación del visor ató el marco del robot, pero que `u_ant` sea de verdad
+   el frente del operador —el signo `−z` de MediaPipe— solo se comprueba con una
+   persona en cuadro. Las teclas `b` y `f` alternan los signos en caliente y `m`
+   el espejo, para no relanzar.
+2. **Grabar dos o tres minutos** en postura de narración, alternando `t` entre
    mano y codo, y pasar el CSV por
    `python tools/analizar_registro_brazos.py brazos.csv`. De ahí salen las tres
    cifras que faltan: el temblor por canal (respalda §3.3.1), la comparación
    mano/codo, y el porcentaje de frames en que se ven el codo y las caderas.
+3. **Comprobar el reposo.** El operador con los brazos caídos pide −90° de
+   abducción y el robot se queda en −55°: hay que ver cómo se siente eso y si
+   conviene una ganancia menor que 1 en ese sentido, que es justo para lo que
+   están las ganancias.
 4. **Medir el coste de BlazePose** con `model_complexity` 0, 1 y 2, **con el
    operador delante**. Es lo que hay que aclarar antes del P7, donde BlazePose
    comparte bucle con Face Mesh y con el clasificador de emoción.
@@ -1369,6 +1412,13 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
      del robot es un eslabón único. El mapeo usa la dirección hombro→mano, así
      que se conserva hacia dónde apunta el brazo pero no su forma. Es un
      retargeting deliberado, no un error de modelo.
+   - **El robot no puede bajar los brazos, y en su reposo pierde un grado de
+     libertad** (H30, verificado en el visor). Su cero es el brazo en cruz y
+     solo baja 55° desde ahí, así que el gesto de «brazos caídos» del operador
+     se reproduce recortado. Y como la dirección de reposo cae sobre el eje de
+     la flexión, **con el brazo en horizontal la flexión no mueve nada**: para
+     señalar al frente hay que subir o bajar el brazo primero. Es una limitación
+     de diseño mecánico, cuantificada y fácil de enseñar en el banco virtual.
 
 2. **Ausencia de ground truth angular.** No hay forma de validar que los ángulos
    estimados correspondan a los reales sin captura de movimiento. Lo defendible
@@ -1850,7 +1900,7 @@ from telmeow_teleop.arm_tracker import (ArmTracker, ArmAngles, arm_angles,
 t = ArmTracker(mirror=True,            # brazo izq. FISICO del operador -> armL
                frame_espejado=True,    # = cfg.camera.flip · hecho, no politica
                target="mano",          # "mano" (por defecto) o "codo"
-               invert_abduccion=False, invert_flexion=True)   # H29
+               invert_abduccion=False, invert_flexion=False)  # verificado, H30
 t.process(frame_rgb) -> ArmAngles | None      # None = no se detecto pose
 t.map_to_robot(canal, abduccion, flexion, timestamp=None)  # sin camara: testeable
 t.last_clamp        # {Side: ArmClamp} · lower/upper/fraction/clamped para el HUD
@@ -1875,11 +1925,13 @@ válido» sin mantener estado (P7 punto 12).
 
 Tres cosas que conviene saber antes de tocarlo:
 
+- **El cero de la abducción es el brazo EN CRUZ**, no colgando (H30). El
+  operador con los brazos caídos pide −90°, que el recorte deja en −55°.
 - **`arm_angles` puede devolver la flexión como `None`** aunque la abducción sea
-  válida: es la singularidad del cardán, con el brazo horizontal hacia el
-  costado. Sin esa guarda, `atan2(0, -0.0)` devuelve **180°** —no un valor
-  ruidoso: 180 exactos— y el robot pega un tirón. El tracker conserva la última
-  flexión válida de ese canal.
+  válida: es la singularidad del cardán, y **cae en la postura de reposo del
+  robot** (brazo en cruz). Sin esa guarda, `atan2(0, -0.0)` devuelve **180°**
+  —no un valor ruidoso: 180 exactos— y el robot pega un tirón. El tracker
+  conserva la última flexión válida de ese canal.
 - **`canal_del_robot` es el único sitio donde un lado del operador se ata a un
   canal del robot.** Todo lo demás —filtros, recorte, CSV, JSON— viaja ya en el
   marco del robot, así que la grabación y lo publicado no pueden discrepar.
@@ -2175,6 +2227,66 @@ Dos lecciones, y la segunda es la que más va a doler si se olvida:
   era real y está corregido: la herramienta ahora mide con el formato del
   pipeline por defecto y acepta `--fourcc` para comparar.
 
+## 7.13 La sesión con el visor del 2026-09-07 (H30, y el H29 retractado)
+
+Es el caso más limpio que ha dado este proyecto de por qué la verificación en el
+visor no es opcional, y conviene leerlo entero antes del PROMPT 7.
+
+**H30 — El reposo del robot tiene los brazos en cruz, y eso lo cambia todo.**
+Todo el módulo se escribió suponiendo que el brazo en reposo **cuelga**. Se
+verificó en el visor y **no**: con los seis canales a cero, el robot está de
+brazos abiertos, en horizontal. Tres consecuencias, cada una medida:
+
+1. **`armL`/`armR` son elevación respecto a la horizontal**, no respecto a la
+   vertical. Con eso, los topes de `limits.py` se leen solos: −55° es lo que el
+   brazo **baja** desde la horizontal y +30° lo que **sube** antes de chocar con
+   la cabeza. Comprobado con −50 (baja) y +30 (sube). **El robot no puede dejar
+   los brazos caídos**, y el operador con los brazos en reposo pide −90°, que el
+   recorte deja en −55°. Es una limitación del mecanismo y hay que declararla.
+2. **La dirección de reposo va sobre el propio eje de la flexión.** Verificado:
+   con `armR = 0`, barrer `armRtw` de 0 a 90° **no mueve el brazo ni un píxel**,
+   solo gira la pieza del hombro sobre sí misma. O sea que **la singularidad del
+   cardán cae exactamente en la postura de reposo del robot**: ahí el brazo
+   tiene un solo grado de libertad útil. Es lo que obliga a que `arm_angles`
+   devuelva la flexión como `None` en esa franja, en vez de un ±180 que daría
+   un tirón.
+3. **«Flexión positiva = adelante» no es cierto ni falso: depende.** La
+   componente antero-posterior vale `sin(abducción)·sin(flexión)`, así que se
+   invierte según el brazo esté por encima o por debajo de la horizontal. Con el
+   brazo bajado 50°, la flexión **negativa** va hacia adelante; con el brazo
+   subido 20°, la que va adelante es la **positiva**. Medidas las dos, y la
+   transcripción del rig las reproduce.
+
+**El H29 queda retractado, y merece quedar escrito por qué.** Deduje sobre el
+papel que `+armRtw` llevaba el brazo hacia atrás, con tres anclas —dos de ellas
+verificadas en vivo— y llegué a fijar `ARM_INVERT_FLEXION = True`. El
+razonamiento no tenía ningún error de aritmética: partía de un supuesto tácito
+que nunca comprobé, el del brazo colgando. **Con anclas correctas y un supuesto
+falso se llega a una conclusión falsa con toda la apariencia de rigor.** Es la
+tercera vez en este proyecto (H17, H22, H29) y siempre el mismo patrón.
+
+Lo que sí funcionó fue el diseño defensivo: el sentido era un **parámetro**
+(`invert_flexion`), no una constante, así que retractarlo costó cambiar un
+`True` por un `False` y no reescribir el módulo. Eso conviene conservarlo.
+
+**Y la prueba contra el rig pasaba en verde con la geometría equivocada**, por
+la misma razón de siempre: su modelo directo usaba el mismo reposo falso que el
+estimador, así que cerraba consigo misma. Ahora el reposo sale de los ejes del
+rig (`REPOSO_VISOR`) y hay una prueba que fija «el cero es el brazo en cruz».
+
+Dos cosas más que salieron de la sesión y que valen para cualquiera que vuelva a
+abrir el visor:
+
+- **La amortiguación de la cámara dura decenas de segundos**, porque el visor
+  renderiza a pocos fps cuando el panel no tiene el foco: la inercia decae por
+  frame, no por tiempo. Comparar dos capturas separadas por segundos **no es
+  fiable**. Lo que sí funciona es capturar los dos estados **seguidos**, sin
+  esperas, y volver al estado inicial para comprobar que la escena reproduce el
+  primer fotograma.
+- **Un valor pedido puede no ser el aplicado.** Con el cabeceo a −39°, pedir
+  `pan = 75` dejó el slider en 1.5°: el recorte por colisión del propio visor.
+  Hay que leer el valor de vuelta, no darlo por puesto.
+
 ## 7.12 El PROMPT 5: los brazos no hacen lo que el plan decía (H28, H29)
 
 **H28 — El robot no tiene rotación axial, y `giro` es flexión.** El enunciado
@@ -2272,7 +2384,8 @@ aplicar ya: su signo depende del sentido de la abducción, no del de la flexión
 | **H26** | Una grabación con el protocolo equivocado no se rescata releyéndola | P4.4, §7.10 |
 | **H27** | El techo de captura lo pone **la luz**, no el sensor: 30 fps con buena iluminación, 10 con poca | §0.4, §4.0.4, §7.10 |
 | **H28** | El robot **no tiene rotación axial**: `giro` es flexión y `balanceo` es abducción. Vocabulario renombrado y §3.3.1 reescrita | §0.5, §3.3.1, P5, §6, §7.12 |
-| **H29** | El canal `tw` va **al revés** de lo que dice el comentario del visor: `+armRtw` lleva el brazo atrás. Compensado con `ARM_INVERT_FLEXION`, pendiente de confirmar | P5.1, §7.12 |
+| **H29** | ~~El canal `tw` va al revés~~ · **RETRACTADO**: la deducción partía de un reposo falso. Lo sustituye el H30 | §7.13 |
+| **H30** | El reposo del robot tiene los **brazos en cruz**, sobre el eje de la flexión: los topes son elevación, la **singularidad cae en el reposo**, y «flexión+ = adelante» depende de la abducción | §0.5, §3.3.1, P5, §7.13 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la
 investigación de la cámara que salió de él. H19 y H20 son **correcciones a

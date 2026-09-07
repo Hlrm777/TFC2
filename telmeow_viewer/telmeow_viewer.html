@@ -280,27 +280,30 @@
      no se pueden cambiar sin romper el contrato MQTT; los rótulos y estos
      comentarios sí, y son los correctos.
 
-     ⚠️ EL SENTIDO DEL CANAL `tw` ESTÁ EN REVISIÓN (H29). Este comentario
-     afirmaba que «+θ = adelante en ambos brazos». La geometría dice lo
-     contrario, por tres vías independientes:
+     ⚠️ «+θ = ADELANTE EN AMBOS BRAZOS» NO PUEDE SER CIERTO TAL CUAL (H30).
+     Verificado en el visor el 2026-09-07, moviendo un slider cada vez:
 
-       1. neckTilt gira sobre +x y está verificado EN VIVO que un tilt negativo
-          baja la cabeza (H22) ⇒ el robot mira hacia +y.
-       2. neckPan gira sobre −z y está verificado EN VIVO que un pan positivo
-          gira el robot a su derecha (P4.1) ⇒ coincide: mira a +y, su derecha
-          es +x, que es donde está Brazo_Der.
-       3. Con esos ejes y setJoint(), que aplica el ángulo sin negarlo, un
-          armRtw positivo lleva el brazo hacia −y. O sea, hacia ATRÁS.
+       - La postura de REPOSO tiene los brazos EN CRUZ, no colgando. Con
+         armR = 0 el brazo apunta a lo largo del eje latero-lateral.
+       - Por eso los topes de limits.py se leen solos: −55° es lo que el brazo
+         BAJA desde la horizontal y +30° lo que SUBE antes de chocar con la
+         cabeza. El robot no puede dejar los brazos caídos.
+       - La dirección de reposo va sobre el propio eje de la flexión, así que
+         CON abd = 0 LA FLEXIÓN NO MUEVE EL BRAZO: barrer armRtw de 0 a 90° no
+         lo desplaza, solo gira la pieza del hombro. Es la singularidad del
+         cardán, y en este robot cae justo en su reposo.
+       - En consecuencia, la componente antero-posterior vale
+         sin(abducción)·sin(flexión), y su sentido SE INVIERTE según el brazo
+         esté por encima o por debajo de la horizontal. Con el brazo bajado 50°,
+         una flexión NEGATIVA va hacia adelante; con el brazo subido 20°, la que
+         va hacia adelante es la POSITIVA. Medido las dos.
 
-     Si es así, `tw` positivo es extensión y no flexión, y el saludo del demo
-     (armRtw = 50, comentado «adelante») está moviendo el brazo hacia atrás. NO
-     se ha cambiado ningún eje ni ningún valor: la geometría se deja intacta y
-     el pipeline lo compensa con ARM_INVERT_FLEXION, que ya viene activado.
-     Falta la comprobación de un minuto: mover s-arRtw a +50 y mirar. Si el
-     brazo va adelante, se retira este aviso y esa bandera vuelve a False.
+     O sea que «adelante» no es una propiedad del signo de tw, y el comentario
+     original no era exactamente falso: era una simplificación que solo vale en
+     media tabla. No se ha cambiado ningún eje ni ningún valor.
 
-     La abducción no está en duda: armR positivo lleva el brazo hacia +x, que
-     es hacia afuera para el brazo derecho, y eso sí coincide con «+θ eleva». */
+     La abducción sí es global: armR positivo sube el brazo, armR negativo lo
+     baja. Comprobado con −50 y +30. */
   const RIG = {
     neckPan:   { piv:V(0.1,-8.4,262.0),  axis:V(0,0,-1) },          // eje del M_Cuello_Sup (motor en la cabeza)
     neckTilt:  { piv:V(0.1,-10.9,215.1), axis:V(1,0,0) },           // eje del M_Cuello_Base (fijo al cuerpo)
@@ -883,14 +886,13 @@
         if(k>=1){ phase='wave'; t0=now; }
       }else{
         const t = (now-t0)/1000*3.64;              // misma cadencia que antes
-        // Saludo dentro del espacio admisible (mapa 2D): brazo derecho fuera
-        // del plano del tronco y abducción moderada.
-        // ⚠️ H29: este bloque se escribió creyendo que armRtw+ era hacia
-        // adelante. Si el sentido resulta ser el contrario (ver la nota del
-        // RIG), el saludo está agitando el brazo por DETRÁS del cuerpo y hay
-        // que negar esta línea. Se deja como está hasta comprobarlo, para no
-        // cambiar dos cosas a la vez.
-        pose.armRtw = 50 + Math.sin(t*4)*8;        // 42..58
+        // Saludo dentro del espacio admisible (mapa 2D): brazo derecho subido
+        // sobre la horizontal y sacado del plano del tronco.
+        // Con la abducción POSITIVA (18..42, o sea el brazo por encima de la
+        // horizontal), una flexión positiva lleva el brazo hacia ADELANTE — ver
+        // la nota del RIG sobre H30: el sentido depende del signo de la
+        // abducción, y en esta franja el comentario original acierta.
+        pose.armRtw = 50 + Math.sin(t*4)*8;        // 42..58 (adelante, con armR>0)
         pose.armR   = 30 + Math.sin(t*1.2)*12;     // 18..42 (abd.máx≈55 ahí)
         pose.pan    = Math.sin(t*1.5)*12;
         pose.tilt   = 8 + Math.sin(t*1.5)*5;

@@ -183,13 +183,17 @@ CANALES: dict[Side, tuple[str, str]] = {
 #: propague a los cuatro canales a la vez.
 ALFA_TRONCO: float = 0.05
 
-#: Componente sagital por debajo de la cual la flexión deja de estar definida.
+#: Componente fuera del eje por debajo de la cual la flexión no está definida.
 #:
-#: Es ``cos(abduccion)``, así que 0.02 corresponde a ±88.9° de abducción: el
-#: brazo prácticamente horizontal hacia el costado, alineado con el eje de la
-#: articulación hija del cardán. Ver la nota de singularidad de ``arm_angles``.
-#: No se pone más pequeño porque el problema no es solo el cero exacto: en un
-#: entorno de la singularidad la flexión ya es una división de dos ruidos.
+#: Es ``|sin(abduccion)|``, así que 0.02 corresponde a ±1.1° de abducción: el
+#: brazo prácticamente en cruz, alineado con el eje de la flexión. Es la
+#: singularidad del cardán, y en este robot **cae en su postura de reposo** —
+#: ver la nota de ``arm_angles``.
+#:
+#: El umbral es estrecho a propósito. Ensancharlo dejaría la flexión sin definir
+#: en una franja amplia alrededor de la horizontal, que es donde el operador va
+#: a estar buena parte del tiempo; y el problema real es el cero exacto, donde
+#: ``atan2`` devuelve ±180 en vez de un valor ruidoso.
 _SAGITAL_MINIMA: float = 0.02
 
 #: Inclinación del eje de flexión respecto al eje latero-lateral ideal, en
@@ -301,50 +305,67 @@ def arm_angles(
     Es la **cinemática inversa exacta del cardán del robot**, en su mismo orden
     de composición: la flexión es la articulación padre y la abducción la hija,
     tal como están anidadas en el rig del visor
-    (``gArmRbal = makeJoint(gArmRtwist, ...)``). Por eso la ida y la vuelta
-    cierran exactamente, y hay una prueba que lo comprueba contra una
-    transcripción independiente de esos ejes.
+    (``gArmRbal = makeJoint(gArmRtwist, ...)``).
 
-    Con ``h`` la dirección unitaria hombro→destino, y llamando ``p``, ``q`` y
-    ``a`` a sus componentes hacia abajo, hacia afuera y hacia adelante::
+    EL CERO NO ES EL BRAZO COLGANDO, ES EL BRAZO EN HORIZONTAL
+    -----------------------------------------------------------
+    Es lo más contraintuitivo de este módulo y conviene leerlo antes de tocar
+    nada. **La postura de reposo del robot tiene los brazos extendidos hacia los
+    lados**, no colgando: con ``armR = 0`` el brazo apunta a lo largo del eje
+    latero-lateral. Verificado en el visor el 2026-09-07 (H30), no deducido.
 
-        abduccion = asin(q)
-        flexion   = atan2(a, p)
+    De ahí sale todo lo demás:
 
-    Nada de cocientes de longitudes: los dos ángulos salen de productos
-    escalares entre vectores unitarios, y el argumento del arcoseno se acota a
-    [-1, 1] antes de evaluarlo. Es la corrección del BUG 3, por construcción y
-    no por parche.
+    - ``abduccion`` es la **elevación respecto a la horizontal**, en el plano
+      frontal. 0 = brazo en cruz, negativo = bajando hacia el cuerpo, positivo =
+      subiendo hacia la cabeza. Los topes de ``limits.py`` cobran sentido
+      inmediato: −55° es lo que el brazo baja desde la horizontal, y +30° lo que
+      sube antes de chocar con la cabeza. **El robot no puede dejar los brazos
+      colgando**: su límite son 55° por debajo de la horizontal.
+    - El brazo del operador colgando corresponde a ``abduccion = −90``, que el
+      recorte lleva a −55. Es correcto y es una limitación del mecanismo, no del
+      estimador.
 
-    ``inclinacion`` CORRIGE QUE EL CARDAN DEL ROBOT NO ES IDEAL. Su eje de
-    flexión está girado ~10° respecto al eje lateral, alrededor del eje de
-    abducción (ver ``INCLINACION_FLEXION``). Deshacerlo es una rotación de
-    ``-inclinacion`` en el plano (abajo, afuera) antes de descomponer, y sumarla
-    de vuelta a la abducción::
+    Con ``h`` la dirección unitaria hombro→destino y sus tres componentes
+    ``L = h·u_lat``, ``S = h·u_sup``, ``A = h·u_ant``, la composición directa
+    del cardán es::
 
-        p' =  p·cos(i) + q·sin(i)
-        q' = -p·sin(i) + q·cos(i)
-        abduccion = asin(q') + i
-        flexion   = atan2(a, p')
+        h = cos(a)·u_lat + sin(a)·[cos(f)·u_sup + sin(f)·u_ant]
 
-    Con la inclinación a 0 se reduce al cardán ideal, que es lo que usan las
-    pruebas de postura. Sin ella, el robot arrastra ~10° de abducción parásita
-    con el brazo a 90° de flexión.
+    y su inversa, tomando la rama ``f ∈ (−90, 90)`` que es la que usa el robot::
 
-    SINGULARIDAD, y no es teórica. Con el brazo sobre ``u_lat`` —abducción
-    ±90°, o sea el brazo horizontal hacia el costado— el eje de la articulación
-    hija se alinea con la dirección del brazo y **la flexión deja de estar
-    definida**: es la singularidad de cualquier cardán. El operador sí puede
-    adoptar esa postura, aunque el robot no pueda seguirla (la tabla 2D no deja
-    pasar de +75° de abducción).
+        a = signo(S) · atan2(hypot(S, A), L)
+        f = atan2(A, S)  si S ≥ 0,  atan2(−A, −S)  si S < 0
+
+    Nada de cocientes de longitudes: todo sale de productos escalares entre
+    vectores unitarios. Es la corrección del BUG 3, por construcción y no por
+    parche.
+
+    ``inclinacion`` CORRIGE QUE EL CARDAN NO ES IDEAL. El eje de flexión está
+    girado ~10° respecto al latero-lateral puro, alrededor del eje de abducción
+    (ver ``INCLINACION_FLEXION``). Como la dirección de reposo del brazo va
+    sobre ese mismo eje, deshacerlo es **una sola rotación de −inclinación en el
+    plano frontal** antes de descomponer, sin desplazamiento que sumar después.
+
+    LA SINGULARIDAD ESTA EN EL REPOSO DEL ROBOT, Y ESO SI DUELE
+    -----------------------------------------------------------
+    Con el brazo en horizontal —``abduccion ≈ 0``— la dirección del brazo se
+    alinea con el eje de la flexión, y **la flexión deja de mover el brazo**.
+    Comprobado en el visor: con ``armR = 0``, barrer ``armRtw`` de 0 a 90° no
+    desplaza el brazo ni un píxel; solo gira la pieza del hombro sobre sí misma.
+
+    No es un defecto del estimador ni algo que se pueda reparametrizar: es la
+    singularidad del propio mecanismo, y cae justo en su postura de reposo. La
+    consecuencia práctica hay que declararla: **con el brazo en cruz, el robot
+    tiene un solo grado de libertad útil**, y el gesto de señalar al frente
+    exige bajar o subir el brazo antes de que la flexión sirva de algo.
 
     Ahí el ``atan2`` no devuelve un valor ruidoso sino uno **falso y grande**:
     con los dos argumentos en cero da 0 o ±180 según el signo del cero en coma
-    flotante, y ese ±180 recortaría al tope y daría un tirón visible en el
-    robot. Por eso, cuando la componente sagital cae por debajo de
-    ``_SAGITAL_MINIMA``, se devuelve la flexión como ``None``: es información
-    que no existe, y quien llama debe conservar el último valor válido en vez de
-    inventarse uno.
+    flotante, y ese ±180 recortaría al tope y daría un tirón visible. Por eso,
+    cuando la componente fuera del eje cae por debajo de ``_SAGITAL_MINIMA``, se
+    devuelve la flexión como ``None``: es información que no existe, y quien
+    llama debe conservar el último valor válido en vez de inventarse uno.
 
     Returns:
         ``(abduccion, flexion)``, con ``flexion`` a ``None`` en la
@@ -358,30 +379,34 @@ def arm_angles(
         return None
 
     u_lat, u_ant, u_sup = base
-    hacia_afuera = float(np.dot(h, u_lat))
-    hacia_abajo = -float(np.dot(h, u_sup))
-    hacia_adelante = float(np.dot(h, u_ant))
+    componente_lateral = float(np.dot(h, u_lat))
+    componente_superior = float(np.dot(h, u_sup))
+    componente_anterior = float(np.dot(h, u_ant))
 
-    # Deshacer la inclinación del eje de flexión. Es una rotación en el plano de
-    # la abducción —el que contiene «abajo» y «afuera»—, así que su signo
-    # depende del sentido de la abducción y no del de la flexión.
+    # Deshacer la inclinación del eje de flexión: una rotación de -inclinacion
+    # en el plano frontal, que es el de la abducción. Su signo depende del
+    # sentido de la abducción y no del de la flexión, así que no queda pendiente
+    # de la verificación del canal `tw`.
     if inclinacion:
         radianes = math.radians(inclinacion)
         coseno, seno = math.cos(radianes), math.sin(radianes)
-        hacia_abajo, hacia_afuera = (
-            hacia_abajo * coseno + hacia_afuera * seno,
-            -hacia_abajo * seno + hacia_afuera * coseno,
+        componente_lateral, componente_superior = (
+            componente_lateral * coseno + componente_superior * seno,
+            -componente_lateral * seno + componente_superior * coseno,
         )
 
-    lateral = min(1.0, max(-1.0, hacia_afuera))
-    abduccion = math.degrees(math.asin(lateral)) + inclinacion
+    fuera_del_eje = math.hypot(componente_superior, componente_anterior)
+    signo = -1.0 if componente_superior < 0.0 else 1.0
+    abduccion = signo * math.degrees(math.atan2(fuera_del_eje, componente_lateral))
     if not math.isfinite(abduccion):
         return None
 
-    if math.hypot(hacia_adelante, hacia_abajo) < _SAGITAL_MINIMA:
+    if fuera_del_eje < _SAGITAL_MINIMA:
         return (abduccion, None)
 
-    flexion = math.degrees(math.atan2(hacia_adelante, hacia_abajo))
+    flexion = math.degrees(
+        math.atan2(signo * componente_anterior, signo * componente_superior)
+    )
     if not math.isfinite(flexion):
         return (abduccion, None)
     return (abduccion, flexion)

@@ -403,31 +403,24 @@ class ArmConfig:
     horizontalmente antes de estimar, así que las etiquetas ``LEFT_*`` de
     BlazePose corresponden al lado **físicamente opuesto** del operador.
 
-    ``invert_flexion`` VIENE ACTIVADO, y el motivo es un hallazgo (H29): el
-    comentario del rig del visor dice que ``+armLtw`` lleva el brazo **hacia
-    adelante**, y la geometría dice que lo lleva **hacia atrás**. Tres anclas
-    independientes, dos de ellas ya verificadas con el operador delante:
+    LAS DOS BANDERAS DE INVERSION VIENEN DESACTIVADAS, y ahora eso está
+    **verificado en el visor** (2026-09-07), no deducido. El estimador
+    reproduce la cinemática inversa exacta del cardán del robot, en su mismo
+    orden y con sus mismos ejes, así que lo que sale de él ya son los valores
+    articulares del robot: no hay nada que invertir.
 
-    1. El eje del servo del cuello es ``+x`` y está comprobado en vivo que un
-       tilt **negativo baja** la cabeza (H22). Eso obliga a que el robot mire
-       hacia ``+y``.
-    2. El eje del pan es ``-z`` y está comprobado en vivo que un pan
-       **positivo gira el robot a su derecha** (P4.1). Coincide: el robot mira
-       a ``+y`` y su derecha es ``+x``, que es donde está ``Brazo_Der``.
-    3. Con esos ejes y ``setJoint``, que aplica el ángulo sin negarlo,
-       ``+armLtw`` mueve el brazo hacia ``-y``. O sea, hacia atrás.
+    Se conservan configurables igualmente, porque son la palanca barata si
+    alguna vez se rehace el rig, y porque en este proyecto ya hubo dos errores
+    de signo que pasaron todas las pruebas en verde (H17 y H22).
 
-    Con el robot mirando a ``+y``, el canal ``tw`` positivo es **extensión**, no
-    flexión. Invertirlo es lo que hace que el robot copie al operador. La
-    abducción no necesita inversión: ``+armR`` lleva el brazo hacia ``+x``, que
-    es hacia afuera para el brazo derecho.
-
-    ⚠️ **Falta la confirmación en vivo**, y es de un minuto: mover el slider
-    ``s-arRtw`` a +50 y mirar si el brazo va adelante o atrás. Si va adelante,
-    esta bandera vuelve a ``False`` y el hallazgo se retira. No se deja
-    deducido y ya porque en este proyecto ya hubo dos errores de signo que
-    pasaron todas las pruebas en verde (H17 y H22) — pero tampoco se deja en el
-    valor que la geometría dice que es el equivocado.
+    ⚠️ **Cuidado con «hacia adelante» como si fuera una propiedad del signo.**
+    El comentario del rig del visor dice que ``+armLtw`` lleva el brazo hacia
+    adelante, y eso **no puede ser cierto ni falso globalmente**: la componente
+    antero-posterior del brazo vale ``sin(abduccion)·sin(flexion)``, así que su
+    sentido **se invierte según el brazo esté por encima o por debajo de la
+    horizontal**. Con el brazo bajado 50°, una flexión negativa va hacia
+    adelante; con el brazo subido 20°, la que va hacia adelante es la positiva.
+    Medido en el visor y reproducido por la transcripción del rig. Ver H30.
 
     Las dos banderas se comparten entre los dos brazos porque la convención del
     robot ya es simétrica —las tablas de ``limits.py`` usan el mismo sentido en
@@ -450,7 +443,7 @@ class ArmConfig:
     target: str = "mano"
     mirror: bool = True
     invert_abduccion: bool = False
-    invert_flexion: bool = True
+    invert_flexion: bool = False
     gain_abduccion: float = 1.0
     gain_aduccion: float = 1.0
     gain_flexion: float = 1.0

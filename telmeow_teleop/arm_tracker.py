@@ -92,7 +92,7 @@ import mediapipe as mp
 import numpy as np
 
 from .config import AppConfig
-from .filters import EMAFilter, OneEuroFilter
+from .filters import EMAFilter, OneEuroFilter, SlewLimiter
 from .head_tracker import apartar_si_existe
 from .limits import (
     ARM_ABDUCCION_1D,
@@ -219,6 +219,22 @@ INCLINACION_FLEXION: dict[Side, float] = {
     Side.L: math.degrees(math.asin(0.174)),
     Side.R: math.degrees(math.asin(0.170)),
 }
+
+#: Cuánto se conserva la vertical del tronco derivada de las caderas cuando
+#: dejan de verse, en segundos.
+#:
+#: Retenerla un instante es correcto: la orientación del tronco es
+#: cuasi-estática y las caderas parpadean por debajo del umbral con facilidad,
+#: sobre todo sentado a una mesa, donde caen cerca del borde del cuadro.
+#:
+#: Retenerla indefinidamente NO lo es, y es el fallo que tenía este módulo: la
+#: bandera se quedaba en «de caderas» para siempre tras el primer frame bueno,
+#: así que el HUD y el CSV afirmaban que la vertical era observada mientras en
+#: realidad era un valor congelado de hacía minutos. Una vertical retenida un
+#: minuto es PEOR que la reserva, porque la reserva es un supuesto declarado
+#: —operador sentado y erguido— y la retenida es un supuesto invisible. Pasado
+#: este plazo se olvida y se cae a la reserva, que sí se anuncia.
+RETENCION_TRONCO_S: float = 2.0
 
 
 # --------------------------------------------------------------------------
@@ -530,6 +546,14 @@ class ArmTracker:
         gain_*: multiplicadores por sentido. 1.0 copia el gesto.
         min_visibility: umbral por debajo del cual un landmark se considera no
             observado.
+        reposo_abduccion, reposo_flexion: pose a la que vuelve un brazo cuando
+            se pierde su seguimiento. Ver ``comando``.
+        gracia_s: cuánto se mantiene el último objetivo antes de empezar a
+            volver al reposo, en segundos.
+        velocidad_max: velocidad angular máxima del comando, en grados por
+            segundo. Ver ``comando`` y ``filters.SlewLimiter``.
+        retencion_tronco_s: cuánto se conserva la vertical del tronco derivada
+            de las caderas cuando dejan de verse. Ver ``RETENCION_TRONCO_S``.
     """
 
     def __init__(
@@ -548,6 +572,11 @@ class ArmTracker:
         beta: float = 0.5,
         min_visibility: float = 0.5,
         model_complexity: int = 1,
+        reposo_abduccion: float = -55.0,
+        reposo_flexion: float = 0.0,
+        gracia_s: float = 0.5,
+        velocidad_max: float = 180.0,
+        retencion_tronco_s: float = RETENCION_TRONCO_S,
         clock=time.perf_counter,
     ) -> None:
         if target not in ("mano", "codo"):
@@ -557,6 +586,10 @@ class ArmTracker:
             raise ValueError("las ganancias deben ser positivas")
         if not 0.0 <= min_visibility <= 1.0:
             raise ValueError("min_visibility debe estar entre 0 y 1")
+        if gracia_s < 0.0:
+            raise ValueError("gracia_s no puede ser negativo")
+        if retencion_tronco_s < 0.0:
+            raise ValueError("retencion_tronco_s no puede ser negativo")
 
         self.mirror = mirror
         self.frame_espejado = frame_espejado
@@ -568,6 +601,8 @@ class ArmTracker:
         self.gain_flexion = gain_flexion
         self.gain_extension = gain_extension
         self.min_visibility = min_visibility
+        self.gracia_s = float(gracia_s)
+        self.retencion_tronco_s = float(retencion_tronco_s)
 
         self._clock = clock
         self._pose = mp.solutions.pose.Pose(
@@ -593,17 +628,43 @@ class ArmTracker:
         self._filtros_tronco = tuple(EMAFilter(ALFA_TRONCO) for _ in range(3))
 
         self._u_sup: np.ndarray | None = None
-        self._tronco_de_caderas = False
+        self._tronco_fresco = False
+        self._t_tronco: float | None = None
         self._frames_sin_pose = 0
         self._raw: dict[Side, tuple[float, float]] = {}
         self._flexion_valida: dict[Side, float] = {}
         self._clamps: dict[Side, ArmClamp] = {}
         self._visibilidades: dict[str, float] = {}
+        self._puntos_destino: dict[Side, int] = {}
         self._landmarks_imagen = None
         self._extremos: dict[Side, dict[str, list[float]]] = {
             lado: {"abduccion": [0.0, 0.0], "flexion": [0.0, 0.0]}
             for lado in (Side.L, Side.R)
         }
+
+        # -- etapa de salida: de la estimación al comando ------------------
+        # La pose de reposo pasa por clamp_arm igual que cualquier otra: así no
+        # hay forma de que una configuración descuidada mande al robot a una
+        # postura que su mecanismo no admite.
+        self._reposo: dict[Side, tuple[float, float]] = {
+            lado: clamp_arm(reposo_abduccion, reposo_flexion, lado).as_tuple
+            for lado in (Side.L, Side.R)
+        }
+        self._limitadores: dict[Side, tuple[SlewLimiter, SlewLimiter]] = {}
+        self._objetivo: dict[Side, tuple[float, float]] = {}
+        for lado in (Side.L, Side.R):
+            abd, flex = self._reposo[lado]
+            limitador_abd = SlewLimiter(velocidad_max, clock=clock)
+            limitador_flex = SlewLimiter(velocidad_max, clock=clock)
+            # Arrancar FIJADOS en el reposo y no sin inicializar: si el primer
+            # objetivo llegara a un limitador virgen, pasaría entero y el
+            # arranque sería justo el salto que esto evita.
+            limitador_abd.reset(abd)
+            limitador_flex.reset(flex)
+            self._limitadores[lado] = (limitador_abd, limitador_flex)
+            self._objetivo[lado] = (abd, flex)
+        self._t_estimado: dict[Side, float] = {}
+        self._estimado: dict[Side, bool] = {Side.L: False, Side.R: False}
 
     # -- estado para el HUD y la calibración -------------------------------
 
@@ -637,12 +698,50 @@ class ArmTracker:
 
     @property
     def tronco_de_caderas(self) -> bool:
-        """True si la vertical del tronco sale de las caderas observadas.
+        """True si las caderas se vieron **en este frame** y actualizaron la
+        vertical del tronco.
 
-        En ``False`` se está usando la reserva (vertical de imagen), que asume
-        al operador sentado y erguido y hay que declararla.
+        OJO al matiz, que costó una lectura falsa del HUD: esto es *fresco en
+        este frame*, no *alguna vez*. Antes la bandera se quedaba puesta para
+        siempre tras el primer frame bueno, así que el HUD y el CSV afirmaban
+        «vertical de caderas» con la visibilidad de cadera a 0.00. Para saber
+        qué se está usando de verdad, incluido el caso intermedio, está
+        ``origen_tronco``.
         """
-        return self._tronco_de_caderas
+        return self._tronco_fresco
+
+    @property
+    def puntos_destino(self) -> dict[Side, int]:
+        """De cuántos landmarks salió el punto de destino de cada canal.
+
+        Con ``target="codo"`` siempre es 1. Con ``target="mano"`` va de 1 a 4,
+        y su media a lo largo de una grabación es la que dice si el centroide
+        de cuatro puntos es real o si en la práctica colapsa a la muñeca.
+        """
+        return dict(self._puntos_destino)
+
+    @property
+    def origen_tronco(self) -> str:
+        """De dónde sale la vertical del tronco ahora mismo.
+
+        - ``"caderas"``: observadas en este frame.
+        - ``"retenido"``: derivada de las caderas, pero de un frame anterior;
+          sigue dentro de ``retencion_tronco_s``.
+        - ``"reserva"``: vertical de imagen. **Asume al operador sentado y
+          erguido**, y es el caso que hay que declarar en la tesis si resulta
+          ser el habitual.
+        """
+        if self._tronco_fresco:
+            return "caderas"
+        return "retenido" if self._u_sup is not None else "reserva"
+
+    @property
+    def edad_tronco_s(self) -> float | None:
+        """Segundos desde la última vez que las caderas actualizaron la
+        vertical, o ``None`` si nunca lo hicieron."""
+        if self._t_tronco is None:
+            return None
+        return self._clock() - self._t_tronco
 
     @property
     def landmarks_imagen(self):
@@ -735,27 +834,54 @@ class ArmTracker:
     def _visibilidad(self, mundo, lado: Side, nombre: str) -> float:
         return float(getattr(mundo[LANDMARKS[lado][nombre]], "visibility", 1.0))
 
-    def _destino(self, mundo, lado: Side) -> tuple[np.ndarray, float]:
-        """Punto que orienta el brazo y su visibilidad, según ``target``."""
+    def _destino(self, mundo, lado: Side) -> tuple[np.ndarray, float, int]:
+        """Punto que orienta el brazo, su visibilidad y de cuántos landmarks
+        salió, según ``target``."""
         if self.target == "codo":
-            return self._punto(mundo, lado, "codo"), self._visibilidad(
-                mundo, lado, "codo"
+            return (
+                self._punto(mundo, lado, "codo"),
+                self._visibilidad(mundo, lado, "codo"),
+                1,
             )
-        # Promediar los cuatro landmarks de la mano en vez de usar solo la
-        # muñeca: son cuatro estimaciones del mismo sitio, y el promedio cancela
-        # parte de su ruido independiente. Es la versión barata —sin añadir
-        # ningún modelo— de pedir más puntos en la mano.
-        puntos = [self._punto(mundo, lado, n) for n in PUNTOS_MANO]
-        visibles = [self._visibilidad(mundo, lado, n) for n in PUNTOS_MANO]
-        return np.mean(puntos, axis=0), min(visibles)
+        # Promediar los landmarks de la mano en vez de usar solo la muñeca: son
+        # varias estimaciones del mismo sitio, y el promedio cancela parte de su
+        # ruido independiente. Es la versión barata —sin añadir ningún modelo—
+        # de pedir más puntos en la mano.
+        #
+        # LA PUERTA ES LA MUÑECA, NO EL MINIMO DE LOS CUATRO. Con el mínimo,
+        # cualquier dedo mal estimado descartaba la mano entera, y BlazePose
+        # estima los dedos con bastante menos confianza que la muñeca incluso
+        # con la mano a la vista. Medido en la grabación del 2026-09-13: el
+        # mínimo de los cuatro pasaba el umbral en el 45-48 % de los frames
+        # mientras el codo —un solo landmark— lo pasaba en el 90 %, lo que hacía
+        # parecer que la mano se ve peor que el codo cuando buena parte de la
+        # diferencia era el propio agregador.
+        #
+        # Y hay un motivo de método además del técnico: `target="codo"` se mide
+        # con la visibilidad de UN landmark, así que gatear la mano con el mínimo
+        # de cuatro sesgaba la comparación mano-frente-a-codo, que es justo la
+        # decisión que esa medición tiene que resolver. Con la muñeca de puerta,
+        # los dos casos se miden igual.
+        vis_ancla = self._visibilidad(mundo, lado, "muneca")
+        puntos = [self._punto(mundo, lado, "muneca")]
+        for nombre in PUNTOS_MANO[1:]:
+            if self._visibilidad(mundo, lado, nombre) >= self.min_visibility:
+                puntos.append(self._punto(mundo, lado, nombre))
+        return np.mean(puntos, axis=0), vis_ancla, len(puntos)
 
-    def _actualizar_tronco(self, mundo) -> np.ndarray | None:
-        """Vertical del tronco, suavizada, o la reserva si no hay caderas."""
+    def _actualizar_tronco(self, mundo, ahora: float) -> np.ndarray | None:
+        """Vertical del tronco, suavizada, o la reserva si no hay caderas.
+
+        Tres estados, y distinguirlos importa: observada en este frame,
+        retenida de un frame anterior reciente, o la reserva. Ver
+        ``origen_tronco`` y ``RETENCION_TRONCO_S``.
+        """
         vis_cadera = min(
             self._visibilidad(mundo, Side.L, "cadera"),
             self._visibilidad(mundo, Side.R, "cadera"),
         )
         self._visibilidades["cadera"] = vis_cadera
+        self._tronco_fresco = False
 
         if vis_cadera >= self.min_visibility:
             hombros = (
@@ -775,13 +901,21 @@ class ArmTracker:
                 normalizado = _normalizar(suave)
                 if normalizado is not None:
                     self._u_sup = normalizado
-                    self._tronco_de_caderas = True
+                    self._t_tronco = ahora
+                    self._tronco_fresco = True
 
-        if self._u_sup is None:
-            # Nunca se vieron las caderas: se asume operador sentado y erguido.
-            self._tronco_de_caderas = False
-            return EJE_SUPERIOR_RESERVA
-        return self._u_sup
+        if self._u_sup is not None and self._t_tronco is not None:
+            if ahora - self._t_tronco <= self.retencion_tronco_s:
+                return self._u_sup
+            # Caducó. Se OLVIDA en vez de seguir arrastrándola: un supuesto
+            # declarado (la reserva) es mejor que uno invisible.
+            self._u_sup = None
+            self._t_tronco = None
+            for filtro in self._filtros_tronco:
+                filtro.reset()
+
+        # No hay caderas recientes: se asume operador sentado y erguido.
+        return EJE_SUPERIOR_RESERVA
 
     def process(self, frame_rgb: np.ndarray) -> ArmAngles | None:
         """Estima los cuatro canales del robot desde un frame RGB.
@@ -791,23 +925,25 @@ class ArmTracker:
             estimar, o ``None`` si no se detectó ninguna pose. Cada brazo se
             descarta por separado.
         """
+        self._estimado = {Side.L: False, Side.R: False}
         resultado = self._pose.process(frame_rgb)
         mundo = getattr(resultado, "pose_world_landmarks", None)
         if mundo is None:
             self._frames_sin_pose += 1
             self._landmarks_imagen = None
+            self._tronco_fresco = False
             return None
         mundo = mundo.landmark
         self._landmarks_imagen = resultado.pose_landmarks
 
         self._frames_sin_pose = 0
         self._raw.clear()
-        u_sup = self._actualizar_tronco(mundo)
+        ahora = self._clock()
+        u_sup = self._actualizar_tronco(mundo, ahora)
         if u_sup is None:
             return ArmAngles()
 
         salida = ArmAngles()
-        ahora = self._clock()
         for etiqueta in (Side.L, Side.R):
             canal = canal_del_robot(
                 etiqueta, frame_espejado=self.frame_espejado, mirror=self.mirror
@@ -818,6 +954,7 @@ class ArmTracker:
             campo_abd, campo_flex = CANALES[canal]
             setattr(salida, campo_abd, angulos[0])
             setattr(salida, campo_flex, angulos[1])
+            self._estimado[canal] = True
         return salida
 
     def _brazo(
@@ -830,7 +967,12 @@ class ArmTracker:
     ) -> tuple[float, float] | None:
         """Un brazo, de landmarks a ángulos del robot. ``None`` = descartarlo."""
         vis_hombro = self._visibilidad(mundo, etiqueta, "hombro")
-        destino, vis_destino = self._destino(mundo, etiqueta)
+        destino, vis_destino, n_destino = self._destino(mundo, etiqueta)
+        # Cuántos landmarks formaron el punto de destino. Es lo que dice si la
+        # promesa de «cuatro puntos de mano son más estables que la muñeca
+        # sola» se cumple de verdad o si el centroide colapsa casi siempre a la
+        # muñeca, en cuyo caso esa afirmación no se puede defender.
+        self._puntos_destino[canal] = n_destino
         # Las visibilidades se registran con el nombre del CANAL DEL ROBOT, no
         # con la etiqueta de BlazePose: el CSV tiene que poder leerse sin volver
         # a razonar sobre el espejo.
@@ -936,6 +1078,85 @@ class ArmTracker:
         self._clamps[canal] = recorte
         return recorte.as_tuple
 
+    def comando(
+        self, pose: ArmAngles | None, timestamp: float | None = None
+    ) -> ArmAngles:
+        """Convierte la ESTIMACION en el COMANDO que se publica.
+
+        Están separadas a propósito, y la distinción va a la tesis: ``process``
+        devuelve lo que se pudo **medir** —con ``None`` donde no se pudo—, y
+        esto devuelve lo que se le **manda** al robot, que nunca tiene huecos.
+        Mezclarlas haría que el CSV no pudiera distinguir «el brazo estaba
+        aquí» de «el brazo no se veía y el comando venía de otra parte», que es
+        exactamente la ambigüedad del H26.
+
+        Tres reglas, en orden:
+
+        1. **Si el brazo se estimó**, el objetivo es lo estimado.
+        2. **Si no, y lleva menos de ``gracia_s`` sin estimarse**, se mantiene el
+           último objetivo. Es lo que evita que un parpadeo de visibilidad
+           —frecuentísimo con la mano en el borde del cuadro— tire los brazos al
+           suelo a mitad de gesto.
+        3. **Si no, el objetivo es la pose de reposo.** Perder el seguimiento no
+           debe dejar el brazo clavado donde estaba: el robot se queda con un
+           gesto que ya nadie sostiene, y a un espectador le parece un cuelgue.
+
+        Y sobre las tres, un **límite de velocidad angular** por canal. Es lo
+        que hace que las transiciones se vean como un movimiento y no como un
+        teletransporte, y protege de la discontinuidad que el One Euro no puede
+        filtrar: tras un hueco largo su ``dt`` es grande, su factor de suavizado
+        se va a 1 y la primera muestra de vuelta pasa entera. Ver
+        ``filters.SlewLimiter``, que documenta el precio en latencia.
+
+        Ojo a una consecuencia del H30: el reposo del robot **no es su cero**.
+        Su cero son los brazos en cruz, así que la pose de reposo por defecto
+        es −55° de abducción —lo más bajo que llega su mecanismo—, no 0.
+        """
+        ahora = self._clock() if timestamp is None else float(timestamp)
+        salida = ArmAngles()
+        for canal in (Side.L, Side.R):
+            campo_abd, campo_flex = CANALES[canal]
+            medido_abd = getattr(pose, campo_abd) if pose is not None else None
+            medido_flex = getattr(pose, campo_flex) if pose is not None else None
+
+            if medido_abd is not None and medido_flex is not None:
+                objetivo = (medido_abd, medido_flex)
+                self._t_estimado[canal] = ahora
+            else:
+                ultimo = self._t_estimado.get(canal)
+                en_gracia = ultimo is not None and ahora - ultimo <= self.gracia_s
+                # En gracia se conserva el OBJETIVO, no la salida actual: así el
+                # brazo termina el movimiento que llevaba en vez de congelarse
+                # donde le pilló el hueco.
+                objetivo = self._objetivo[canal] if en_gracia else self._reposo[canal]
+
+            self._objetivo[canal] = objetivo
+            limitador_abd, limitador_flex = self._limitadores[canal]
+            setattr(salida, campo_abd, limitador_abd(objetivo[0], ahora))
+            setattr(salida, campo_flex, limitador_flex(objetivo[1], ahora))
+        return salida
+
+    @property
+    def estimado(self) -> dict[Side, bool]:
+        """Si cada canal se estimó en el último ``process``.
+
+        Es lo que distingue en el CSV un ángulo medido de uno que viene de la
+        gracia o de la rampa al reposo. Sin esta columna, el analizador
+        calcularía el temblor sobre tramos de rampa y daría una cifra que no
+        es del estimador.
+        """
+        return dict(self._estimado)
+
+    @property
+    def objetivos(self) -> dict[Side, tuple[float, float]]:
+        """Objetivo vigente de cada canal, antes del límite de velocidad."""
+        return dict(self._objetivo)
+
+    @property
+    def reposo(self) -> dict[Side, tuple[float, float]]:
+        """Pose de reposo por canal, ya recortada a lo que el robot admite."""
+        return dict(self._reposo)
+
     def close(self) -> None:
         self._pose.close()
 
@@ -1017,7 +1238,18 @@ def _demo(argv: list[str] | None = None) -> int:
         "  El arm tracker necesita HOMBROS y MANOS en cuadro, y a ser posible\n"
         "  tambien las caderas: de ellas sale la vertical del tronco. Si no se\n"
         "  ven, se usa la vertical de imagen como reserva, que asume que estas\n"
-        "  sentado y erguido. El HUD dice cual de las dos esta activa.\n\n"
+        "  sentado y erguido. El HUD dice cual de las tres esta activa:\n"
+        "  'caderas' (vistas ahora), 'retenido Xs' (de hace un momento) o\n"
+        "  'RESERVA vertical'.\n\n"
+        "  MediaPipe solo dibuja los landmarks que pasan de 0.5, el mismo umbral\n"
+        "  que usa el tracker. Asi que si no ves el esqueleto del brazo pintado,\n"
+        "  el tracker tampoco lo esta usando.\n\n"
+        "CUANDO SE PIERDE UN BRAZO\n"
+        "  El canal no se congela: mantiene el ultimo objetivo medio segundo\n"
+        "  —para absorber parpadeos— y luego vuelve al reposo por una rampa. El\n"
+        "  HUD marca con '~' los canales cuyo valor NO viene de una medida de\n"
+        "  este frame. Ojo: el reposo del robot no es su cero, son los brazos en\n"
+        "  cruz; el reposo por defecto es -55 de abduccion (H30).\n\n"
         "VERIFICAR EL SENTIDO DE CADA CANAL (esto es lo importante)\n"
         "  Lanza con --publish y mira el visor. Mueve UN SOLO brazo cada vez y\n"
         "  comprueba las cuatro afirmaciones:\n"
@@ -1058,6 +1290,10 @@ def _demo(argv: list[str] | None = None) -> int:
         beta=cfg.arm.beta,
         min_visibility=cfg.arm.min_visibility,
         model_complexity=cfg.arm.model_complexity,
+        reposo_abduccion=cfg.arm.reposo_abduccion,
+        reposo_flexion=cfg.arm.reposo_flexion,
+        gracia_s=cfg.arm.gracia_s,
+        velocidad_max=cfg.arm.velocidad_max,
     )
 
     # Import perezoso a propósito: el módulo tiene que poder usarse sin
@@ -1092,15 +1328,24 @@ def _demo(argv: list[str] | None = None) -> int:
         # columnas crudo_* y vis_*. Es deliberado: el CSV tiene que poder leerse
         # sin volver a razonar sobre el espejo, y la columna 'espejo' deja
         # constancia de con qué política se grabó.
+        #
+        # Y una distinción que hay que respetar al leerlo: 'crudo_*' es lo
+        # MEDIDO y 'arm*' es lo PUBLICADO. No siempre coinciden: cuando un
+        # brazo no se ve, 'crudo_*' queda vacío y 'arm*' sigue teniendo valor,
+        # porque el comando vuelve al reposo por una rampa. 'estimado_*' dice
+        # cuál de los dos casos es cada fila, y sin esa columna el temblor se
+        # calcularía sobre tramos de rampa.
         escritor.writerow(
             [
                 "t", "etiqueta", "target", "espejo", "frame_espejado",
                 "crudo_abd_L", "crudo_flex_L", "crudo_abd_R", "crudo_flex_R",
                 "armL", "armLtw", "armR", "armRtw",
+                "estimado_L", "estimado_R",
                 "recortado_L", "recortado_R",
                 "vis_hombro_L", "vis_destino_L", "vis_codo_L",
                 "vis_hombro_R", "vis_destino_R", "vis_codo_R",
-                "vis_cadera", "tronco_caderas",
+                "puntos_destino_L", "puntos_destino_R",
+                "vis_cadera", "tronco_caderas", "tronco_origen",
                 "gain_abduccion", "gain_aduccion",
                 "gain_flexion", "gain_extension",
                 "ancho", "alto",
@@ -1130,6 +1375,12 @@ def _demo(argv: list[str] | None = None) -> int:
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pose = tracker.process(rgb)
+            # La estimación puede tener huecos; el comando no. Lo que se
+            # publica, se graba y se muestra es el COMANDO, y la columna
+            # 'estimado_*' dice si venía de una medida o de la rampa.
+            mando = tracker.comando(pose)
+            estimado = tracker.estimado
+            puntos_destino = tracker.puntos_destino
 
             if tracker.landmarks_imagen is not None:
                 dibujo.draw_landmarks(frame, tracker.landmarks_imagen, conexiones)
@@ -1138,21 +1389,23 @@ def _demo(argv: list[str] | None = None) -> int:
             recortes = tracker.last_clamp
             for fila, canal in enumerate((Side.L, Side.R)):
                 campo_abd, campo_flex = CANALES[canal]
-                valor_abd = getattr(pose, campo_abd) if pose is not None else None
-                valor_flex = getattr(pose, campo_flex) if pose is not None else None
+                valor_abd = getattr(mando, campo_abd)
+                valor_flex = getattr(mando, campo_flex)
+                vivo = estimado.get(canal, False)
                 recorte = recortes.get(canal)
-                if recorte is not None and recorte.clamped:
+                if recorte is not None and recorte.clamped and vivo:
                     color = (0, 0, 255)
-                elif valor_abd is not None:
+                elif vivo:
                     color = (0, 255, 0)
                 else:
                     color = (120, 120, 120)
+                marca = " " if vivo else "~"
                 texto_abd = "  --  " if valor_abd is None else f"{valor_abd:+7.2f}"
                 texto_flex = "  --  " if valor_flex is None else f"{valor_flex:+7.2f}"
                 y = 30 + fila * 52
                 cv2.putText(
                     frame,
-                    f"{campo_abd:5s} abd {texto_abd}   flex {texto_flex}",
+                    f"{campo_abd:5s}{marca}abd {texto_abd}   flex {texto_flex}",
                     (10, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.62, color, 2,
                 )
@@ -1188,14 +1441,24 @@ def _demo(argv: list[str] | None = None) -> int:
             )
 
             vis = tracker.visibilidades
-            origen = "caderas" if tracker.tronco_de_caderas else "RESERVA vertical"
+            # Tres estados y no dos, y el del medio es el que faltaba: una
+            # vertical retenida NO es una vertical observada. Decir 'caderas'
+            # con la visibilidad de cadera a 0.00 era el HUD mintiendo.
+            origen_tronco = tracker.origen_tronco
+            edad = tracker.edad_tronco_s
+            if origen_tronco == "caderas":
+                texto_tronco, color_tronco = "caderas", (180, 255, 180)
+            elif origen_tronco == "retenido":
+                texto_tronco = f"retenido {edad:.1f}s" if edad is not None else "retenido"
+                color_tronco = (0, 255, 255)
+            else:
+                texto_tronco, color_tronco = "RESERVA vertical", (0, 165, 255)
             cv2.putText(
                 frame,
-                f"tronco: {origen}   cadera {vis.get('cadera', 0.0):.2f}   "
+                f"tronco: {texto_tronco}   cadera {vis.get('cadera', 0.0):.2f}   "
                 f"codo L {vis.get('codo_L', 0.0):.2f} R {vis.get('codo_R', 0.0):.2f}",
                 (10, ALTO_TEXTO),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                (180, 255, 180) if tracker.tronco_de_caderas else (0, 165, 255), 1,
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, color_tronco, 1,
             )
 
             sugeridas = tracker.suggested_gains()
@@ -1222,18 +1485,23 @@ def _demo(argv: list[str] | None = None) -> int:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2,
                 )
 
-            if publicador is not None and pose is not None:
+            # Se publica SIEMPRE, también sin pose: es lo que hace que los
+            # brazos vuelvan al reposo en vez de quedarse clavados cuando el
+            # operador sale de cuadro.
+            if publicador is not None:
                 publicador.publish(
-                    armL=pose.armL, armLtw=pose.armLtw,
-                    armR=pose.armR, armRtw=pose.armRtw,
+                    armL=mando.armL, armLtw=mando.armLtw,
+                    armR=mando.armR, armRtw=mando.armRtw,
                 )
 
-            if escritor is not None and pose is not None:
+            if escritor is not None:
                 nada = (float("nan"), float("nan"))
                 cl = crudos.get(Side.L, nada)
                 cr = crudos.get(Side.R, nada)
                 rl = recortes.get(Side.L)
                 rr = recortes.get(Side.R)
+                vivo_l = estimado.get(Side.L, False)
+                vivo_r = estimado.get(Side.R, False)
 
                 def _f(valor: float | None) -> str:
                     return "" if valor is None else f"{valor:.4f}"
@@ -1245,8 +1513,9 @@ def _demo(argv: list[str] | None = None) -> int:
                         int(tracker.frame_espejado),
                         f"{cl[0]:.4f}", f"{cl[1]:.4f}",
                         f"{cr[0]:.4f}", f"{cr[1]:.4f}",
-                        _f(pose.armL), _f(pose.armLtw),
-                        _f(pose.armR), _f(pose.armRtw),
+                        _f(mando.armL), _f(mando.armLtw),
+                        _f(mando.armR), _f(mando.armRtw),
+                        int(vivo_l), int(vivo_r),
                         int(bool(rl and rl.clamped)), int(bool(rr and rr.clamped)),
                         f"{vis.get('hombro_L', float('nan')):.3f}",
                         f"{vis.get('destino_L', float('nan')):.3f}",
@@ -1254,8 +1523,10 @@ def _demo(argv: list[str] | None = None) -> int:
                         f"{vis.get('hombro_R', float('nan')):.3f}",
                         f"{vis.get('destino_R', float('nan')):.3f}",
                         f"{vis.get('codo_R', float('nan')):.3f}",
+                        puntos_destino.get(Side.L, ""),
+                        puntos_destino.get(Side.R, ""),
                         f"{vis.get('cadera', float('nan')):.3f}",
-                        int(tracker.tronco_de_caderas),
+                        int(tracker.tronco_de_caderas), origen_tronco,
                         f"{tracker.gain_abduccion:.2f}",
                         f"{tracker.gain_aduccion:.2f}",
                         f"{tracker.gain_flexion:.2f}",

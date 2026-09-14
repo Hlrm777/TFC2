@@ -35,7 +35,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Hashable
 
-__all__ = ["OneEuroFilter", "EMAFilter", "ClassHysteresis"]
+__all__ = ["OneEuroFilter", "EMAFilter", "SlewLimiter", "ClassHysteresis"]
 
 #: Reloj por defecto. perf_counter y NO monotonic: ver la nota del módulo.
 _DEFAULT_CLOCK = time.perf_counter
@@ -240,6 +240,125 @@ class EMAFilter:
             self._y = value
         else:
             self._y += self.alpha * (value - self._y)
+        return self._y
+
+
+class SlewLimiter:
+    """Limita la velocidad de cambio de una señal, en unidades por segundo.
+
+    No es un filtro de ruido y no sustituye al One Euro: no toca las muestras
+    que cambian despacio. Lo que hace es **acotar el salto** entre dos muestras
+    consecutivas, y por eso resuelve cosas que un pasabajos no resuelve:
+
+    - **Discontinuidades de la propia estimación.** Cuando un brazo sale de
+      cuadro y vuelve, el One Euro no protege: adapta su corte al ``dt``, y tras
+      un hueco largo el ``dt`` es grande, el factor de suavizado se va a 1 y la
+      primera muestra pasa **tal cual**. El robot da un salto. Aquí no.
+    - **Vuelta a una pose de reposo.** Perder el seguimiento no debería dejar el
+      brazo clavado a mitad de gesto, pero llevarlo al reposo de golpe es peor.
+      Con el objetivo puesto en el reposo, el límite convierte el salto en una
+      rampa de duración conocida: ``salto / max_rate``.
+    - **Cambios de convenio en caliente.** Invertir un signo desde el teclado
+      mueve el objetivo 2x; el límite lo hace una rampa en vez de un latigazo.
+
+    El precio, y hay que declararlo porque el proyecto mide la latencia: un
+    salto de ``d`` unidades tarda ``d / max_rate`` segundos en completarse. Por
+    encima de ``max_rate`` la señal va con retardo. Se elige ``max_rate``
+    **por encima de la velocidad del gesto que se quiere reproducir**, de modo
+    que el límite solo actúe en las discontinuidades, que es para lo que está.
+
+    Un servo real tiene su propia velocidad máxima, así que limitar el comando
+    no es solo estético: acerca el comando a lo que el actuador puede seguir.
+
+    Args:
+        max_rate: velocidad máxima, en unidades por segundo. Positiva.
+    """
+
+    def __init__(
+        self,
+        max_rate: float,
+        *,
+        clock: Callable[[], float] = _DEFAULT_CLOCK,
+    ) -> None:
+        if not max_rate > 0.0:
+            raise ValueError(f"max_rate debe ser positivo, se recibió {max_rate!r}")
+        self.max_rate = float(max_rate)
+        self._clock = clock
+        self._y: float | None = None
+        self._t_prev: float | None = None
+        self._last_dt: float | None = None
+        self._degenerate_dt = 0
+
+    @property
+    def initialized(self) -> bool:
+        return self._y is not None
+
+    @property
+    def value(self) -> float | None:
+        """Salida actual, sin consumir una muestra."""
+        return self._y
+
+    @property
+    def degenerate_dt_count(self) -> int:
+        """``dt`` no positivos que hubo que sustituir. Ver ``OneEuroFilter``."""
+        return self._degenerate_dt
+
+    def reset(self, value: float | None = None) -> None:
+        """Olvida el estado, o lo fija en ``value`` sin rampa.
+
+        Fijarlo es lo que se quiere al arrancar: la primera salida es el reposo,
+        y a partir de ahí todo movimiento está limitado. Si se dejara sin
+        inicializar, la primera muestra pasaría entera y el arranque sería
+        justamente el salto que esta clase existe para evitar.
+        """
+        if value is not None:
+            value = float(value)
+            if not math.isfinite(value):
+                raise ValueError(f"el valor no es finito: {value!r}")
+        self._y = value
+        self._t_prev = None
+        self._last_dt = None
+
+    def __call__(self, target: float, timestamp: float | None = None) -> float:
+        """Avanza hacia ``target`` lo que el límite permita, y devuelve dónde
+        se quedó.
+
+        Raises:
+            ValueError: si ``target`` no es finito. Igual que en el One Euro: un
+                NaN contaminaría el estado de forma permanente.
+        """
+        target = float(target)
+        if not math.isfinite(target):
+            raise ValueError(f"el objetivo no es finito: {target!r}")
+
+        now = self._clock() if timestamp is None else float(timestamp)
+
+        if self._y is None:
+            self._y = target
+            self._t_prev = now
+            return target
+
+        if self._t_prev is None:
+            # Estado fijado con reset(value): hay salida pero no instante. La
+            # primera muestra ya se limita, con el dt de reserva.
+            dt = _FALLBACK_DT
+        else:
+            dt = now - self._t_prev
+            if dt <= 0.0:
+                self._degenerate_dt += 1
+                dt = self._last_dt if self._last_dt is not None else _FALLBACK_DT
+            else:
+                self._last_dt = dt
+
+        maximo = self.max_rate * dt
+        delta = target - self._y
+        if delta > maximo:
+            delta = maximo
+        elif delta < -maximo:
+            delta = -maximo
+
+        self._y += delta
+        self._t_prev = now
         return self._y
 
 

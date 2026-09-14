@@ -107,6 +107,7 @@ def cargar(ruta: Path) -> list[dict]:
     numericas += list(COLUMNAS_VISIBILIDAD)
     numericas += [
         "gain_abduccion", "gain_aduccion", "gain_flexion", "gain_extension",
+        "puntos_destino_L", "puntos_destino_R",
     ]
 
     for fila in filas:
@@ -118,18 +119,42 @@ def cargar(ruta: Path) -> list[dict]:
                 fila[clave] = int(fila.get(clave, 0))
             except (TypeError, ValueError):
                 fila[clave] = 0
+        # Estas por separado, con default 1: una grabación anterior a que
+        # existiera la etapa de salida no tiene la columna, y sus filas SI eran
+        # todas estimadas. Con default 0 se filtrarían todas y el informe
+        # saldría vacío sin decir por qué.
+        for clave in ("estimado_L", "estimado_R"):
+            try:
+                fila[clave] = int(fila.get(clave, 1))
+            except (TypeError, ValueError):
+                fila[clave] = 1
     return filas
 
 
-def _validos(filas: list[dict], clave: str) -> tuple[list[float], list[float]]:
+def _columna_estimado(clave_salida: str) -> str:
+    """Columna ``estimado_*`` que corresponde a un canal publicado."""
+    return "estimado_R" if clave_salida.startswith("armR") else "estimado_L"
+
+
+def _validos(
+    filas: list[dict], clave: str, solo_si: str | None = None
+) -> tuple[list[float], list[float]]:
     """Valores no NaN de una columna, con sus tiempos.
 
-    Hay que filtrar: un brazo fuera de cuadro deja su canal vacío ese frame, y
-    meter esos huecos en la desviación típica la contamina con el hueco en vez
-    de con el temblor.
+    Hay que filtrar: un brazo fuera de cuadro deja su canal crudo vacío ese
+    frame, y meter esos huecos en la desviación típica la contamina con el hueco
+    en vez de con el temblor.
+
+    ``solo_si`` restringe a las filas en que esa columna valga 1. Es
+    imprescindible para las columnas publicadas: cuando el brazo no se ve, el
+    comando sigue teniendo valor —vuelve al reposo por una rampa— y medir el
+    temblor sobre la rampa daría una cifra del limitador de velocidad, no del
+    estimador. Que es justo la clase de número que no se puede citar.
     """
     valores, tiempos = [], []
     for fila in filas:
+        if solo_si is not None and not fila.get(solo_si, 1):
+            continue
         valor = fila[clave]
         if valor == valor:  # descarta NaN
             valores.append(valor)
@@ -157,7 +182,9 @@ def resumen_bloque(nombre: str, filas: list[dict]) -> None:
         if len(crudos) < 10:
             print(f"    {rotulo}  sin muestras suficientes")
             continue
-        salidas, tiempos_salida = _validos(filas, clave_salida)
+        salidas, tiempos_salida = _validos(
+            filas, clave_salida, solo_si=_columna_estimado(clave_salida)
+        )
 
         temblor_crudo = temblor(crudos, tiempos)
         temblor_salida = temblor(salidas, tiempos_salida)
@@ -230,17 +257,48 @@ def resumen_visibilidad(filas: list[dict]) -> None:
             f"{statistics.median(valores):.3f}{aviso}"
         )
 
+    # ¿Se cumple la promesa de los cuatro puntos de mano, o el centroide
+    # colapsa a la muñeca? Es una afirmación del plan, y conviene medirla en
+    # vez de repetirla.
+    for lado in ("L", "R"):
+        valores, _ = _validos(filas, f"puntos_destino_{lado}")
+        if valores:
+            media = statistics.mean(valores)
+            cuantos_cuatro = 100 * sum(1 for v in valores if v >= 4) / len(valores)
+            print(
+                f"\n  Punto de destino {lado}: {media:.2f} landmarks de media"
+                f"   con los 4 en el {cuantos_cuatro:.1f} % de los frames"
+            )
+            if media < 1.5:
+                print(
+                    "  AVISO: el centroide colapsa casi siempre a la muneca, asi que\n"
+                    "  'cuatro puntos son mas estables que uno' NO se sostiene aqui."
+                )
+
+    # Tres estados, porque una vertical RETENIDA no es una vertical observada.
+    # La columna 'tronco_caderas' solo cuenta los frames en que las caderas se
+    # vieron de verdad; 'tronco_origen' desglosa el resto.
     de_caderas = sum(f["tronco_caderas"] for f in filas)
     fraccion = 100 * de_caderas / len(filas)
     print(
-        f"\n  Vertical del tronco tomada de las caderas en el {fraccion:.1f} % de "
-        f"los frames."
+        f"\n  Vertical del tronco OBSERVADA en las caderas en el {fraccion:.1f} % "
+        f"de los frames."
     )
+    origenes = defaultdict(int)
+    for fila in filas:
+        origenes[fila.get("tronco_origen", "?")] += 1
+    if set(origenes) - {"?"}:
+        desglose = "  ".join(
+            f"{nombre} {100 * n / len(filas):.1f} %"
+            for nombre, n in sorted(origenes.items(), key=lambda kv: -kv[1])
+        )
+        print(f"  Desglose: {desglose}")
     if fraccion < 90:
         print(
-            "  AVISO: el resto se resolvio con la vertical de imagen, que asume\n"
-            "  al operador sentado y erguido. Hay que declararlo, o reencuadrar\n"
-            "  la camara para que las caderas entren."
+            "  AVISO: el resto se resolvio con una vertical retenida de un frame\n"
+            "  anterior o con la vertical de imagen, que asume al operador sentado\n"
+            "  y erguido. Hay que declararlo, o reencuadrar la camara para que las\n"
+            "  caderas entren."
         )
     print()
 

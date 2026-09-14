@@ -54,6 +54,30 @@ que este documento daba por buena desde el principio:
   adelante» **no es una propiedad del signo** sino que se invierte con la
   abducción. Obligó a reparametrizar el estimador entero.
 
+**La sesión del 2026-09-13 arranca el P5.2** y, antes de grabar nada, el propio
+HUD delató un fallo del instrumento:
+
+- **H31** — el HUD afirmaba «vertical del tronco tomada de las caderas» con la
+  visibilidad de cadera a **0.00**. La bandera se **enclavaba** en el primer
+  frame bueno y no volvía a bajar, así que el HUD y la columna del CSV
+  declaraban como observado un valor congelado de minutos antes. Medido: las
+  caderas se vieron en el **9.8 %** de los frames y el instrumento declaró
+  haberlas usado en el **86.5 %**.
+- **H32** — la visibilidad de la mano se medía con el **mínimo de cuatro**
+  landmarks y la del codo con **uno solo**, así que la comparación
+  mano-frente-a-codo —la decisión que esa medición existe para resolver—
+  estaba sesgada por el propio agregador. **Reabre la elección del punto de
+  destino**: medido, el codo se ve *más* que la mano, al revés de lo previsto.
+- **H33** — **las ganancias sí hacen falta, y solo en abducción.** El recorrido
+  del hombro humano desborda el del robot y el recorte actuó en el 67-75 % de
+  los frames. Es consecuencia del H30. En flexión el operador y el robot
+  coinciden.
+
+Los dos primeros son **fallos del instrumento, no del robot**, y los dos se
+detectaron antes de grabar nada citable. Se añade además una decisión de diseño
+que pidió el operador: **separar la estimación del comando**, para que perder un
+brazo de cuadro no lo deje clavado a mitad de gesto. Ver el P5.
+
 Cómo leerlo:
 
 - **Partes 0 a 5** — el plan propiamente dicho, con los hallazgos ya integrados
@@ -85,7 +109,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**550 pruebas en verde.** Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**581 pruebas en verde.** Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -126,7 +150,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── __init__.py
 │   ├── config.py             ✅ broker, topics, tasas, rutas · solo stdlib
 │   ├── limits.py             ✅ límites articulares + clamp 2D · solo stdlib
-│   ├── filters.py            ✅ One Euro, EMA, histéresis · solo stdlib
+│   ├── filters.py            ✅ One Euro, EMA, límite de vel., histéresis · stdlib
 │   ├── publisher.py          ✅ MQTT, JSON único, QoS 0
 │   ├── head_tracker.py       ✅ Face Mesh + solvePnP
 │   ├── arm_tracker.py        🟡 BlazePose · signos verificados · falta medir
@@ -337,7 +361,8 @@ excepción para los eventos discretos. `tools/mqtt_monitor.py`,
 ## PROMPT 3 — ✅ HECHO
 
 `filters.py`: `OneEuroFilter` (Casiez, Roussel & Vogel, CHI 2012), `EMAFilter`
-como línea base, `ClassHysteresis`. Medido sobre escalón con ruido a 100 Hz:
+como línea base, `SlewLimiter` para las discontinuidades del comando y
+`ClassHysteresis`. Medido sobre escalón con ruido a 100 Hz:
 
 | Filtro | Reducción de ruido | Retardo al 90 % |
 |---|---|---|
@@ -683,13 +708,20 @@ sagital, no una torsión, y que el robot no tiene ningún GDL de rotación axial
 Nomenclatura corregida en `limits.py`, `arm_tracker.py`, las pruebas y los
 rótulos del visor; el contrato MQTT intacto. Ver §0.5 y §7.12.
 
-**2. El brazo se apunta con la MANO, no con el codo.** Decisión del operador y
-es la buena: el brazo del robot es un eslabón rígido sin codo, así que lo que
-hay que conservar es hacia dónde apunta el brazo entero; y sentado a la mesa con
-la integrada a 640x480, el codo se sale de cuadro mucho antes que la mano. Se
-usa el **centroide de los cuatro landmarks de mano** que BlazePose ya entrega
-(muñeca, meñique, índice y pulgar), que es gratis y más estable que la muñeca
-sola. `target="codo"` queda conmutable con una tecla para poder comparar los dos
+**2. El brazo se apunta con la MANO, no con el codo.** ⚠️ **El segundo argumento
+de esta decisión resultó falso el 2026-09-13** (ver P5.2): medido sobre 13.271
+frames, el **codo se ve más que la mano**, no menos. El primer argumento sigue
+en pie y es el que importa —el brazo del robot es un eslabón rígido sin codo,
+así que lo que hay que conservar es hacia dónde apunta el brazo entero—, pero la
+elección vuelve a depender de la medición mano-frente-a-codo, que está
+pendiente. Lo que se escribió aquí era: que sentado a la mesa con la integrada a
+640x480 el codo se sale de cuadro antes que la mano. No es así.
+
+Se usa el **centroide de los landmarks de mano** que BlazePose ya entrega
+(muñeca, meñique, índice y pulgar), que es gratis y en principio más estable que
+la muñeca sola — con la **muñeca como puerta de visibilidad**, corregido el
+2026-09-13: gatear con el mínimo de los cuatro sesgaba la comparación contra la
+mano. `target="codo"` queda conmutable con una tecla para poder comparar los dos
 con datos, como `mesh`/`pnp` en el P4.
 
 *(Y una corrección a lo que yo mismo escribí al planificar: hombro→muñeca **no**
@@ -702,10 +734,15 @@ hacia **atrás**. `ARM_INVERT_FLEXION` viene activado para compensarlo, y el
 comentario del visor queda marcado como en revisión. **No se ha tocado ningún
 eje ni ningún valor del rig.** Ver §7.12.
 
-**4. Ganancias implementadas y a 1.0.** Cuatro, una por sentido. No hay motivo
-conocido para que hagan falta —el problema del P4, perder de vista el monitor,
-no se replica en los brazos— pero la infraestructura está, y el analizador las
-propone. Que se queden en 1.0 también es un resultado.
+**4. Ganancias implementadas y a 1.0.** Cuatro, una por sentido, y el analizador
+las propone.
+
+⚠️ **Aquí decía «no hay motivo conocido para que hagan falta». Lo hay, y se
+midió el 2026-09-13**: en **abducción sí hacen falta** (~0.33/0.51 provisional),
+porque el recorrido del hombro humano desborda por completo el del robot —
+consecuencia del **H30**, cuyo cero está en la horizontal, así que solo tiene
+−55…+32 de recorrido. En **flexión no** (1.04/1.06): ahí el operador y el robot
+coinciden. El valor definitivo sale de la sesión con protocolo.
 
 ### P5.1 — Verificación en el visor ✅ **cerrada el 2026-09-07**
 
@@ -731,13 +768,161 @@ Las dos banderas de inversión quedan en `False`: el estimador reproduce la
 cinemática inversa exacta del cardán, así que lo que sale de él ya son los
 valores articulares del robot.
 
-### P5.2 — Sesión con cámara ⬜ **lo que falta, y necesita al operador**
+### Lo hecho el 2026-09-13 — la etapa de salida, y el tronco que mentía
+
+Dos cosas, las dos salidas del primer arranque de la sesión P5.2 y ninguna
+prevista en el plan.
+
+**1. El HUD mentía sobre la vertical del tronco (H31).** Decía «tronco:
+caderas» con `cadera 0.00` en la misma línea. La bandera `_tronco_de_caderas`
+se ponía en `True` el primer frame en que las caderas superaban el umbral y
+**no volvía a bajar nunca**; lo único que la reiniciaba era no haber tenido
+nunca una vertical buena. Consecuencias:
+
+- El HUD declaraba observado lo que era un valor **congelado** de un momento
+  indeterminado.
+- La columna `tronco_caderas` del CSV escribía `1` para siempre, así que el
+  analizador habría reportado «la vertical salió de las caderas en el 100 % de
+  los frames» sobre una grabación en la que no se vieron jamás. Una cifra falsa,
+  citable, y sin nada que la delatara.
+
+Arreglado con **tres estados** —`caderas` (vista en este frame), `retenido Xs`
+(derivada de las caderas hace poco) y `RESERVA vertical`— y una **caducidad**
+de 2 s (`RETENCION_TRONCO_S`). Pasado el plazo se olvida la vertical y se cae a
+la reserva: **una vertical retenida un minuto es peor que la reserva**, porque
+la reserva es un supuesto declarado —operador sentado y erguido— y la retenida
+es un supuesto invisible. El CSV gana la columna `tronco_origen` y el analizador
+imprime el desglose de los tres.
+
+**2. Estimación y comando pasan a ser cosas distintas.** Lo pidió el operador:
+al perder los brazos de cuadro el robot se quedaba **clavado a mitad de gesto**,
+porque el canal se omitía del JSON y el visor conserva el último valor. Y al
+recuperarlo, **saltaba**: el One Euro adapta su corte al `dt`, así que tras un
+hueco largo su factor de suavizado se va a 1 y la primera muestra de vuelta pasa
+entera.
+
+Ahora `process()` devuelve **lo medido**, con `None` donde no se pudo medir, y
+`comando()` devuelve **lo que se le manda al robot**, que nunca tiene huecos.
+Tres reglas y un límite:
+
+| | Regla |
+|---|---|
+| 1 | Si el brazo se estimó, el objetivo es lo estimado |
+| 2 | Si no, y lleva menos de `gracia_s` (0.5 s), se mantiene el último objetivo — absorbe los parpadeos de visibilidad, que son la mayoría |
+| 3 | Si no, el objetivo es la **pose de reposo** |
+| + | Sobre las tres, un **límite de velocidad angular** de 180 °/s por canal (`filters.SlewLimiter`) |
+
+**El reposo por defecto es −55° de abducción, no 0**, y es consecuencia directa
+del H30: el cero del robot son los brazos en cruz, así que volver al cero sería
+volver a una postura de espantapájaros. −55° es lo más bajo que llega su
+mecanismo. Pasa por `clamp_arm`, así que una configuración descuidada no puede
+pedir una postura imposible.
+
+El límite de velocidad tiene un precio que hay que declarar porque **la latencia
+es una métrica del proyecto**: un salto de `d` grados tarda `d / velocidad_max`
+segundos (los 55° del reposo, ~0.3 s). Se elige **por encima de la velocidad del
+gesto narrado** para que solo actúe en las discontinuidades; por debajo
+introduciría retardo en el gesto normal. Y no es solo estético: un servo real
+tiene su propia velocidad máxima, así que limitar el comando lo acerca a lo que
+el actuador puede seguir.
+
+Efecto lateral que mejora la instrumentación: el CSV gana `estimado_L` /
+`estimado_R`, y el analizador **excluye los tramos de rampa** al calcular el
+temblor. Sin esa columna, la cifra de §3.3.1 habría mezclado el temblor del
+estimador con la pendiente del limitador — un número del filtro disfrazado de
+número del estimador.
+
+**+31 pruebas (581 en total).** 12 del `SlewLimiter` en `test_filters.py`, y en
+`test_arm_tracker.py` dos grupos nuevos: la etapa de salida (incluidas
+`test_el_reposo_no_es_el_cero_del_robot`, que fija el H30, y
+`test_un_parpadeo_de_visibilidad_no_tira_el_brazo`) y los tres estados del
+tronco con su caducidad.
+
+De paso se retiró `SENTIDO_FLEXION_VISOR` de las pruebas: era la conclusión del
+H29 retractado, ya no se usaba y su comentario afirmaba algo falso. `pyflakes`
+no avisa de constantes de módulo sin usar, así que había sobrevivido.
+
+### P5.2 — Sesión con cámara 🟡 **arrancada el 2026-09-13, falta el operador**
 
 ```
 & "C:\Program Files\mosquitto\mosquitto.exe" -c mosquitto.conf -v
 python -m http.server 8000 --directory telmeow_viewer
 python -m telmeow_teleop.arm_tracker --publish --record brazos.csv
 ```
+
+#### Lo que se sacó de `brazos_2026-09-13_descartada.csv`
+
+**La grabación queda descartada como medición** y su nombre lo dice: 13.271
+frames (563 s, 23.6 fps) en **una sola etiqueta**, solo con `target="mano"`, con
+los signos aún sin verificar y con el tronco mintiendo (H31). No sirve para
+ninguna de las cifras que la tesis necesita — el temblor sobre 563 s de
+movimiento continuo mide el movimiento, no el temblor (H24), y sin una segunda
+etiqueta con `codo` no hay comparación. Se **conserva** porque es la evidencia
+del H31 y porque las columnas `crudo_*` y `vis_*` sí son medida honesta.
+
+Tres cosas que sí quedan establecidas:
+
+**1. El H31, demostrado con números en la propia grabación.** Las dos columnas
+se contradicen de frente:
+
+| Columna | Valor |
+|---|---|
+| `vis_cadera` por encima de 0.5 | **9.8 %** de los frames (mediana **0.03**) |
+| `tronco_caderas` = 1 | **86.5 %** de los frames |
+
+Las caderas se vieron en uno de cada diez frames y el instrumento declaró
+haberlas usado en nueve de cada diez. Es la bandera enclavada, medida.
+Consecuencia real para el P5.2: **la vertical del tronco va a salir de la
+reserva buena parte del tiempo**, y eso hay que declararlo en la tesis —
+sentado a la mesa, las caderas simplemente no entran en cuadro.
+
+**2. El codo se ve MÁS que la mano, al contrario de lo previsto** — y parte de
+la diferencia era un sesgo del instrumento:
+
+| Landmark | Por encima de 0.5 | Mediana |
+|---|---|---|
+| hombros | 100 % | 1.00 |
+| **codo** izq / der | **89.3 % / 91.8 %** | 0.88 / 0.93 |
+| **destino (mano)** izq / der | **47.5 % / 44.5 %** | 0.39 / 0.38 |
+
+El argumento del operador para hombro→mano era que el codo quedaría oculto y la
+mano visible. **Con estos datos es al revés.** Pero la comparación no era
+limpia: `vis_destino` era el **mínimo de los cuatro** landmarks de mano mientras
+el codo se medía con **uno solo**, y BlazePose estima los dedos con bastante
+menos confianza que la muñeca incluso con la mano a la vista. O sea que el
+agregador sesgaba justo la decisión que la medición tenía que resolver.
+
+**Corregido**: la puerta de `target="mano"` es ahora la **muñeca** —un landmark,
+igual que el codo— y el centroide promedia los dedos que superen el umbral. El
+CSV gana `puntos_destino_L`/`_R` con cuántos landmarks formaron el punto, para
+poder comprobar si «cuatro puntos son más estables que uno» se sostiene o si el
+centroide colapsa a la muñeca. **La decisión mano-frente-a-codo se reabre** y se
+resuelve con la grabación nueva.
+
+**3. Las ganancias sí hacen falta, y solo en la abducción.** Contra
+`ARM_ABDUCCION_1D` y desde el percentil (H24):
+
+| Sentido | Ganancia sugerida |
+|---|---|
+| abducción | **0.33** |
+| aducción | **0.51** |
+| flexión | 1.04 |
+| extensión | 1.06 |
+
+Y encaja con el resto: `armL` salió **recortado por el tope en el 75 %** de los
+frames y `armR` en el 67 %. El recorrido del operador (±100° y más) desborda el
+del robot (−55…+32), mientras que en flexión coinciden. Contradice lo que este
+documento suponía —«no hay motivo conocido para que las ganancias hagan falta»—
+y el motivo ahora se entiende: es el **H30**. El robot no tiene el recorrido de
+abducción de un hombro humano porque su cero está en la horizontal.
+
+Las cifras de arriba son provisionales, porque salen de una grabación sin
+protocolo; el valor se fija con la sesión buena. Pero la **dirección** está
+clara y no va a cambiar.
+
+Truco de diagnóstico en vivo que conviene recordar: MediaPipe solo dibuja los
+landmarks por encima de 0.5, **el mismo umbral que usa el tracker**. Si el
+esqueleto del brazo no está pintado, el tracker tampoco lo está usando.
 
 1. **Las cuatro afirmaciones con el operador delante.** Separar el brazo
    izquierdo físico → se separa el izquierdo del robot; levantarlo → sube; ídem
@@ -1835,17 +2020,31 @@ cambia.**
 ## `filters.py`
 
 ```python
-from telmeow_teleop.filters import OneEuroFilter, EMAFilter, ClassHysteresis
+from telmeow_teleop.filters import (OneEuroFilter, EMAFilter, SlewLimiter,
+                                    ClassHysteresis)
 
 f = OneEuroFilter(min_cutoff=0.5, beta=0.5)
 f(valor, timestamp)          # timestamp de perf_counter; opcional
 f.degenerate_dt_count        # cuenta los dt <= 0 sustituidos
 f.reset()
 
+s = SlewLimiter(max_rate=180.0)   # grados/s · limita VELOCIDAD, no ruido
+s(objetivo, timestamp) -> float   # avanza lo que el limite permita
+s.reset(valor)               # fija la salida sin rampa (arrancar en reposo)
+s.value ; s.initialized ; s.degenerate_dt_count
+
 h = ClassHysteresis(n_frames=5, min_confidence=0.6, initial="neutral")
 h.update(etiqueta, confianza) -> etiqueta estabilizada
 h.current ; h.window
 ```
+
+⚠️ **`SlewLimiter` no sustituye al One Euro y no filtra ruido**: no toca las
+muestras que cambian despacio. Está para las **discontinuidades**, que son
+justo lo que el One Euro no puede filtrar —tras un hueco largo su `dt` es
+grande, su factor de suavizado se va a 1 y la muestra pasa entera—. Un salto de
+`d` unidades tarda `d / max_rate` segundos, así que `max_rate` se elige **por
+encima de la velocidad del gesto** para que no añada retardo al movimiento
+normal. Lo usa `arm_tracker.comando`.
 
 ## `head_tracker.py`
 
@@ -1900,14 +2099,22 @@ from telmeow_teleop.arm_tracker import (ArmTracker, ArmAngles, arm_angles,
 t = ArmTracker(mirror=True,            # brazo izq. FISICO del operador -> armL
                frame_espejado=True,    # = cfg.camera.flip · hecho, no politica
                target="mano",          # "mano" (por defecto) o "codo"
-               invert_abduccion=False, invert_flexion=False)  # verificado, H30
-t.process(frame_rgb) -> ArmAngles | None      # None = no se detecto pose
+               invert_abduccion=False, invert_flexion=False,  # verificado, H30
+               reposo_abduccion=-55.0, reposo_flexion=0.0,    # NO es el cero
+               gracia_s=0.5, velocidad_max=180.0)             # grados/s
+t.process(frame_rgb) -> ArmAngles | None      # ESTIMACION · None = sin pose
+t.comando(pose, timestamp=None) -> ArmAngles  # COMANDO · nunca tiene huecos
 t.map_to_robot(canal, abduccion, flexion, timestamp=None)  # sin camara: testeable
 t.last_clamp        # {Side: ArmClamp} · lower/upper/fraction/clamped para el HUD
 t.raw_angles        # {Side: (abduccion, flexion)} crudos del operador
 t.raw_extremes ; t.reset_extremes() ; t.suggested_gains()
+t.estimado          # {Side: bool} · si ese canal se MIDIO en el ultimo frame
+t.objetivos         # {Side: (abd, flex)} objetivo vigente, antes del limite
+t.reposo            # {Side: (abd, flex)} ya recortado a lo que el robot admite
 t.visibilidades     # {landmark: score} · el dato que decide mano-vs-codo
-t.tronco_de_caderas # False = se esta usando la vertical de imagen de reserva
+t.origen_tronco     # "caderas" | "retenido" | "reserva"  (H31)
+t.tronco_de_caderas # True solo si se vieron EN ESTE FRAME
+t.edad_tronco_s     # segundos desde la ultima actualizacion de caderas
 t.landmarks_imagen  # para dibujar el esqueleto
 t.frames_sin_pose ; t.degenerate_dt_count
 t.close()           # o usarlo como gestor de contexto
@@ -1919,14 +2126,34 @@ canal_del_robot(etiqueta, frame_espejado=, mirror=) -> Side
 ```
 
 `ArmAngles` lleva `armL`, `armLtw`, `armR`, `armRtw`, cada uno `float | None`,
-más `.as_tuple` y `.vacio`. **Un canal en `None` se omite del JSON y el visor
-conserva su último valor**, que es como se cumple «reutilizar el último valor
-válido» sin mantener estado (P7 punto 12).
+más `.as_tuple` y `.vacio`. En la **estimación** un canal en `None` significa
+«no se pudo medir»; en el **comando** no hay `None` nunca.
 
-Tres cosas que conviene saber antes de tocarlo:
+⚠️ **`process()` y `comando()` no son lo mismo, y la distinción es deliberada.**
+`process()` devuelve lo **medido**, con huecos donde no se pudo medir.
+`comando()` devuelve lo que se le **manda** al robot, sin huecos: mantiene el
+último objetivo `gracia_s` segundos, luego vuelve a la pose de reposo, y todo
+ello con un límite de velocidad angular. **Lo que se publica y lo que se graba
+en las columnas `arm*` es el comando**; `crudo_*` es la medida, y `estimado_*`
+dice cuál de los dos casos es cada fila. Mezclarlas dejaría un CSV en el que no
+se puede distinguir un ángulo medido de una rampa, y el temblor calculado sobre
+él no sería del estimador.
+
+Lo que resuelve, y son dos cosas que se veían en el visor: un brazo perdido ya
+no se queda **clavado a mitad de gesto**, y al recuperarlo ya no **salta** —el
+One Euro no protege de eso, porque tras un hueco largo su `dt` es grande, su
+factor de suavizado se va a 1 y la primera muestra pasa entera—.
+
+Cinco cosas que conviene saber antes de tocarlo:
 
 - **El cero de la abducción es el brazo EN CRUZ**, no colgando (H30). El
-  operador con los brazos caídos pide −90°, que el recorte deja en −55°.
+  operador con los brazos caídos pide −90°, que el recorte deja en −55°. Por eso
+  la pose de reposo por defecto es −55° y **no** 0: volver al cero sería abrir
+  los brazos en cruz cada vez que el operador baja las manos.
+- **`origen_tronco` tiene tres valores, no dos** (H31). `tronco_de_caderas`
+  significa «vistas **en este frame**», y una vertical retenida más de
+  `RETENCION_TRONCO_S` (2 s) caduca y cae a la reserva. Antes la bandera se
+  enclavaba y el HUD declaraba observado un valor congelado.
 - **`arm_angles` puede devolver la flexión como `None`** aunque la abducción sea
   válida: es la singularidad del cardán, y **cae en la postura de reposo del
   robot** (brazo en cruz). Sin esa guarda, `atan2(0, -0.0)` devuelve **180°**
@@ -1943,6 +2170,17 @@ Modo demo: `python -m telmeow_teleop.arm_tracker --publish --record brazos.csv`,
 y luego `python tools/analizar_registro_brazos.py brazos.csv`.
 Teclas: `m` espejo · `t` mano/codo · `b` `f` invertir signos · `r` extremos ·
 `z/Z x/X v/V n/N` ganancias · ESPACIO etiqueta · `q` salir.
+
+El HUD marca con `~` los canales cuyo valor **no** viene de una medida de ese
+frame, e imprime `tronco:` con el estado y, si está retenido, su edad. **Imprime
+el dato crudo junto a su interpretación** (`cadera 0.00` al lado de `tronco: …`)
+a propósito: es lo que permitió detectar el H31.
+
+Columnas del CSV, y la distinción importa al leerlo: `crudo_*` es la **medida**
+(vacío si no se pudo medir), `arm*` es el **comando publicado** (nunca vacío),
+`estimado_L`/`estimado_R` dicen cuál de los dos casos es cada fila, y
+`tronco_origen` de dónde salía la vertical. Los sufijos `_L`/`_R` son **siempre**
+el canal del robot, también en `crudo_*` y `vis_*`.
 
 ## `publisher.py`
 
@@ -2352,6 +2590,91 @@ hacia afuera para el brazo derecho, y eso coincide con el «+θ eleva» del
 comentario. De ahí que la corrección de la inclinación del eje (§0.5) se pueda
 aplicar ya: su signo depende del sentido de la abducción, no del de la flexión.
 
+## 7.14 El instrumento que mentía sobre sí mismo (H31)
+
+**2026-09-13, primer arranque de la sesión P5.2.** El HUD del arm tracker
+imprimía, en la misma línea:
+
+```
+tronco: caderas    cadera 0.00    codo L 0.50 R 0.39
+```
+
+Las dos cosas no pueden ser ciertas a la vez. `cadera 0.00` significa que las
+caderas no se ven —estaban fuera de cuadro, con el operador sentado a la mesa—,
+y aun así el HUD declaraba que la vertical del tronco salía de ellas.
+
+**La causa**, en `arm_tracker._actualizar_tronco`: la bandera se ponía en `True`
+el primer frame en que las caderas superaban el umbral, y **la única cosa que la
+volvía a poner en `False` era no haber tenido nunca una vertical buena**. O sea
+que tras el primer frame afortunado se quedaba puesta para siempre, mientras el
+módulo seguía usando —correctamente— el último valor bueno.
+
+**Por qué importa más de lo que parece.** El comportamiento *interno* era
+razonable: retener la vertical es lo correcto, porque la orientación del tronco
+es cuasi-estática y las caderas parpadean bajo el umbral con facilidad. Lo que
+estaba roto era **lo que el instrumento decía de sí mismo**. Y ese error tiene
+una vía directa a la tesis: la columna `tronco_caderas` del CSV escribía `1` en
+todas las filas, así que `analizar_registro_brazos.py` habría informado de
+«vertical del tronco tomada de las caderas en el 100 % de los frames» sobre una
+grabación en la que no se vieron **ni una vez**. Una cifra falsa, concreta,
+citable y sin nada en el informe que la contradijera.
+
+**Corregido** con tres estados (`caderas` / `retenido Xs` / `RESERVA vertical`),
+una caducidad de 2 s, la columna `tronco_origen` en el CSV y el desglose de los
+tres en el analizador.
+
+**La lección, que generaliza más allá de este caso:** una bandera que **se
+enclava** —que puede pasar de `False` a `True` pero no al revés— convierte un
+diagnóstico en una afirmación histórica sin avisar de que lo es. Cuando el HUD o
+el CSV declaran el **origen** de un dato, ese indicador tiene que ser *fresco
+en este frame* o decir explícitamente su edad. Es primo hermano del **H26**: una
+grabación ambigua no se rescata releyéndola, así que el instrumento tiene que
+grabar sin ambigüedad la primera vez.
+
+Y una nota de método que sí funcionó: el fallo salió a la luz porque el HUD
+imprime **el dato crudo junto a su interpretación** (`cadera 0.00` al lado de
+`tronco: caderas`). Si solo hubiera impreso la conclusión, no habría habido
+forma de notarlo. Merece la pena mantener ese patrón en los HUD que queden.
+
+**La evidencia numérica**, de `brazos_2026-09-13_descartada.csv` (13.271
+frames): `vis_cadera` superó el umbral en el **9.8 %** de los frames —mediana
+0.03— mientras `tronco_caderas` valía 1 en el **86.5 %**. Las dos columnas del
+mismo archivo se contradicen, y una de ellas es la que el informe citaba.
+
+## 7.15 El agregador que sesgaba su propia comparación (H32)
+
+**Misma sesión, mismo archivo.** El informe de visibilidad decía que el **codo
+se ve el doble de bien que la mano** (89-92 % frente a 44-48 % de frames por
+encima del umbral), lo contrario de lo que el operador había previsto y de lo
+que este documento daba por bueno al elegir hombro→mano.
+
+Antes de aceptarlo hubo que mirar **cómo se medía cada uno**, y ahí estaba el
+problema: con `target="mano"` la visibilidad reportada era el **mínimo de los
+cuatro** landmarks de mano (muñeca, meñique, índice, pulgar), mientras que
+`target="codo"` reportaba la de **un solo** landmark. Y BlazePose estima los
+dedos con bastante menos confianza que la muñeca incluso con la mano claramente
+a la vista, así que el mínimo de cuatro es un estimador sistemáticamente
+pesimista.
+
+O sea: **el instrumento sesgaba justo la decisión que estaba puesto para
+resolver**, y en la dirección de rechazar la opción que el plan había elegido.
+No es que el resultado fuera falso —el codo puede verse mejor, está por medir—
+es que la comparación no era una comparación.
+
+**Corregido**: la puerta de `target="mano"` es la **muñeca** —un landmark, igual
+que el codo—, y el centroide promedia los dedos que superen el umbral. Se añade
+`puntos_destino_L`/`_R` al CSV con cuántos landmarks formaron el punto, porque
+eso permite comprobar una afirmación que el plan hacía sin medir: que «cuatro
+puntos de mano son más estables que la muñeca sola». Si el centroide colapsa
+casi siempre a la muñeca, la afirmación no se puede defender, y el analizador
+ahora lo avisa.
+
+**La lección:** cuando dos alternativas se comparan con una métrica, **la
+métrica tiene que medirse igual en las dos**. Un agregador distinto a cada lado
+—mínimo de cuatro frente a valor único— produce una diferencia que parece del
+mundo y es del instrumento. Es el pariente estadístico del H31: allí el
+instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
+
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
@@ -2386,6 +2709,9 @@ aplicar ya: su signo depende del sentido de la abducción, no del de la flexión
 | **H28** | El robot **no tiene rotación axial**: `giro` es flexión y `balanceo` es abducción. Vocabulario renombrado y §3.3.1 reescrita | §0.5, §3.3.1, P5, §6, §7.12 |
 | **H29** | ~~El canal `tw` va al revés~~ · **RETRACTADO**: la deducción partía de un reposo falso. Lo sustituye el H30 | §7.13 |
 | **H30** | El reposo del robot tiene los **brazos en cruz**, sobre el eje de la flexión: los topes son elevación, la **singularidad cae en el reposo**, y «flexión+ = adelante» depende de la abducción | §0.5, §3.3.1, P5, §7.13 |
+| **H31** | Una bandera **enclavada** hacía que el HUD y el CSV declararan como observada una vertical de tronco **congelada** (9.8 % de caderas vistas frente a 86.5 % declarado). Un indicador de origen tiene que ser fresco o decir su edad | P5, §7.14 |
+| **H32** | La visibilidad de la mano se medía con el **mínimo de cuatro** landmarks y la del codo con **uno**, así que la comparación mano-frente-a-codo estaba sesgada por el agregador. Puerta corregida a la muñeca | P5, §7.15 |
+| **H33** | **Las ganancias sí hacen falta, y solo en abducción** (~0.33/0.51): el recorrido del hombro humano desborda el del robot, que se recortó en el 67-75 % de los frames. Consecuencia del H30. En flexión coinciden | P5, §0.5 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la
 investigación de la cámara que salió de él. H19 y H20 son **correcciones a

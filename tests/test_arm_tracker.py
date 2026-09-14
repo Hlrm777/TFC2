@@ -198,16 +198,14 @@ def direccion_del_visor(lado, abduccion, flexion):
     return r_flex @ (r_abd @ reposo)
 
 
-#: Sentido del canal ``tw`` del visor respecto a la flexión del operador (H29).
-#:
-#: −1 significa que ``+armLtw`` lleva el brazo del robot hacia ATRAS, o sea que
-#: el canal es extensión y no flexión, al contrario de lo que dice el comentario
-#: del rig. Sale de tres anclas independientes, dos verificadas en vivo; el
-#: razonamiento completo está en el docstring de ``config.ArmConfig``.
-#:
-#: Está aquí como constante con nombre, y no disuelto en la prueba, porque es lo
-#: ÚNICO que hay que cambiar si la confirmación en el visor dice lo contrario.
-SENTIDO_FLEXION_VISOR = -1
+# Aquí vivía SENTIDO_FLEXION_VISOR = -1, la conclusión del H29: que ``+armLtw``
+# llevaba el brazo hacia atrás. Se dedujo con tres anclas, dos de ellas
+# verificadas en vivo, y era FALSA — no por un error de aritmética, sino por un
+# supuesto tácito que nunca se comprobó: que el brazo del robot en reposo
+# colgaba. Está en cruz. El H29 queda retractado y sustituido por el H30, y el
+# sentido antero-posterior ya no es una constante global porque no puede serlo:
+# depende del signo de la abducción. Ver ``test_el_sentido_antero_posterior_
+# depende_de_la_abduccion``.
 
 
 def visor_a_mediapipe(vector):
@@ -801,6 +799,26 @@ def tracker(monkeypatch):
     return modulo.ArmTracker(clock=RelojFalso())
 
 
+@pytest.fixture
+def tracker_reposo_imposible(monkeypatch):
+    """Un tracker configurado con un reposo que el robot no puede alcanzar."""
+    import telmeow_teleop.arm_tracker as modulo
+
+    class PoseFalsa:
+        def process(self, _frame):
+            return None
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        modulo.mp.solutions.pose, "Pose", lambda **kwargs: PoseFalsa()
+    )
+    return modulo.ArmTracker(
+        reposo_abduccion=-500.0, reposo_flexion=0.0, clock=RelojFalso()
+    )
+
+
 def test_la_ganancia_multiplica_el_gesto_del_operador(tracker):
     tracker.gain_abduccion = 2.0
     salida = tracker.map_to_robot(Side.L, 10.0, 0.0)
@@ -1038,3 +1056,297 @@ def test_el_eje_anterior_apunta_hacia_la_camara():
     """
     assert EJE_ANTERIOR[2] < 0
     assert EJE_ANTERIOR[0] == 0 and EJE_ANTERIOR[1] == 0
+
+
+# --------------------------------------------------------------------------
+# 11. La etapa de salida: gracia, vuelta al reposo y limite de velocidad
+# --------------------------------------------------------------------------
+#
+# Aqui se comprueba la distincion entre ESTIMACION y COMANDO. ``process``
+# devuelve lo que se pudo medir, con huecos; ``comando`` devuelve lo que se le
+# manda al robot, que nunca tiene huecos. Confundirlas es lo que hacia que un
+# brazo perdido se quedara clavado a mitad de gesto.
+
+
+def test_el_comando_arranca_en_el_reposo(tracker):
+    """Antes de ver a nadie, el robot esta en reposo y no en su cero.
+
+    Es una consecuencia directa del H30: el cero del robot son los brazos en
+    cruz, asi que arrancar en cero seria arrancar de espantapajaros.
+    """
+    mando = tracker.comando(None, 0.0)
+    assert mando.armL == pytest.approx(-55.0)
+    assert mando.armR == pytest.approx(-55.0)
+    assert mando.armLtw == pytest.approx(0.0)
+    assert mando.armRtw == pytest.approx(0.0)
+
+
+def test_el_comando_nunca_tiene_huecos(tracker):
+    """Sin pose, sin estimacion y sin nada, los cuatro canales salen con valor.
+
+    Es lo que permite publicar siempre, y publicar siempre es lo que hace que
+    los brazos vuelvan al reposo en vez de congelarse.
+    """
+    assert not tracker.comando(None, 0.0).vacio
+    assert not tracker.comando(ArmAngles(), 1.0).vacio
+    assert all(v is not None for v in tracker.comando(None, 2.0).as_tuple)
+
+
+def test_un_parpadeo_de_visibilidad_no_tira_el_brazo(tracker):
+    """Dentro de la gracia se mantiene el objetivo, no se vuelve al reposo.
+
+    La mano entra y sale del cuadro constantemente sentado a una mesa. Si cada
+    parpadeo iniciara la vuelta al reposo, el brazo del robot temblaria entre
+    el gesto y el costado.
+    """
+    tracker.comando(ArmAngles(armL=20.0, armLtw=10.0), 0.0)
+    assert tracker.objetivos[Side.L] == (20.0, 10.0)
+    # Tres frames sin ver el brazo, muy por debajo de gracia_s = 0.5
+    for i in range(1, 4):
+        tracker.comando(ArmAngles(), i / 30)
+    assert tracker.objetivos[Side.L] == (20.0, 10.0)
+
+
+def test_pasada_la_gracia_el_objetivo_es_el_reposo(tracker):
+    tracker.comando(ArmAngles(armL=20.0, armLtw=10.0), 0.0)
+    tracker.comando(ArmAngles(), 0.4)      # dentro de la gracia
+    assert tracker.objetivos[Side.L] == (20.0, 10.0)
+    tracker.comando(ArmAngles(), 0.6)      # fuera
+    assert tracker.objetivos[Side.L] == tracker.reposo[Side.L]
+
+
+def _correr(tracker, pose, t0: float, segundos: float, fps: float = 60.0):
+    """Llama a ``comando`` frame a frame, como hace el bucle del demo.
+
+    Importa hacerlo asi: el limitador acota VELOCIDAD, asi que si se le llama
+    dos veces con dos segundos de diferencia permite el salto entero, y con
+    razon —ha pasado ese tiempo—. Lo que acota el movimiento visible es que se
+    le llame en cada frame, tenga o no estimacion ese frame.
+    """
+    t = t0
+    salidas = []
+    for _ in range(int(segundos * fps)):
+        t += 1 / fps
+        salidas.append(tracker.comando(pose, t))
+    return t, salidas
+
+
+def test_la_vuelta_al_reposo_es_una_rampa_y_no_un_salto(tracker):
+    """Lo que se pidio: suave, no brusco.
+
+    Se exige que ningun frame mueva mas de lo que el limite permite y que al
+    final llegue. Con 180 grados/s y 60 fps, el maximo por frame es 3 grados.
+    """
+    # Primero se llega a 25 con el brazo a la vista.
+    t, _ = _correr(tracker, ArmAngles(armL=25.0, armLtw=0.0), 0.0, 2.0)
+    previo = tracker.comando(ArmAngles(armL=25.0, armLtw=0.0), t).armL
+    assert previo == pytest.approx(25.0, abs=1e-6)
+
+    # Y ahora se pierde. Ningun frame debe mover mas de 3 grados.
+    for _ in range(300):
+        t += 1 / 60
+        actual = tracker.comando(ArmAngles(), t).armL
+        assert abs(actual - previo) <= 3.0 + 1e-6
+        previo = actual
+    assert previo == pytest.approx(-55.0, abs=1e-6)
+
+
+def test_la_recuperacion_tampoco_salta(tracker):
+    """El caso que el One Euro no protege: volver tras un hueco largo.
+
+    Su corte se adapta al dt, asi que tras un hueco el factor de suavizado se
+    va a 1 y la muestra pasa entera. El limite de velocidad es lo unico que hay
+    entre eso y un latigazo del robot.
+    """
+    t, _ = _correr(tracker, None, 0.0, 2.0)          # en reposo, -55
+    assert tracker.comando(None, t).armL == pytest.approx(-55.0, abs=1e-6)
+
+    # Reaparece pidiendo +30: son 85 grados de salto, y no se dan de golpe.
+    salida = tracker.comando(ArmAngles(armL=30.0, armLtw=0.0), t + 1 / 60)
+    assert salida.armL == pytest.approx(-55.0 + 3.0, abs=1e-6)
+
+
+def test_un_brazo_perdido_no_arrastra_al_otro_en_el_comando(tracker):
+    """El BUG 2 tambien en la etapa de salida: los canales son independientes."""
+    tracker.comando(ArmAngles(armL=20.0, armLtw=5.0, armR=-20.0, armRtw=5.0), 0.0)
+    # Solo el derecho sigue viendose, durante mas de la gracia.
+    t = 0.0
+    for _ in range(120):
+        t += 1 / 60
+        mando = tracker.comando(ArmAngles(armR=-20.0, armRtw=5.0), t)
+    assert mando.armR == pytest.approx(-20.0, abs=1e-6)
+    assert mando.armL == pytest.approx(-55.0, abs=1e-6)
+
+
+def test_medio_brazo_estimado_no_cuenta_como_estimado(tracker):
+    """La abduccion sin su flexion no es una pose: se trata como perdido.
+
+    Los dos ejes del mismo brazo van juntos por construccion —``map_to_robot``
+    valida antes de tocar los filtros—, asi que si llegara uno solo seria un
+    sintoma de algo roto, no un caso a interpolar.
+    """
+    tracker.comando(ArmAngles(armL=20.0, armLtw=10.0), 0.0)
+    tracker.comando(ArmAngles(armL=40.0), 0.6)
+    assert tracker.objetivos[Side.L] == tracker.reposo[Side.L]
+
+
+def test_el_reposo_pasa_por_el_recorte_del_robot(tracker_reposo_imposible):
+    """Una configuracion descuidada no puede mandar una postura imposible."""
+    reposo = tracker_reposo_imposible.reposo
+    lower, _ = ARM_ABDUCCION_1D[Side.L]
+    assert reposo[Side.L][0] == pytest.approx(lower)
+
+
+def test_el_reposo_no_es_el_cero_del_robot(tracker):
+    """Fija el H30 en una prueba.
+
+    Si alguien 'simplificara' el reposo a (0, 0) por parecer el valor neutro,
+    el robot abriria los brazos en cruz cada vez que el operador baja las
+    manos. Esta prueba se pondria roja.
+    """
+    assert tracker.reposo[Side.L][0] != 0.0
+    assert tracker.reposo[Side.R][0] != 0.0
+
+
+# --------------------------------------------------------------------------
+# 12. La vertical del tronco: fresca, retenida o de reserva
+# --------------------------------------------------------------------------
+
+
+def test_el_origen_del_tronco_arranca_en_reserva(tracker):
+    assert tracker.origen_tronco == "reserva"
+    assert tracker.tronco_de_caderas is False
+    assert tracker.edad_tronco_s is None
+
+
+class LandmarkFalso:
+    """Un landmark de BlazePose con lo justo: posicion y visibilidad."""
+
+    def __init__(self, x=0.0, y=0.0, z=0.0, visibility=1.0):
+        self.x, self.y, self.z = x, y, z
+        self.visibility = visibility
+
+
+def mundo_falso(vis_cadera: float):
+    """33 landmarks, con hombros y caderas puestos y el resto en el origen."""
+    mundo = [LandmarkFalso() for _ in range(33)]
+    for lado, hombro, cadera in (
+        (Side.L, HOMBRO_IZQ, CADERA_IZQ),
+        (Side.R, HOMBRO_DER, CADERA_DER),
+    ):
+        indice_hombro = LANDMARKS[lado]["hombro"]
+        mundo[indice_hombro] = LandmarkFalso(*hombro, visibility=1.0)
+        indice_cadera = LANDMARKS[lado]["cadera"]
+        mundo[indice_cadera] = LandmarkFalso(*cadera, visibility=vis_cadera)
+    return mundo
+
+
+def test_con_las_caderas_visibles_el_tronco_es_fresco(tracker):
+    tracker._actualizar_tronco(mundo_falso(0.9), 0.0)
+    assert tracker.origen_tronco == "caderas"
+    assert tracker.tronco_de_caderas is True
+
+
+def test_el_tronco_se_retiene_un_instante_pero_se_declara_retenido(tracker):
+    """El fallo que el HUD delato: 'caderas' con la cadera a 0.00.
+
+    La bandera se ponia en True el primer frame bueno y NO volvia a bajar, asi
+    que el HUD y la columna del CSV afirmaban que la vertical era observada
+    cuando en realidad era un valor congelado. Retenerla un instante es
+    correcto; decir que es fresca, no.
+    """
+    tracker._actualizar_tronco(mundo_falso(0.9), 0.0)
+    tracker._actualizar_tronco(mundo_falso(0.0), 0.5)
+    assert tracker.tronco_de_caderas is False      # ya NO miente
+    assert tracker.origen_tronco == "retenido"
+
+
+def test_una_vertical_retenida_demasiado_tiempo_caduca(tracker):
+    """Pasada la retencion se cae a la reserva, que si esta declarada.
+
+    Una vertical de hace un minuto es PEOR que la reserva: la reserva es un
+    supuesto explicito —operador sentado y erguido— y la retenida es un
+    supuesto invisible.
+    """
+    tracker._actualizar_tronco(mundo_falso(0.9), 0.0)
+    tracker._actualizar_tronco(mundo_falso(0.0), 0.5)
+    assert tracker.origen_tronco == "retenido"
+    tracker._actualizar_tronco(mundo_falso(0.0), 5.0)
+    assert tracker.origen_tronco == "reserva"
+
+
+def test_al_caducar_se_devuelve_la_vertical_de_reserva(tracker):
+    import telmeow_teleop.arm_tracker as modulo
+
+    tracker._actualizar_tronco(mundo_falso(0.9), 0.0)
+    devuelto = tracker._actualizar_tronco(mundo_falso(0.0), 10.0)
+    assert np.allclose(devuelto, modulo.EJE_SUPERIOR_RESERVA)
+
+
+def test_las_caderas_vuelven_a_verse_y_el_tronco_vuelve_a_ser_fresco(tracker):
+    tracker._actualizar_tronco(mundo_falso(0.9), 0.0)
+    tracker._actualizar_tronco(mundo_falso(0.0), 5.0)
+    assert tracker.origen_tronco == "reserva"
+    tracker._actualizar_tronco(mundo_falso(0.9), 5.1)
+    assert tracker.origen_tronco == "caderas"
+
+
+# --------------------------------------------------------------------------
+# 13. El punto de destino: la muneca es la puerta, no el minimo de los cuatro
+# --------------------------------------------------------------------------
+
+
+def mundo_con_mano(vis_muneca, vis_dedos, sitio_dedos=None):
+    """Mundo con la mano izquierda puesta: muneca y tres dedos."""
+    mundo = mundo_falso(0.9)
+    muneca = HOMBRO_IZQ + np.array([0.30, 0.0, 0.0])
+    dedos = muneca if sitio_dedos is None else sitio_dedos
+    mundo[LANDMARKS[Side.L]["muneca"]] = LandmarkFalso(
+        *muneca, visibility=vis_muneca
+    )
+    for nombre in PUNTOS_MANO[1:]:
+        mundo[LANDMARKS[Side.L][nombre]] = LandmarkFalso(
+            *dedos, visibility=vis_dedos
+        )
+    return mundo, muneca
+
+
+def test_un_dedo_mal_estimado_no_descarta_la_mano(tracker):
+    """El sesgo que la grabacion del 2026-09-13 delato.
+
+    Con el minimo de los cuatro landmarks como puerta, cualquier dedo flojo
+    tiraba la mano entera; y BlazePose estima los dedos con bastante menos
+    confianza que la muneca incluso con la mano a la vista. El resultado era
+    que la mano parecia verse la mitad de bien que el codo cuando parte de la
+    diferencia era el propio agregador.
+    """
+    mundo, _ = mundo_con_mano(vis_muneca=0.95, vis_dedos=0.10)
+    _, visibilidad, _ = tracker._destino(mundo, Side.L)
+    assert visibilidad == pytest.approx(0.95)
+    assert visibilidad >= tracker.min_visibility
+
+
+def test_los_dedos_poco_visibles_no_entran_en_el_centroide(tracker):
+    """Se promedian los puntos utiles, no todos a ciegas."""
+    lejos = HOMBRO_IZQ + np.array([0.0, 10.0, 0.0])
+    mundo, muneca = mundo_con_mano(
+        vis_muneca=0.95, vis_dedos=0.10, sitio_dedos=lejos
+    )
+    punto, _, cuantos = tracker._destino(mundo, Side.L)
+    assert cuantos == 1
+    assert np.allclose(punto, muneca)
+
+
+def test_con_los_dedos_visibles_si_se_promedian_los_cuatro(tracker):
+    mundo, _ = mundo_con_mano(vis_muneca=0.95, vis_dedos=0.90)
+    _, _, cuantos = tracker._destino(mundo, Side.L)
+    assert cuantos == 4
+
+
+def test_el_codo_es_un_solo_landmark(tracker):
+    """Y por eso la comparacion mano-vs-codo tiene que medirse igual: la mano
+    tambien se gatea con UN landmark, la muneca."""
+    tracker.target = "codo"
+    mundo, _ = mundo_con_mano(vis_muneca=0.95, vis_dedos=0.90)
+    _, _, cuantos = tracker._destino(mundo, Side.L)
+    assert cuantos == 1

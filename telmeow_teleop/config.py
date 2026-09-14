@@ -426,18 +426,48 @@ class ArmConfig:
     robot ya es simétrica —las tablas de ``limits.py`` usan el mismo sentido en
     los dos lados—, y compartirlas reduce a la mitad la superficie del fallo.
 
-    LAS GANANCIAS VALEN 1.0 y están pendientes de calibrar. A diferencia de la
-    cabeza, aquí no hay motivo conocido para que hagan falta: la ganancia del
-    head tracker existe porque el operador no puede girar la cabeza sin perder
-    de vista el monitor, y ese problema no se replica en los brazos. Se dejan
-    implementadas y configurables, por sentido, para poder fijarlas si una
-    sesión de medición demuestra que el recorrido del operador no cubre el rango
-    del robot. Que se queden en 1.0 también es un resultado.
+    LAS GANANCIAS VALEN 1.0 y están pendientes de calibrar, pero ya se sabe que
+    en **abducción van a hacer falta** y que en **flexión no**. Medido el
+    2026-09-13 sobre 13.271 frames: el recorrido de abducción del operador
+    (±100° y más) desborda por completo el del robot (−55…+32), que salió
+    recortado por el tope en el 67-75 % de los frames; la propuesta provisional
+    es ~0.33 en abducción y ~0.51 en aducción. En flexión los dos coinciden
+    (1.04/1.06).
+
+    El motivo es el **H30** y no tiene arreglo mecánico: el cero del robot está
+    en la horizontal, así que su recorrido de abducción es una fracción del de
+    un hombro humano. Es distinto del motivo de la cabeza —allí la ganancia
+    existe porque el operador no puede girar la cabeza sin perder de vista el
+    monitor— pero el efecto es el mismo.
+
+    El valor definitivo sale de una sesión con protocolo; el que se cite tiene
+    que venir de ahí y no de la grabación descartada.
 
     ``min_visibility`` es el umbral de la puntuación de visibilidad de BlazePose
     por debajo del cual un landmark se considera no observado. Un brazo cuyos
     landmarks no lleguen al umbral se descarta **por separado**, sin arrastrar
     al otro.
+
+    QUE PASA CUANDO SE PIERDE UN BRAZO
+    ----------------------------------
+    Las manos salen y entran del cuadro constantemente, sobre todo sentado a una
+    mesa con la cámara integrada. Omitir el canal deja el brazo del robot
+    **clavado a mitad de gesto**, que a un espectador le parece un cuelgue; y
+    devolverlo al reposo de golpe es peor. Así que hay tres parámetros:
+
+    - ``gracia_s``: cuánto se mantiene el último objetivo antes de empezar a
+      volver. Absorbe los parpadeos de visibilidad, que son la mayoría.
+    - ``reposo_abduccion`` / ``reposo_flexion``: la pose a la que se vuelve.
+      **El reposo del robot no es su cero**: su cero son los brazos en cruz
+      (H30), así que el reposo por defecto es −55° de abducción, lo más bajo que
+      llega su mecanismo. Pasa por ``clamp_arm``, así que no puede pedir una
+      postura imposible.
+    - ``velocidad_max``: velocidad angular máxima del comando, en grados por
+      segundo. Convierte cualquier salto en una rampa de duración conocida
+      (``salto / velocidad_max``: los 55° del reposo tardan ~0.3 s con el valor
+      por defecto). Se elige **por encima de la velocidad del gesto narrado**
+      para que solo actúe en las discontinuidades; por debajo de ella
+      introduciría retardo, y la latencia es una métrica del proyecto.
     """
 
     target: str = "mano"
@@ -452,6 +482,10 @@ class ArmConfig:
     beta: float = 0.5
     min_visibility: float = 0.5
     model_complexity: int = 1
+    reposo_abduccion: float = -55.0
+    reposo_flexion: float = 0.0
+    gracia_s: float = 0.5
+    velocidad_max: float = 180.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "ArmConfig":
@@ -472,6 +506,12 @@ class ArmConfig:
             model_complexity=_env_int(
                 env, "ARM_MODEL_COMPLEXITY", cls.model_complexity
             ),
+            reposo_abduccion=_env_float(
+                env, "ARM_REPOSO_ABDUCCION", cls.reposo_abduccion
+            ),
+            reposo_flexion=_env_float(env, "ARM_REPOSO_FLEXION", cls.reposo_flexion),
+            gracia_s=_env_float(env, "ARM_GRACIA_S", cls.gracia_s),
+            velocidad_max=_env_float(env, "ARM_VELOCIDAD_MAX", cls.velocidad_max),
         )
 
 

@@ -20,6 +20,7 @@ from telmeow_teleop.filters import (
     ClassHysteresis,
     EMAFilter,
     OneEuroFilter,
+    SlewLimiter,
 )
 
 FS = 100.0
@@ -249,6 +250,134 @@ def test_ema_reset():
     ema(10.0)
     ema.reset()
     assert ema(20.0) == 20.0
+
+
+# --------------------------------------------------------------------------
+# Límite de velocidad
+# --------------------------------------------------------------------------
+
+
+def test_la_primera_muestra_del_limitador_pasa_tal_cual():
+    """Sin estado previo no hay velocidad que limitar."""
+    lim = SlewLimiter(10.0)
+    assert lim(100.0, 0.0) == 100.0
+
+
+def test_un_salto_se_convierte_en_rampa_de_duracion_conocida():
+    """Lo que se le pide al limitador: ``salto / max_rate`` segundos.
+
+    Con 180 grados/s, los 55 grados que hay del cero del robot a su reposo
+    tardan 0.306 s. Es la cifra que se cita, así que conviene fijarla.
+    """
+    lim = SlewLimiter(180.0)
+    lim.reset(0.0)
+    t, y = 0.0, 0.0
+    for _ in range(200):
+        t += 1 / 60
+        y = lim(-55.0, t)
+        if y <= -55.0 + 1e-9:
+            break
+    assert t == pytest.approx(55.0 / 180.0, abs=2 / 60)
+    assert y == pytest.approx(-55.0, abs=1e-9)
+
+
+def test_una_senal_lenta_pasa_sin_tocarse():
+    """No es un filtro de ruido: por debajo del limite no hace nada.
+
+    Es la propiedad que permite ponerlo en el camino del comando sin que
+    contamine la latencia del gesto normal.
+    """
+    lim = SlewLimiter(180.0)
+    lim.reset(0.0)
+    objetivo = 0.0
+    for i in range(1, 60):
+        objetivo += 2.0  # 120 grados/s a 60 fps
+        assert lim(objetivo, i / 60) == pytest.approx(objetivo, abs=1e-9)
+
+
+def test_el_limite_es_simetrico():
+    # Se consume una muestra primero para que haya instante previo: tras un
+    # reset(valor) no lo hay y la siguiente usa el dt de reserva, que es lo que
+    # fija test_reset_con_valor_deja_salida_sin_rampa.
+    lim = SlewLimiter(100.0)
+    lim(0.0, 0.0)
+    assert lim(1000.0, 0.1) == pytest.approx(10.0)
+    lim.reset()
+    lim(0.0, 0.0)
+    assert lim(-1000.0, 0.1) == pytest.approx(-10.0)
+
+
+def test_reset_con_valor_deja_salida_sin_rampa():
+    """Arrancar FIJADO en el reposo es lo que evita el salto del primer frame."""
+    lim = SlewLimiter(180.0)
+    lim.reset(-55.0)
+    assert lim.value == -55.0
+    assert lim.initialized
+    # Y la primera muestra ya se limita, con el dt de reserva (1/30 s).
+    assert lim(0.0, 0.0) == pytest.approx(-55.0 + 180.0 / 30.0)
+
+
+def test_reset_sin_valor_olvida_el_estado():
+    lim = SlewLimiter(1.0)
+    lim(5.0, 0.0)
+    lim.reset()
+    assert not lim.initialized
+    assert lim.value is None
+    assert lim(99.0, 1.0) == 99.0
+
+
+def test_el_limitador_absorbe_el_salto_que_el_one_euro_no_filtra():
+    """El motivo por el que existe, y es un modo de fallo real.
+
+    El One Euro adapta su corte al ``dt``: tras un hueco largo, su factor de
+    suavizado se va a 1 y la primera muestra de vuelta pasa ENTERA. Se
+    comprueban los dos, sobre el mismo hueco, y se exige que el limitador
+    acote lo que el One Euro deja pasar.
+    """
+    euro = OneEuroFilter(0.5, 0.5)
+    lim = SlewLimiter(180.0)
+    euro(0.0, 0.0)
+    lim(0.0, 0.0)
+    # Dos segundos sin muestras y vuelve pidiendo 80 grados.
+    salida_euro = euro(80.0, 2.0)
+    salida_lim = lim(80.0, 2.0)
+    assert salida_euro > 79.0          # el One Euro no protege
+    assert salida_lim == pytest.approx(80.0)  # aqui tampoco, 2 s dan de sobra
+    # Pero en un solo frame si: 6 grados a 180 grados/s y 1/30 s.
+    lim2 = SlewLimiter(180.0)
+    lim2(0.0, 0.0)
+    assert lim2(80.0, 1 / 30) == pytest.approx(6.0)
+
+
+def test_dt_degenerado_en_el_limitador_se_contabiliza():
+    lim = SlewLimiter(100.0)
+    lim(0.0, 1.0)
+    lim(50.0, 1.0)      # mismo instante
+    lim(50.0, 0.5)      # hacia atras
+    assert lim.degenerate_dt_count == 2
+
+
+@pytest.mark.parametrize("malo", [float("nan"), float("inf"), float("-inf")])
+def test_el_limitador_rechaza_objetivos_no_finitos(malo):
+    lim = SlewLimiter(10.0)
+    lim(0.0, 0.0)
+    with pytest.raises(ValueError):
+        lim(malo, 1.0)
+    with pytest.raises(ValueError):
+        lim.reset(malo)
+
+
+@pytest.mark.parametrize("tasa", [0.0, -1.0, float("nan")])
+def test_el_limitador_valida_su_tasa(tasa):
+    with pytest.raises(ValueError):
+        SlewLimiter(tasa)
+
+
+def test_el_limitador_acepta_reloj_inyectable():
+    reloj = iter([0.0, 0.5])
+    lim = SlewLimiter(10.0, clock=lambda: next(reloj))
+    assert lim(0.0) == 0.0
+    assert lim(100.0) == pytest.approx(5.0)
 
 
 # --------------------------------------------------------------------------

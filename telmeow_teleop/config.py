@@ -258,6 +258,30 @@ class CameraConfig:
     antes de pedir MJPG.
 
     Cadena vacía deja el formato que elija el backend.
+
+    LA EXPOSICION SE PIDE EXPLICITAMENTE, Y HAY QUE HACERLO
+    -------------------------------------------------------
+    Los ajustes de DirectShow **viven en el driver, no en el proceso**: la
+    exposición que deje puesta una aplicación sigue ahí cuando arranca la
+    siguiente. El 2026-09-13 la cámara apareció **completamente negra** a 30 fps
+    perfectos, con la exposición clavada en manual −6 —el obturador casi
+    cerrado— de una ejecución anterior. Forzar la automática la devolvió de un
+    brillo medio de 2.2 a 117.9 sobre 255.
+
+    El síntoma es especialmente traicionero porque **no se parece a un fallo**:
+    el dispositivo se abre, entrega frames a la tasa nominal y no hay error
+    ninguno; simplemente no se ve nada, y BlazePose no detecta a nadie. Por eso
+    ``auto_exposure`` vale ``True`` por defecto: arrancar pidiendo la automática
+    hace el arranque **reproducible** en vez de depender de lo que dejó puesto
+    el último programa que usó la cámara.
+
+    Con ``auto_exposure=False`` se fija ``exposure`` a mano. Sirve para una
+    sesión de medición en la que interese una **tasa constante**: la
+    autoexposición alarga el tiempo de integración cuando falta luz y con ello
+    baja los fps (**H27**), así que fijarla cambia ruido por estabilidad. El
+    valor es el de la escala de DirectShow, logarítmica y negativa
+    (−6 ≈ 1/64 s, −4 ≈ 1/16 s, −2 ≈ 1/4 s); en esta cámara −2 o superior da
+    imagen usable y −4 ya sale oscura.
     """
 
     index: int = 0
@@ -267,6 +291,8 @@ class CameraConfig:
     flip: bool = True
     backend: str = "dshow"
     fourcc: str = "MJPG"
+    auto_exposure: bool = True
+    exposure: float = -4.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "CameraConfig":
@@ -278,6 +304,8 @@ class CameraConfig:
             flip=_env_bool(env, "CAMERA_FLIP", cls.flip),
             backend=_env_str(env, "CAMERA_BACKEND", cls.backend),
             fourcc=_env_str(env, "CAMERA_FOURCC", cls.fourcc),
+            auto_exposure=_env_bool(env, "CAMERA_AUTO_EXPOSURE", cls.auto_exposure),
+            exposure=_env_float(env, "CAMERA_EXPOSURE", cls.exposure),
         )
 
 

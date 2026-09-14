@@ -6,13 +6,16 @@ hacia el visor 3D del navegador.
 Módulos:
     config        -- parámetros de ejecución (MQTT, tasas, rutas, cámara)
     limits        -- límites articulares del robot y recorte de poses
-    filters       -- suavizado temporal (One Euro, EMA, histéresis de clase)
+    filters       -- suavizado temporal (One Euro, EMA, límite de velocidad,
+                     histéresis de clase)
+    camera        -- apertura de la cámara, con el orden y la exposición que
+                     hacen el arranque reproducible
     publisher     -- publicación de poses por MQTT hacia el visor
     head_tracker  -- pose de la cabeza por Face Mesh + solvePnP
     arm_tracker   -- pose de los brazos por BlazePose (abducción y flexión)
 
-Los tres primeros usan solo biblioteca estándar, así que toda su lógica se puede
-validar sin instalar TensorFlow ni MediaPipe.
+``config``, ``limits`` y ``filters`` usan solo biblioteca estándar, así que toda
+su lógica se puede validar sin instalar TensorFlow ni MediaPipe.
 
 El paquete reemplaza a los scripts sueltos que quedaron en ``legacy/``, que se
 conservan sin modificar como referencia histórica citada en el documento de
@@ -53,6 +56,7 @@ __all__ = [
     "config",
     "limits",
     "filters",
+    "camera",
     "publisher",
     "head_tracker",
     "arm_tracker",

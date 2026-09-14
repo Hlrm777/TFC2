@@ -109,7 +109,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**581 pruebas en verde.** Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**600 pruebas en verde.** Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -151,6 +151,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── config.py             ✅ broker, topics, tasas, rutas · solo stdlib
 │   ├── limits.py             ✅ límites articulares + clamp 2D · solo stdlib
 │   ├── filters.py            ✅ One Euro, EMA, límite de vel., histéresis · stdlib
+│   ├── camera.py             ✅ apertura de cámara · el orden y la exposición
 │   ├── publisher.py          ✅ MQTT, JSON único, QoS 0
 │   ├── head_tracker.py       ✅ Face Mesh + solvePnP
 │   ├── arm_tracker.py        🟡 BlazePose · signos verificados · falta medir
@@ -978,6 +979,12 @@ Windows: correr `tools/list_cameras.py` al empezar.
 $env:TELMEOW_CAMERA_BACKEND="dshow"; $env:TELMEOW_CAMERA_INDEX="1"
 $env:TELMEOW_CAMERA_WIDTH="640";     $env:TELMEOW_CAMERA_HEIGHT="480"
 ```
+
+⚠️ **El `1` de ahí arriba no es universal, y el 2026-09-13 era falso**: con solo
+la integrada conectada, el índice **1 no se abría** y la integrada era el **0**
+—que además es el valor por defecto, así que sin variables de entorno funciona—.
+Es exactamente el motivo por el que hay que correr `list_cameras.py`: el número
+depende de qué esté enchufado, no del protocolo.
 
 **2. El punto 11 de abajo —la convención de signos— es EL riesgo de este
 prompt, y ya se materializó una vez.** En el P4, el método por defecto devolvía
@@ -2046,6 +2053,33 @@ grande, su factor de suavizado se va a 1 y la muestra pasa entera—. Un salto d
 encima de la velocidad del gesto** para que no añada retardo al movimiento
 normal. Lo usa `arm_tracker.comando`.
 
+## `camera.py`
+
+```python
+from telmeow_teleop.camera import (abrir_camara, describir, brillo_medio,
+                                   BACKENDS, AUTO_EXPOSURE_ON, AUTO_EXPOSURE_OFF)
+
+cap = abrir_camara(cfg.camera)     # None si no se abre; NO lanza
+if cap is None: ...
+print(describir(cap, cfg.camera))  # lo CONCEDIDO, no lo pedido (H19)
+brillo_medio(frame)                # 0-255 · por debajo de 8 no hay imagen (H34)
+```
+
+Existe porque abrir una webcam en Windows tiene cuatro trampas ya pagadas, y
+estaban **duplicadas** en los dos trackers, así que arreglar una dejaba la otra
+rota:
+
+1. **MSMF se cuelga** en algunas máquinas con las protecciones de Windows
+   activadas. El defecto es DirectShow.
+2. **El FOURCC antes que la resolución.** Al revés no siempre se aplica, y sin
+   MJPG muchas webcams bajan a 10 fps a 1280x720 sin avisar.
+3. **La exposición sobrevive al proceso** (H34): DirectShow la guarda en el
+   driver, así que se pide **siempre y explícitamente**. Por defecto la
+   automática; `TELMEOW_CAMERA_AUTO_EXPOSURE=0` + `TELMEOW_CAMERA_EXPOSURE=-2`
+   la fija a mano para una sesión que necesite tasa constante.
+4. **Los valores de autoexposición son 0.75 y 0.25**, no 1 y 0, y no están en la
+   documentación de OpenCV. Invertirlos deja la cámara ciega sin error.
+
 ## `head_tracker.py`
 
 ```python
@@ -2641,6 +2675,69 @@ frames): `vis_cadera` superó el umbral en el **9.8 %** de los frames —mediana
 0.03— mientras `tronco_caderas` valía 1 en el **86.5 %**. Las dos columnas del
 mismo archivo se contradicen, y una de ellas es la que el informe citaba.
 
+## 7.16 La cámara negra a 30 fps (H34)
+
+**2026-09-13, en plena sesión.** La ventana del arm tracker salió **totalmente
+negra**, pero el HUD marcaba **29.8 fps** y publicaba por MQTT sin perder
+mensajes. `sin pose (464)`.
+
+**Lo que se descartó primero**, y en este orden, porque el síntoma admite varias
+causas:
+
+| Comprobado | Resultado |
+|---|---|
+| Otro proceso con la cámara cogida | no había ninguno |
+| Permiso de cámara de Windows (usuario y apps de escritorio) | concedido |
+| Estado del dispositivo | `HP Wide Vision HD Camera`, OK, sin código de error |
+| Índice de cámara | **solo existe el 0**; el 1 no se abre |
+| ¿Algún filtro del propio código? | **no**: la medición se hizo con OpenCV a pelo, sin una línea del tracker |
+
+**La causa era la exposición**, y el barrido lo deja sin ambigüedad:
+
+| Ajuste | Brillo medio (0-255) |
+|---|---|
+| Tal cual lo encontró | **2.20** |
+| Autoexposición forzada | **117.91** |
+| Manual −4 | 3.93 |
+| Manual −2 / 0 / +2 | ~106 |
+
+La cámara estaba clavada en **exposición manual −6** —el obturador casi
+cerrado— heredada de **otro proceso**. Los ajustes de DirectShow **viven en el
+driver, no en el proceso**: lo que deja puesto una aplicación sigue ahí cuando
+arranca la siguiente, y este código nunca tocaba la exposición, así que el
+arranque dependía de lo último que hubiera usado la cámara.
+
+**Por qué es peligroso más allá de la molestia:** el fallo **no se parece a un
+fallo**. El dispositivo se abre, no hay excepción, los frames llegan a la tasa
+nominal y el contador de MQTT sube. Lo único que se ve es que BlazePose no
+detecta a nadie — o sea que apunta al detector, que es donde no está el
+problema. Sin el barrido de exposición, la hipótesis natural habría sido «falla
+el tracker».
+
+**Es la otra cara del H27.** Allí se estableció que en esta cámara la luz manda
+vía exposición, y que el techo de fps era una condición de operación y no una
+limitación. Lo que faltaba es que **ese ajuste sobrevive al proceso**.
+
+**Corregido** en un módulo nuevo, `telmeow_teleop/camera.py`, compartido por los
+dos trackers —estaba duplicado en los dos, así que arreglar uno dejaba el otro
+roto—:
+
+- La exposición **se pide siempre y explícitamente**. Por defecto la automática,
+  que es lo que hace el arranque reproducible.
+- `TELMEOW_CAMERA_AUTO_EXPOSURE=0` + `TELMEOW_CAMERA_EXPOSURE=-2` la fija a
+  mano, para una sesión que necesite **tasa constante**: la automática alarga el
+  tiempo de integración cuando falta luz y con ello baja los fps (H27), así que
+  fijarla cambia ruido por estabilidad.
+- El HUD **avisa** con `CAMARA NEGRA (brillo X)` cuando lleva más de 30 frames
+  sin pose y el brillo medio está por debajo de 8. Distingue «no te detecto» de
+  «no veo nada», que son dos fallos distintos con la misma pinta.
+- `describir()` **lee de vuelta** lo que la cámara concedió, no lo que se pidió.
+
+Los valores de `CAP_PROP_AUTO_EXPOSURE` en DirectShow son **0.75 (automática) y
+0.25 (manual)**, no 1 y 0, y no están en la documentación de OpenCV. Quedan
+como constantes con nombre y con una prueba que se pone roja si alguien los
+«normaliza», porque invertirlos deja la cámara ciega sin ningún error.
+
 ## 7.15 El agregador que sesgaba su propia comparación (H32)
 
 **Misma sesión, mismo archivo.** El informe de visibilidad decía que el **codo
@@ -2712,6 +2809,7 @@ instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 | **H31** | Una bandera **enclavada** hacía que el HUD y el CSV declararan como observada una vertical de tronco **congelada** (9.8 % de caderas vistas frente a 86.5 % declarado). Un indicador de origen tiene que ser fresco o decir su edad | P5, §7.14 |
 | **H32** | La visibilidad de la mano se medía con el **mínimo de cuatro** landmarks y la del codo con **uno**, así que la comparación mano-frente-a-codo estaba sesgada por el agregador. Puerta corregida a la muñeca | P5, §7.15 |
 | **H33** | **Las ganancias sí hacen falta, y solo en abducción** (~0.33/0.51): el recorrido del hombro humano desborda el del robot, que se recortó en el 67-75 % de los frames. Consecuencia del H30. En flexión coinciden | P5, §0.5 |
+| **H34** | **La exposición de la cámara sobrevive al proceso** (DirectShow la guarda en el driver) y dejó la imagen **negra a 30 fps sin ningún error**. Se pide explícitamente al abrir, y el HUD avisa del brillo | §4.0, P5, §7.16 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la
 investigación de la cámara que salió de él. H19 y H20 son **correcciones a

@@ -91,6 +91,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
+from .camera import abrir_camara, brillo_medio, describir
 from .config import AppConfig
 from .filters import EMAFilter, OneEuroFilter, SlewLimiter
 from .head_tracker import apartar_si_existe
@@ -1174,6 +1175,14 @@ class ArmTracker:
 #: Altura y del bloque inferior del HUD.
 ALTO_TEXTO = 160
 
+#: Brillo medio (0-255) por debajo del cual se avisa de cámara negra.
+#:
+#: Medido el 2026-09-13 en la cámara integrada: con la exposición clavada en
+#: manual −6 el brillo medio era **2.2**, y con la automática **117.9**. Una
+#: escena legítimamente oscura pero utilizable se queda muy por encima de 8, así
+#: que el umbral separa «hay poca luz» de «no hay imagen».
+BRILLO_MINIMO: float = 8.0
+
 #: Ancho en píxeles de las barras de rango.
 ANCHO_BARRA = 150
 
@@ -1214,24 +1223,17 @@ def _demo(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     cfg = AppConfig.from_env()
-    backends = {"dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF, "any": cv2.CAP_ANY}
-    cap = cv2.VideoCapture(cfg.camera.index, backends[cfg.camera.backend])
-    # El formato ANTES que la resolución: pedirlo después no siempre se aplica.
-    if cfg.camera.fourcc:
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*cfg.camera.fourcc))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.camera.width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.camera.height)
-    cap.set(cv2.CAP_PROP_FPS, cfg.camera.fps)
-    if not cap.isOpened():
-        print(f"No se pudo abrir la camara {cfg.camera.index}.")
+    cap = abrir_camara(cfg.camera)
+    if cap is None:
+        print(
+            f"No se pudo abrir la camara {cfg.camera.index}. "
+            f"Prueba 'python tools/list_cameras.py' para ver que indices hay."
+        )
         return 1
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    print(
-        f"Camara {cfg.camera.index} ({cfg.camera.backend}) a {width}x{height}, "
-        f"{cap.get(cv2.CAP_PROP_FPS):.0f} fps nominales.\n"
-    )
+    print(describir(cap, cfg.camera) + "\n")
 
     print(
         "ENCUADRE\n"
@@ -1484,6 +1486,22 @@ def _demo(argv: list[str] | None = None) -> int:
                     (10, ALTO_TEXTO + 44),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2,
                 )
+                # Distinguir «no te detecto» de «no veo nada». Son dos fallos
+                # distintos y la ventana se ve igual en los dos: el 2026-09-13
+                # la cámara apareció negra a 30 fps con la exposición heredada
+                # de otro programa, y sin este aviso no hay forma de saber que
+                # el problema no es el detector. Se mide solo cuando ya hay
+                # sospecha, para no pagar el promedio en cada frame.
+                if tracker.frames_sin_pose > 30:
+                    brillo = brillo_medio(frame)
+                    if brillo < BRILLO_MINIMO:
+                        cv2.putText(
+                            frame,
+                            f"CAMARA NEGRA (brillo {brillo:.1f}): revisa la tapa "
+                            f"o pon TELMEOW_CAMERA_AUTO_EXPOSURE=1",
+                            (10, ALTO_TEXTO + 66),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
+                        )
 
             # Se publica SIEMPRE, también sin pose: es lo que hace que los
             # brazos vuelvan al reposo en vez de quedarse clavados cuando el
@@ -1537,7 +1555,7 @@ def _demo(argv: list[str] | None = None) -> int:
                 cv2.putText(
                     frame,
                     f"etiqueta {etiqueta}",
-                    (10, ALTO_TEXTO + 66),
+                    (10, ALTO_TEXTO + 88),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 100), 2,
                 )
 

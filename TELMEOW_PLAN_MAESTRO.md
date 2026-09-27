@@ -283,9 +283,14 @@ calibración** de la ganancia de abducción, igual que `HEAD_PAN_TARGET_RANGE`
 para el pan: el rango de la tabla no sirve para eso porque cambia con la
 flexión y daría una ganancia distinta en cada frame.
 
-Orden de operaciones en `clamp_arm`: recortar la **flexión** a ±90° primero (es
-límite duro y además índice de la tabla), luego interpolar la tabla en esa
-flexión, y con ese rango recortar la **abducción**.
+Orden de operaciones en `clamp_arm`: recortar la **flexión** a su rango primero
+(es límite duro y además índice de la tabla), luego interpolar la tabla en esa
+flexión, y con ese rango recortar la **abducción**. El rango de la flexión es
+**±90° por defecto** —lo que cubrió el barrido, y lo que sigue usando el mapeo
+`articular`— y **[−180, 90] cuando se pasa `flexion_range=FLEXION_RANGE_EXTENDIDO`**,
+que es lo que hace el mapeo `direccion` del P5.3. Fuera de ±90 la tabla no se
+interpola directamente: `arm_abduccion_range_extendido` la refleja con la
+equivalencia `(a, f) ≡ (−a, f ± 180)`.
 
 La prueba que distingue la implementación correcta de la errónea:
 `clamp_arm(+70, flexion=+90, 'izq')` debe dar **+70**, no +32.

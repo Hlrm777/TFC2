@@ -1470,9 +1470,14 @@ def _demo(argv: list[str] | None = None) -> int:
         "       del robot (con el espejo en izq->izq).\n"
         "    2. Lo levantas hacia ADELANTE -> el del robot va hacia adelante.\n"
         "    3. y 4. Idem con el derecho.\n"
-        "  Si un canal va al reves, corrigelo con 'b' (abduccion) o 'f'\n"
-        "  (flexion) y anota el valor: son ARM_INVERT_ABDUCCION y\n"
-        "  ARM_INVERT_FLEXION. NO deduzcas el signo mirando el HUD.\n\n"
+        "  Si se mueve el brazo EQUIVOCADO del robot, es el espejo: 'm'.\n"
+        "  Si va al reves en el mapeo 'articular', corrigelo con 'b'\n"
+        "  (abduccion) o 'f' (flexion) y anota el valor: son\n"
+        "  ARM_INVERT_ABDUCCION y ARM_INVERT_FLEXION. En el mapeo\n"
+        "  'direccion' (el de por defecto) NO pulses 'b' ni 'f': no corrigen\n"
+        "  nada ahi, y si algo va al reves es un fallo del marco del tronco\n"
+        "  que hay que arreglar en el codigo. Anotalo y para.\n"
+        "  NO deduzcas el signo mirando el HUD.\n\n"
         "  Ojo al comparar: el visor renderiza a pocos fps cuando no esta en\n"
         "  primer plano, y su camara sigue deslizandose por amortiguacion\n"
         "  varios segundos despues de un arrastre. Comparar dos capturas de\n"
@@ -1811,10 +1816,13 @@ def _demo(argv: list[str] | None = None) -> int:
                         *_retarget_csv(retargetings.get(Side.R), vivo_r),
                     ]
                 )
+                # Una línea por debajo de la de MQTT: con --publish y --record a
+                # la vez, las dos compartían la altura y la etiqueta —lo único
+                # que hay que mirar mientras se graba con protocolo— no se leía.
                 cv2.putText(
                     frame,
                     f"etiqueta {etiqueta}",
-                    (10, ALTO_TEXTO + 88),
+                    (10, ALTO_TEXTO + 110),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 100), 2,
                 )
 

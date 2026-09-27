@@ -43,7 +43,7 @@ calculan al final:
    Es la parametrización NATURAL de este mecanismo: la abducción del robot es
    ``±ψ`` y la flexión es ``α`` o ``α − 180``. Ver ``articulares``.
 4. **Escalar ψ dentro de la envolvente del robot**, que depende de α y sale
-   de las tablas 2D del barrido (``alcance_robot``): arriba el robot llega a
+   de las tablas 2D medidas (``alcance_robot``): arriba el robot llega a
    ~30°, al frente a ~70°, abajo a ~55°. El operador cubre ~90° en todas. Se
    escala en vez de recortar para que el gesto se conserve entero. Las
    ganancias provisionales que midió el P5.2 sin este modelo (0.33 en
@@ -71,7 +71,7 @@ from .limits import (
     FLEXION_RANGE_EXTENDIDO,
     ArmClamp,
     Side,
-    arm_abduccion_range,
+    arm_abduccion_range_extendido,
     clamp_arm,
 )
 
@@ -150,49 +150,32 @@ def al_frente(h) -> tuple[float, float, float] | None:
     return _unitario((L, S, 0.0)) or (1.0, 0.0, 0.0)
 
 
-def alcance_robot(alfa: float, lado: Side | str) -> float:
-    """Ángulo máximo con el lateral que admite el robot en el azimut ``α``.
+def alcance_robot(
+    alfa: float,
+    lado: Side | str,
+    rama: int = -1,
+    flexion_range: tuple[float, float] = FLEXION_RANGE_EXTENDIDO,
+) -> float:
+    """Ángulo máximo con el lateral que admite el robot en el azimut ``α``,
+    usando la rama ``rama`` de la cinemática inversa.
 
-    Sale de las tablas 2D del barrido (``limits.py``), que son la autoridad.
-    ``α`` se recorta a [0, 180] (el hemisferio frontal):
+    Sale de las tablas 2D de ``limits.py``, que son la autoridad: la flexión que
+    corresponde a ``α`` en esa rama (recortada a ``flexion_range``) indexa la
+    tabla, y el alcance es el tope de la abducción en el sentido de la rama —el
+    mínimo, cambiado de signo, en la rama −1; el máximo en la +1—.
 
-    - ``α < 90`` (por encima de la horizontal): el máximo de la abducción
-      POSITIVA de la tabla en flexión = α.
-    - ``α ≥ 90`` (por debajo): el máximo de la abducción NEGATIVA en flexión =
-      α − 180.
-
-    Las dos mitades se tocan en α = 90, donde el barrido —con su resolución
-    de 5°— da valores que no casan: en el brazo izquierdo 70 → 75 | 70 → 75
-    alrededor de la costura. Ese diente de sierra, escalado, movía la abducción
-    ~4° en medio grado de α justo donde el operador pasa un cuarto del tiempo.
-    Por eso en ``[90 − COSTURA_TABLA, 90 + COSTURA_TABLA]`` se toma en α = 90
-    el MENOR de los dos lados y se interpola linealmente hacia cada borde: la
-    envolvente queda continua y nunca promete más de lo que la tabla admite en
-    ninguno de los dos lados (la tabla es lineal entre nodos de 5°).
+    En la rama −1 con la flexión extendida, ``α`` de 0 a 180 recorre la tabla de
+    −180 a 0: la zona [−180, −95] medida en el P5.3 y la de agosto a
+    continuación. Las dos casan en −95/−90 (−70 en los dos brazos), así que la
+    envolvente es continua sin suavizar nada. Las cifras: ~30° arriba, ~70° al
+    frente, ~55° abajo.
     """
     lado = Side.parse(lado)
     alfa = min(180.0, max(0.0, float(alfa)))
-    if abs(alfa - 90.0) < COSTURA_TABLA:
-        centro = min(
-            max(0.0, arm_abduccion_range(90.0, lado)[1]),
-            max(0.0, -arm_abduccion_range(-90.0, lado)[0]),
-        )
-        borde_alfa = 90.0 - COSTURA_TABLA if alfa < 90.0 else 90.0 + COSTURA_TABLA
-        borde = _alcance_crudo(borde_alfa, lado)
-        t = abs(alfa - 90.0) / COSTURA_TABLA
-        return centro + t * (borde - centro)
-    return _alcance_crudo(alfa, lado)
-
-
-#: Semiancho, en grados de α, de la franja donde se suaviza la unión de las
-#: dos mitades de la tabla. Es un paso del barrido.
-COSTURA_TABLA: float = 5.0
-
-
-def _alcance_crudo(alfa: float, lado: Side) -> float:
-    if alfa < 90.0:
-        return max(0.0, arm_abduccion_range(alfa, lado)[1])
-    return max(0.0, -arm_abduccion_range(alfa - 180.0, lado)[0])
+    flexion = articulares(0.0, alfa, rama)[1]
+    flexion = min(flexion_range[1], max(flexion_range[0], flexion))
+    lower, upper = arm_abduccion_range_extendido(flexion, lado)
+    return max(0.0, -lower) if rama < 0 else max(0.0, upper)
 
 
 def escala_radial(
@@ -374,6 +357,15 @@ class RetargetBrazo:
         f = self._flexion_de(rama, alfa)
         return self.flexion_range[0] - tolerancia <= f <= self.flexion_range[1] + tolerancia
 
+    def _psi_robot(self, psi_humano: float, alfa: float, rama: int) -> float:
+        psi_max = alcance_robot(alfa, self.lado, rama, self.flexion_range)
+        return escala_radial(
+            psi_humano,
+            max(0.0, psi_max - self.margen),
+            alcance_humano=self.alcance_humano,
+            rodilla=self.rodilla,
+        )
+
     def __call__(self, h) -> Retargeting | None:
         """Un paso. ``h`` es la dirección hombro→destino del operador en el
         marco del robot, ``(L, S, A)``; no hace falta que sea unitaria.
@@ -391,15 +383,8 @@ class RetargetBrazo:
         # Tras proyectar al frente, α ∈ [0, 180] salvo redondeo.
         alfa = min(180.0, max(0.0, alfa))
 
-        psi_max = max(0.0, alcance_robot(alfa, self.lado) - self.margen)
-        psi_r = escala_radial(
-            psi_h,
-            psi_max,
-            alcance_humano=self.alcance_humano,
-            rodilla=self.rodilla,
-        )
-
         # -- rama -----------------------------------------------------------
+        # Se decide ANTES de escalar, porque el alcance depende de la rama.
         cambio = False
         if not self._admite(self._rama, alfa, self.histeresis):
             otra = -self._rama
@@ -408,7 +393,7 @@ class RetargetBrazo:
                 cambio = True
         elif (
             self._rama != self.rama_preferida
-            and psi_r < self.polo[0]
+            and self._psi_robot(psi_h, alfa, self._rama) < self.polo[0]
             and self._admite(self.rama_preferida, alfa, 0.0)
         ):
             # Cerca del polo el cambio es gratis (el brazo apenas se mueve):
@@ -417,6 +402,8 @@ class RetargetBrazo:
             cambio = True
         if cambio:
             self._cambios += 1
+
+        psi_r = self._psi_robot(psi_h, alfa, self._rama)
 
         flexion_objetivo = min(
             self.flexion_range[1],

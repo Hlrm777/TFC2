@@ -161,9 +161,15 @@ FLEXION_RANGE: tuple[float, float] = (-90.0, 90.0)
 #: −180° permite cubrir todo el hemisferio frontal con una sola rama de la
 #: cinemática inversa, sin esa costura.
 #:
-#: Pendiente de confirmar en el CAD: que la unión del hombro y el cableado
-#: admitan ese giro. Mientras tanto se puede volver a ±90° con
-#: ``TELMEOW_ARM_FLEXION_MIN=-90``.
+#: Verificado el 2026-09-27 con los detectores del visor: la zona [−180, −95]
+#: está barrida (``_TABLE_EXT_L``/``_R``), y la unión y el motor que viaja con el
+#: brazo no chocan con el tronco en ninguna pose admisible.
+#:
+#: El cable del hombro NO está modelado en el CAD, así que no se verifica: se
+#: declara como supuesto de diseño. El mapeo por dirección solo usa flexión en
+#: [−180, 0], o sea 180° de recorrido, el mismo que el ±90° original desplazado
+#: 90°; montado con el cable relajado en flexión −90° (brazo al frente), la
+#: torsión queda en ±90°, igual que en el diseño original.
 FLEXION_RANGE_EXTENDIDO: tuple[float, float] = (-180.0, 90.0)
 HEAD_PAN_RANGE: tuple[float, float] = (-90.0, 90.0)
 HEAD_TILT_RANGE: tuple[float, float] = (-39.0, 42.0)  # asimétrico
@@ -240,6 +246,54 @@ _ARM_TABLES: dict[Side, tuple[tuple[float, float, float], ...]] = {
 # resultados sin sentido.
 _ARM_FLEXION_KEYS: dict[Side, tuple[float, ...]] = {
     side: tuple(row[0] for row in table) for side, table in _ARM_TABLES.items()
+}
+
+
+# --------------------------------------------------------------------------
+# Zona de flexión extendida [-180, -95], MEDIDA (P5.3, 2026-09-27)
+# --------------------------------------------------------------------------
+#
+# Mismo criterio y mismo procedimiento que las tablas de arriba: el `probe()`
+# del visor (plano posterior + BVH brazo-tronco), paso 5°, rango contiguo
+# alrededor de abducción 0 y demás DOF en home. El arnés que lo corrió
+# reprodujo las 37 filas de las tablas de arriba SIN UNA SOLA DIFERENCIA en los
+# dos brazos, así que estas filas son comparables con ellas.
+#
+# No son el reflejo exacto de la tabla (``(a, f) ≡ (−a, f ± 180)``): coinciden
+# en 12 de 18 filas en el brazo izquierdo y en 9 en el derecho, y en el resto
+# difieren en un paso de 5° (dos, una vez, en el máximo del derecho a −170), en
+# los dos sentidos. El brazo solo es simétrico a ±2 mm alrededor de su eje, y
+# con pasos de 5° eso basta para mover una fila. En
+# el límite que usa el mapeo por dirección (el mínimo) el reflejo prometía 5° de
+# más en 3 filas del izquierdo y 2 del derecho, más que el margen de 2° de
+# ``retarget``; por eso manda lo medido y no el reflejo.
+
+_TABLE_EXT_L: tuple[tuple[float, float, float], ...] = (
+    (-180.0, -30.0, 55.0), (-175.0, -30.0, 55.0), (-170.0, -30.0, 45.0),
+    (-165.0, -30.0, 30.0), (-160.0, -35.0, 20.0), (-155.0, -35.0, 15.0),
+    (-150.0, -35.0, 15.0), (-145.0, -40.0, 10.0), (-140.0, -45.0, 10.0),
+    (-135.0, -50.0, 10.0), (-130.0, -55.0, 10.0), (-125.0, -60.0, 10.0),
+    (-120.0, -60.0, 5.0), (-115.0, -65.0, 5.0), (-110.0, -65.0, 5.0),
+    (-105.0, -65.0, 5.0), (-100.0, -70.0, 5.0), (-95.0, -70.0, 5.0),
+)
+
+_TABLE_EXT_R: tuple[tuple[float, float, float], ...] = (
+    (-180.0, -30.0, 55.0), (-175.0, -30.0, 55.0), (-170.0, -30.0, 50.0),
+    (-165.0, -30.0, 30.0), (-160.0, -35.0, 20.0), (-155.0, -35.0, 15.0),
+    (-150.0, -40.0, 15.0), (-145.0, -40.0, 10.0), (-140.0, -45.0, 10.0),
+    (-135.0, -50.0, 10.0), (-130.0, -55.0, 10.0), (-125.0, -60.0, 10.0),
+    (-120.0, -60.0, 5.0), (-115.0, -65.0, 5.0), (-110.0, -65.0, 5.0),
+    (-105.0, -65.0, 5.0), (-100.0, -70.0, 5.0), (-95.0, -70.0, 5.0),
+)
+
+#: Tabla completa de [-180, 90]: la zona medida en el P5.3 seguida de la del
+#: barrido de agosto. Es la que usa ``arm_abduccion_range_extendido``.
+_ARM_TABLES_EXT: dict[Side, tuple[tuple[float, float, float], ...]] = {
+    Side.L: _TABLE_EXT_L + _TABLE_L,
+    Side.R: _TABLE_EXT_R + _TABLE_R,
+}
+_ARM_FLEXION_KEYS_EXT: dict[Side, tuple[float, ...]] = {
+    side: tuple(row[0] for row in table) for side, table in _ARM_TABLES_EXT.items()
 }
 
 
@@ -397,27 +451,42 @@ def arm_abduccion_range_extendido(
 ) -> tuple[float, float]:
     """Como ``arm_abduccion_range`` pero válida para flexiones en [−180, 180].
 
-    Fuera de ±90° no hay barrido, pero no hace falta: el cardán es ideal en el
-    sentido que importa aquí —el eje de abducción es perpendicular al de
-    flexión y la dirección de reposo del brazo va sobre el eje de flexión—, así
-    que ``(a, f)`` y ``(−a, f ± 180)`` ponen el brazo **en la misma dirección**,
-    solo girado 180° sobre su propio eje. El brazo es simétrico alrededor de su
-    eje (medido en ``Brazo_Der_W.stl``: radios iguales a ±2 mm), así que la
-    colisión brazo-tronco y el plano posterior dan lo mismo en las dos. De ahí::
-
-        rango(f) = (−max(f ∓ 180), −min(f ∓ 180))    para |f| > 90
-
-    Lo que esa equivalencia NO cubre es la pieza de unión y el motor que viaja
-    con el brazo, que sí giran distinto. Se declara y se verifica en el visor.
+    - **[−180, 90]: tabla medida.** La zona [−180, −95] se barrió en el P5.3 con
+      el mismo criterio que la de agosto (ver ``_TABLE_EXT_L``); entre −95 y −90
+      se interpola entre las dos.
+    - **(90, 180]: reflejo, sin medir.** ``(a, f)`` y ``(−a, f − 180)`` ponen el
+      brazo en la misma dirección, girado 180° sobre su propio eje, así que se
+      usa ``rango(f) = (−max(f − 180), −min(f − 180))``. Con
+      ``FLEXION_RANGE_EXTENDIDO`` esa zona es inalcanzable (el tope es +90); se
+      conserva para que la función esté definida en todo el círculo. En la
+      zona que sí se midió, el reflejo acertó en 9-12 de 18 filas y falló por
+      uno o dos pasos de 5° en el resto: si alguna vez se usa esta zona, hay
+      que barrerla.
     """
     side = Side.parse(lado)
     flexion = _check_finite(flexion, "flexion")
     flexion = min(180.0, max(-180.0, flexion))
-    if FLEXION_RANGE[0] <= flexion <= FLEXION_RANGE[1]:
-        return arm_abduccion_range(flexion, side, policy=policy)
-    equivalente = flexion + 180.0 if flexion < 0.0 else flexion - 180.0
-    lower, upper = arm_abduccion_range(equivalente, side, policy=policy)
-    return (-upper, -lower)
+    if flexion > FLEXION_RANGE[1]:
+        lower, upper = arm_abduccion_range(flexion - 180.0, side, policy=policy)
+        return (-upper, -lower)
+
+    keys = _ARM_FLEXION_KEYS_EXT[side]
+    table = _ARM_TABLES_EXT[side]
+    index = bisect.bisect_left(keys, flexion)
+    if index < len(keys) and keys[index] == flexion:
+        lower, upper = table[index][1], table[index][2]
+    else:
+        low_flex, low_min, low_max = table[index - 1]
+        high_flex, high_min, high_max = table[index]
+        t = (flexion - low_flex) / (high_flex - low_flex)
+        lower = low_min + t * (high_min - low_min)
+        upper = low_max + t * (high_max - low_max)
+
+    if policy is AbduccionPolicy.INTERSECTION:
+        one_d_min, one_d_max = ARM_ABDUCCION_1D[side]
+        lower = max(lower, one_d_min)
+        upper = min(upper, one_d_max)
+    return (lower, upper)
 
 
 # --------------------------------------------------------------------------

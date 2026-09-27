@@ -143,27 +143,33 @@ def test_al_frente_proyecta_y_no_toca_lo_frontal():
 
 
 @pytest.mark.parametrize("lado", [Side.L, Side.R])
-def test_el_alcance_es_continuo_en_la_costura_de_la_tabla(lado):
+def test_el_alcance_es_continuo_en_toda_la_envolvente(lado):
+    """Con la zona extendida MEDIDA, las dos tablas casan en −95/−90 y la
+    envolvente es continua sin suavizar nada."""
     alfas = np.linspace(0, 180, 3601)
     alcances = np.array([alcance_robot(a, lado) for a in alfas])
     assert np.max(np.abs(np.diff(alcances))) < 0.1
-    # Y dentro de la franja no promete más de lo que admite cada lado.
-    for a in np.linspace(85, 95, 41):
-        arriba = arm_abduccion_range(a, lado)[1] if a <= 90 else math.inf
-        abajo = -arm_abduccion_range(a - 180.0, lado)[0] if a >= 90 else math.inf
-        assert alcance_robot(a, lado) <= min(arriba, abajo) + 1e-9
 
 
 @pytest.mark.parametrize("lado", [Side.L, Side.R])
 def test_el_alcance_sale_de_la_tabla(lado):
-    assert alcance_robot(0.0, lado) == arm_abduccion_range(0.0, lado)[1]      # arriba
-    assert alcance_robot(180.0, lado) == -arm_abduccion_range(0.0, lado)[0]   # abajo
-    assert alcance_robot(135.0, lado) == -arm_abduccion_range(-45.0, lado)[0]
-    assert alcance_robot(45.0, lado) == arm_abduccion_range(45.0, lado)[1]
+    """Rama −1: α indexa la tabla en flexión α − 180, y el alcance es el mínimo
+    de la abducción cambiado de signo."""
+    for alfa in (0.0, 15.0, 45.0, 90.0, 120.0, 180.0):
+        assert alcance_robot(alfa, lado) == -arm_abduccion_range_extendido(alfa - 180.0, lado)[0]
+    # Rama +1: el máximo en flexión α.
+    assert alcance_robot(45.0, lado, rama=1) == arm_abduccion_range(45.0, lado)[1]
     # Las cifras: el robot llega a ~30 arriba, ~55 abajo, ~70 al frente.
     assert alcance_robot(0.0, lado) == pytest.approx(30.0)
     assert alcance_robot(180.0, lado) == pytest.approx(55.0)
-    assert 65.0 <= alcance_robot(90.0, lado) <= 75.0
+    assert alcance_robot(90.0, lado) == pytest.approx(70.0)
+
+
+@pytest.mark.parametrize("lado", [Side.L, Side.R])
+def test_con_flexion_de_90_el_alcance_se_recorta_al_tope(lado):
+    """En el modo de reserva la flexión no pasa de −90: la rama −1 por encima de
+    la horizontal se queda en la fila −90 de la tabla."""
+    assert alcance_robot(30.0, lado, -1, FLEXION_RANGE) == -arm_abduccion_range(-90.0, lado)[0]
 
 
 def test_las_ganancias_medidas_en_p5_2_son_la_envolvente():
@@ -210,10 +216,42 @@ def test_el_rango_extendido_coincide_con_la_tabla_dentro_de_90(lado):
         assert arm_abduccion_range_extendido(f, lado) == arm_abduccion_range(f, lado)
 
 
+#: Filas medidas el 2026-09-27 con los detectores del visor (P5.3), copiadas a
+#: mano de la salida del barrido y NO de limits.py, para que la prueba ate el
+#: módulo a la medición y no a sí mismo.
+MEDIDO_P5_3 = {
+    Side.L: {-180: (-30, 55), -165: (-30, 30), -150: (-35, 15), -135: (-50, 10),
+             -120: (-60, 5), -105: (-65, 5), -95: (-70, 5)},
+    Side.R: {-180: (-30, 55), -170: (-30, 50), -150: (-40, 15), -135: (-50, 10),
+             -120: (-60, 5), -105: (-65, 5), -95: (-70, 5)},
+}
+
+
 @pytest.mark.parametrize("lado", [Side.L, Side.R])
-def test_el_rango_extendido_es_la_tabla_reflejada(lado):
-    lo, hi = arm_abduccion_range(45.0, lado)
-    assert arm_abduccion_range_extendido(-135.0, lado) == (-hi, -lo)
+def test_la_zona_extendida_es_la_medida(lado):
+    for f, rango in MEDIDO_P5_3[lado].items():
+        assert arm_abduccion_range_extendido(float(f), lado) == rango
+
+
+@pytest.mark.parametrize("lado", [Side.L, Side.R])
+def test_el_reflejo_solo_aproxima_la_zona_medida(lado):
+    """Por qué manda la tabla medida y no la simetría: el reflejo acierta en la
+    mitad de las filas o más, pero en el resto falla por un paso de 5° en el
+    mínimo (el límite que usa la rama −1) y hasta por dos en el máximo."""
+    iguales = 0
+    for f in range(-180, -90, 5):
+        medido = arm_abduccion_range_extendido(float(f), lado)
+        lo, hi = arm_abduccion_range(f + 180.0, lado)
+        reflejo = (-hi, -lo)
+        assert abs(medido[0] - reflejo[0]) <= 5.0
+        assert abs(medido[1] - reflejo[1]) <= 10.0
+        iguales += medido == reflejo
+    assert 8 <= iguales < 18      # medido: 12 filas iguales en el izquierdo, 9 en el derecho
+
+
+@pytest.mark.parametrize("lado", [Side.L, Side.R])
+def test_por_encima_de_90_sigue_siendo_el_reflejo(lado):
+    """Zona inalcanzable con el rango extendido; se define por reflejo."""
     lo, hi = arm_abduccion_range(-30.0, lado)
     assert arm_abduccion_range_extendido(150.0, lado) == (-hi, -lo)
 

@@ -109,7 +109,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**734 pruebas en verde** (600 + 134 del P5.3). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**740 pruebas en verde** (600 + 140 del P5.3). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -265,12 +265,18 @@ mueve.
 
 **La flexión ya no se limita a ±90° (P5.3, H35).** ±90° era el rango de los
 sliders del visor, no un tope del servo (XL430: 360° en modo posición), y el
-barrido solo exploró dentro de él. Fuera de ±90 la tabla se extiende por
-simetría: `(a, f)` y `(−a, f ± 180)` ponen el brazo en la misma dirección
-(verificado contra el rig y renderizando el visor). `clamp_arm` conserva ±90
-por defecto y el extendido se pide con `flexion_range=FLEXION_RANGE_EXTENDIDO`.
-**Pendiente de confirmar en el CAD** que la unión y el cableado del hombro
-admiten −180; si no, `TELMEOW_ARM_FLEXION_MIN=-90`.
+barrido de agosto solo exploró dentro de él. La zona [−180, −95] **se barrió
+el 2026-09-27** con los mismos detectores del visor (`tools/barrido_colisiones.mjs`,
+ver P5.3) y está en `limits._TABLE_EXT_L/_R`; la unión del hombro y el motor del
+brazo, que ningún detector revisaba, tampoco chocan (0 en ~820 poses por
+brazo). `clamp_arm` conserva ±90 por defecto y el extendido se pide con
+`flexion_range=FLEXION_RANGE_EXTENDIDO`.
+
+**El cable del hombro no está modelado en el CAD**, así que no se verifica: se
+**declara como supuesto de diseño**. El mapeo por dirección solo usa flexión en
+[−180, 0], o sea 180° de recorrido, el mismo que el ±90° original desplazado
+90°. Montado con el cable relajado en flexión −90° (brazo al frente), su
+torsión queda en ±90°, igual que en el diseño original.
 
 **La abducción depende de la flexión.** Las tablas 2D del barrido BVH (paso 5°,
 refinado 1°, demás DOF en home) son **la autoridad**; están en `limits.py`.
@@ -288,9 +294,10 @@ Orden de operaciones en `clamp_arm`: recortar la **flexión** a su rango primero
 flexión, y con ese rango recortar la **abducción**. El rango de la flexión es
 **±90° por defecto** —lo que cubrió el barrido, y lo que sigue usando el mapeo
 `articular`— y **[−180, 90] cuando se pasa `flexion_range=FLEXION_RANGE_EXTENDIDO`**,
-que es lo que hace el mapeo `direccion` del P5.3. Fuera de ±90 la tabla no se
-interpola directamente: `arm_abduccion_range_extendido` la refleja con la
-equivalencia `(a, f) ≡ (−a, f ± 180)`.
+que es lo que hace el mapeo `direccion` del P5.3. Por debajo de −90,
+`arm_abduccion_range_extendido` interpola la **tabla medida** de [−180, −95]
+(no el reflejo `(a, f) ≡ (−a, f ± 180)`, que se probó y falla por un paso de 5°
+en parte de las filas).
 
 La prueba que distingue la implementación correcta de la errónea:
 `clamp_arm(+70, flexion=+90, 'izq')` debe dar **+70**, no +32.
@@ -1016,8 +1023,9 @@ defecto en `ArmTracker` (el articular queda conmutable con `k`):
    arriba / 90 al frente / 180 abajo—, que es la parametrización natural de
    este mecanismo: abducción = ±ψ, flexión = α o α − 180.
 5. **Escala de ψ dentro de la envolvente del robot**, que sale de las tablas 2D
-   (`alcance_robot`: ~30° arriba, ~70° al frente, ~55° abajo) y se suaviza en la
-   costura de la tabla. El operador con el brazo colgando pide exactamente el
+   medidas y de la rama en uso (`alcance_robot`: ~30° arriba, ~70° al frente,
+   ~55° abajo; continua sin suavizar, porque la zona medida casa con la de
+   agosto en −95/−90). El operador con el brazo colgando pide exactamente el
    reposo; más allá de 90° satura con pendiente cero (curva C¹, sin esquina
    contra la que vibrar). **Esto sustituye a las cuatro ganancias**: las
    provisionales del P5.2 (0.33 / 0.51) son justo `30/90` y `≈55/90` (H36).
@@ -1037,7 +1045,7 @@ defecto en `ArmTracker` (el articular queda conmutable con `k`):
 |---|---|---|
 | Saltos de rama | 174 / 129 | **0 / 0** |
 | Correlación componente **anterior** operador→robot | 0.64 / 0.62 | **0.93 / 0.89** |
-| Correlación componente lateral | 0.35 / 0.29 | **0.67 / 0.57** |
+| Correlación componente lateral | 0.35 / 0.29 | **0.66 / 0.56** |
 | Temblor de la punta p95 (°/frame) | 10.2 / 9.5 | **7.1 / 6.7** |
 | Con flexión ±90 + histéresis: cambios de rama | — | 54 / 48 |
 
@@ -1052,6 +1060,32 @@ simétrico alrededor de su eje (medido en `Brazo_Der_W.stl`: radios iguales a
 ±2 mm), así que el giro de 180° sobre su eje que implica la otra rama no se ve.
 Lo que SÍ gira distinto es la **unión** y el **motor que viaja con el brazo**.
 
+#### Barrido de la zona extendida — 2026-09-27
+
+La primera versión del P5.3 extendía la tabla **por simetría**, sin barrer. Se
+barrió después, con `tools/barrido_colisiones.mjs`: una copia en memoria del
+visor que expone su `probe()` —plano posterior + BVH brazo-tronco, **el mismo
+criterio que opera en vivo**— y repite el procedimiento de agosto (paso 5°,
+rango contiguo alrededor de abducción 0, demás DOF en home; 1D con refinado a
+1°). Resultado en `barrido_colisiones_2026-09-27.json`.
+
+| Comprobación | Resultado |
+|---|---|
+| Reproducción de la tabla de agosto en [−90, 90] | **37/37 filas idénticas** en los dos brazos: el arnés es fiel |
+| 1D | abducción −55/+32 (izq) y −55/+33 (der), como en agosto; flexión libre de −180 a +90 con el brazo en cruz |
+| Zona [−180, −95] contra el reflejo | iguales **12/18** (izq) y **9/18** (der); el resto difiere **un paso de 5°** (dos, una vez, en el máximo del derecho a −170) |
+| En el límite que usa la rama −1 (el mínimo) | el reflejo prometía **5° de más** en 3 filas (izq) y 2 (der), más que el margen de 2° |
+| Unión y motor del brazo contra el tronco (+ tapa y cajita) | **0 choques** en 822 (izq) y 818 (der) poses admisibles; libres también en home |
+
+Consecuencia: **manda la tabla medida**, no el reflejo (`limits._TABLE_EXT_*`).
+El reflejo solo se conserva para flexión > 90, que el rango extendido no
+alcanza. La simetría era una buena aproximación —a un paso de barrido— pero no
+lo bastante para usarla como límite.
+
+Lo que el barrido **no** cubre, y se declara: combinaciones con los demás DOF
+fuera de home (como en agosto, §3.3.8), contacto de la unión con el motor fijo
+del hombro (van acoplados), y el cable, que no está en el CAD (ver §0.5).
+
 **Cambios en el contrato**: ninguno en el JSON. El visor recibe `armLtw` en
 [−180, 90] y ya lo aplicaba; solo cambió el rango de sus dos sliders de flexión.
 El CSV gana `mapeo`, `flexion_min`, `h_lat/sup/ant_*` (la dirección cruda, que
@@ -1060,8 +1094,10 @@ permite reproducir OFFLINE cualquier mapeo futuro sobre la misma sesión) y
 
 **Lo que falta, con el operador delante:**
 
-1. **Confirmar en Fusion** que la unión del hombro, el motor del brazo y el
-   cable admiten flexión hasta −180°. Si no, `TELMEOW_ARM_FLEXION_MIN=-90`.
+1. ~~Confirmar en Fusion la unión, el motor del brazo y el cable~~ → **hecho
+   con los detectores del visor** el 2026-09-27 para unión y motor (0 choques).
+   El cable no existe en el CAD: pasa a **supuesto de diseño declarado** (§0.5,
+   §3.3.11), no a verificación.
 2. Sesión con `--publish`: acercar las manos a la cámara, subir y bajar el brazo
    por delante, cruzar por delante del cuerpo. Alternar `k` para ver los dos
    mapeos sobre el mismo gesto.
@@ -1771,6 +1807,12 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
     al rango de ±50°, pero hay que declararlo junto con la ganancia empleada, no
     reportar el temblor crudo del estimador como si fuera el del robot.
 
+11. **El cable del hombro no está modelado.** La flexión extendida (P5.3) se
+    verificó contra colisiones de brazo, unión y motor, pero el cableado no
+    existe en el CAD. Se declara como supuesto de diseño: 180° de recorrido
+    usado, el mismo que el ±90° original, con el cable relajado en flexión −90°
+    para que la torsión quede en ±90°.
+
 ---
 
 # PARTE 4 — Verificación end-to-end
@@ -2043,9 +2085,19 @@ equivalente en Python puro, sin privilegios de administrador.
 
 - **«¿Por qué extendió la flexión a −180° si su barrido llegaba a ±90°?»** *(nueva)*
   Porque ±90 era el rango del slider, no del servo, y porque con ±90 la costura
-  cae en el espacio de trabajo. Fuera de ±90 no hace falta barrer: `(a, f)` y
-  `(−a, f ± 180)` son la misma dirección del brazo, y el brazo es simétrico
-  alrededor de su eje. Lo que se verificó aparte es la unión del hombro.
+  cae en el espacio de trabajo. Y la zona nueva **se barrió** con el mismo
+  criterio que la de agosto: el arnés reprodujo la tabla original fila por fila
+  antes de medir la nueva. La simetría `(a, f) ≡ (−a, f ± 180)` predecía la
+  zona a un paso de 5°, pero no exacta, así que manda lo medido. La unión y el
+  motor del brazo, que el detector del visor no revisa, se comprobaron aparte:
+  sin choques.
+
+- **«¿Y el cable del hombro con 180° de giro?»** *(nueva)*
+  No está modelado en el CAD, así que se declara como supuesto de diseño, no se
+  presenta como verificado. El argumento: el mapeo solo usa flexión en
+  [−180, 0], el mismo recorrido de 180° que el ±90° original, desplazado. Con
+  el cable relajado en −90° (brazo al frente) la torsión queda en ±90°, igual
+  que en el diseño que ya se daba por bueno.
 
 - **«¿Su accuracy de emoción generaliza a otras personas?»**
   El modelo se entrena con FER-2013 (multi-sujeto), no con el dataset propio.
@@ -2935,9 +2987,10 @@ instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 | **H31** | Una bandera **enclavada** hacía que el HUD y el CSV declararan como observada una vertical de tronco **congelada** (9.8 % de caderas vistas frente a 86.5 % declarado). Un indicador de origen tiene que ser fresco o decir su edad | P5, §7.14 |
 | **H32** | La visibilidad de la mano se medía con el **mínimo de cuatro** landmarks y la del codo con **uno**, así que la comparación mano-frente-a-codo estaba sesgada por el agregador. Puerta corregida a la muñeca | P5, §7.15 |
 | **H33** | **Las ganancias sí hacen falta, y solo en abducción** (~0.33/0.51): el recorrido del hombro humano desborda el del robot, que se recortó en el 67-75 % de los frames. Consecuencia del H30. En flexión coinciden | P5, §0.5 |
+| **H34** | **La exposición de la cámara sobrevive al proceso** (DirectShow la guarda en el driver) y dejó la imagen **negra a 30 fps sin ningún error**. Se pide explícitamente al abrir, y el HUD avisa del brillo | §4.0, P5, §7.16 |
 | **H35** | **El brazo «daba la vuelta» por una costura del mapeo articular, no por la profundidad**: con flexión ±90, «al frente» tiene dos soluciones y se elegía por el signo de una componente que al frente es ruido (303 saltos en 9 min). Retargeting por dirección y flexión extendida a −180 | P5.3, §0.5 |
 | **H36** | Las ganancias de abducción del H33 **no son ganancias**: son la envolvente del robot entre 90°. Se sustituyen por un escalado dependiente de la dirección que sale de la tabla | P5.3 |
-| **H34** | **La exposición de la cámara sobrevive al proceso** (DirectShow la guarda en el driver) y dejó la imagen **negra a 30 fps sin ningún error**. Se pide explícitamente al abrir, y el HUD avisa del brillo | §4.0, P5, §7.16 |
+| **H37** | **La simetría aproximaba la zona extendida, pero no la medía**: el reflejo `(a, f) ≡ (−a, f ± 180)` falló por un paso de 5° en 6-9 de 18 filas, y en el límite usado prometía 5° de más. Barrida con los detectores del visor (tras reproducir 37/37 filas de agosto); manda lo medido. Unión y motor: 0 choques. El cable, sin CAD, pasa a supuesto declarado | P5.3, §0.5, §3.3.11 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la
 investigación de la cámara que salió de él. H19 y H20 son **correcciones a

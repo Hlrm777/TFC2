@@ -727,8 +727,9 @@
      vuelta por la pose en cruz. Con −180 una sola rama (abducción ≤ 0) cubre
      todo el hemisferio frontal. (a, f) y (−a, f±180) ponen el brazo en la
      misma dirección, girado 180° sobre su eje, que no se ve porque el brazo
-     es simétrico; lo que SÍ cambia es la unión y el motor del brazo: revisar
-     que no interfieran con el tronco. */
+     es simétrico. La zona [−180, −95] se barrió el 2026-09-27 con estos mismos
+     detectores (tools/barrido_colisiones.mjs; tabla en limits.py) y la unión
+     y el motor del brazo, que giran distinto, no chocan con el tronco. */
   const BACKPLANE = { back:-1, marginMM:20, enabled:true };
   const PAIR_FILE = {'brazo izq':'Brazo_Izq_W.stl','brazo der':'Brazo_Der_W.stl'};
   let planeMesh = null; const armTips = {};

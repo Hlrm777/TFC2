@@ -519,8 +519,9 @@ class ArmConfig:
     # banderas de inversión, que solo se aplican con ``mapeo = "articular"``.
     # ``flexion_min = -180`` quita la costura del frente (el brazo que daba la
     # vuelta al acercar las manos a la cámara); ``-90`` vuelve al rango que
-    # cubrió el barrido, con histéresis en la costura. Pendiente de confirmar en
-    # el CAD que la unión del hombro admite -180.
+    # cubrió el barrido de agosto, con histéresis en la costura. La zona hasta
+    # -180 está barrida (limits._TABLE_EXT_*) y la unión y el motor del brazo no
+    # chocan; el cable no está en el CAD y se declara como supuesto de diseño.
     mapeo: str = "direccion"
     flexion_min: float = -180.0
     alcance_humano: float = 90.0

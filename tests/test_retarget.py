@@ -504,9 +504,11 @@ def _tracker(**kwargs):
     return tracker, reloj
 
 
-def test_el_mapeo_por_defecto_es_direccion_con_flexion_extendida():
+def test_por_defecto_la_flexion_es_la_extendida():
+    # El mapeo por defecto es 'posicion' desde el P5.4 (test_posicion.py), que
+    # comparte con 'direccion' el rango extendido y el reposo.
     tracker, _ = _tracker()
-    assert tracker.mapeo == "direccion"
+    assert tracker.mapeo in ("posicion", "direccion")
     assert tracker.flexion_range == FLEXION_RANGE_EXTENDIDO
     assert tracker.reposo[Side.L] == (-55.0, 0.0)
 
@@ -566,7 +568,7 @@ def test_la_configuracion_lee_el_mapeo_del_entorno():
     cfg = AppConfig.from_env({"TELMEOW_ARM_MAPEO": "articular", "TELMEOW_ARM_FLEXION_MIN": "-90"})
     assert cfg.arm.mapeo == "articular"
     assert cfg.arm.flexion_min == -90.0
-    assert AppConfig.from_env({}).arm.mapeo == "direccion"
+    assert AppConfig.from_env({}).arm.mapeo == "posicion"
 
 
 # --------------------------------------------------------------------------
@@ -596,4 +598,30 @@ def test_la_grabacion_del_13_sin_saltos_de_rama():
         assert nuevo_m["saltos"] == 0
         assert nuevo["cambios_de_rama"][lado] == 0
         assert nuevo_m["correlacion"][2] > viejo_m["correlacion"][2] + 0.2
+        assert nuevo_m["temblor_p95"] < viejo_m["temblor_p95"]
+
+
+CSV_26 = RAIZ / "mapeo_2026-09-26.csv"
+
+
+@pytest.mark.skipif(not CSV_26.exists(), reason="falta la grabación del 2026-09-26")
+def test_la_grabacion_con_protocolo_confirma_el_p5_3():
+    """Las cifras del P5.3 que se citan salen de aquí, no de la grabación
+    descartada: la primera sesión con protocolo (acercar y alejar las manos,
+    subir y bajar por delante, cruzar por delante del cuerpo)."""
+    import sys
+
+    sys.path.insert(0, str(RAIZ / "tools"))
+    from comparar_mapeo_brazos import leer_sesion, metricas, reproducir
+
+    sesion = leer_sesion(CSV_26)
+    articular = reproducir(sesion, "articular")
+    nuevo = reproducir(sesion, "direccion")
+    for lado in (Side.L, Side.R):
+        viejo_m = metricas(sesion, articular, lado)
+        nuevo_m = metricas(sesion, nuevo, lado)
+        assert viejo_m["saltos"] > 80
+        assert nuevo_m["saltos"] == 0
+        assert nuevo["cambios_de_rama"][lado] == 0
+        assert nuevo_m["correlacion"][2] > viejo_m["correlacion"][2] + 0.3
         assert nuevo_m["temblor_p95"] < viejo_m["temblor_p95"]

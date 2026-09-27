@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import statistics
 import sys
 from collections import defaultdict
@@ -109,6 +110,14 @@ def cargar(ruta: Path) -> list[dict]:
         "gain_abduccion", "gain_aduccion", "gain_flexion", "gain_extension",
         "puntos_destino_L", "puntos_destino_R",
     ]
+    # P5.3 y P5.4: dirección unitaria, vectores en metros y extensión. Las
+    # grabaciones anteriores no las tienen y quedan en NaN, que es lo que las
+    # secciones que las usan comprueban antes de imprimir nada.
+    for s in ("L", "R"):
+        numericas += [f"h_{e}_{s}" for e in ("lat", "sup", "ant")]
+        numericas += [f"p_{e}_{s}" for e in ("lat", "sup", "ant")]
+        numericas += [f"c_{e}_{s}" for e in ("lat", "sup", "ant")]
+        numericas.append(f"ext_{s}")
 
     for fila in filas:
         for clave in numericas:
@@ -164,6 +173,110 @@ def _validos(
 
 def _fmt(valor: float | None) -> str:
     return f"{valor:5.3f}" if valor is not None else "  -- "
+
+
+def temblor_direccion(
+    vectores: list[tuple[float, float, float]],
+    tiempos: list[float],
+    ventana: float = 1.0,
+) -> float | None:
+    """Temblor de la DIRECCION del brazo, en grados: mediana, sobre ventanas de
+    ``ventana`` segundos, de la desviación angular RMS respecto a la dirección
+    media de la ventana.
+
+    Es la medida que no depende del mapeo ni de la parametrización. El temblor
+    de ``crudo_flex`` se infla cerca de la cruz por pura geometría —la flexión
+    es un azimut, y cerca del polo un milímetro de mano la cambia mucho—, y el
+    de los canales publicados mezcla el filtro con la escala de la envolvente.
+    Este no tiene ninguno de los dos problemas.
+    """
+    if len(vectores) < 10:
+        return None
+    grupos: dict[int, list[tuple[float, float, float]]] = defaultdict(list)
+    for v, t in zip(vectores, tiempos):
+        grupos[int(t // ventana)].append(v)
+    desviaciones = []
+    for grupo in grupos.values():
+        if len(grupo) < 5:
+            continue
+        media = [sum(c) / len(grupo) for c in zip(*grupo)]
+        norma = math.sqrt(sum(c * c for c in media))
+        if norma < 1e-9:
+            continue
+        media = [c / norma for c in media]
+        angulos = []
+        for v in grupo:
+            nv = math.sqrt(sum(c * c for c in v))
+            coseno = sum(a * b for a, b in zip(v, media)) / nv
+            angulos.append(math.degrees(math.acos(max(-1.0, min(1.0, coseno)))))
+        desviaciones.append(math.sqrt(sum(a * a for a in angulos) / len(angulos)))
+    return statistics.median(desviaciones) if desviaciones else None
+
+
+def _vectores(filas: list[dict], prefijo: str, lado: str):
+    """Vectores ``(lat, sup, ant)`` de un prefijo (``h`` o ``p``) en las filas
+    estimadas de ese canal, con sus tiempos."""
+    vectores, tiempos = [], []
+    for fila in filas:
+        if not fila.get(f"estimado_{lado}", 1):
+            continue
+        v = tuple(
+            fila.get(f"{prefijo}_{e}_{lado}", float("nan")) for e in ("lat", "sup", "ant")
+        )
+        if all(c == c for c in v):
+            vectores.append(v)
+            tiempos.append(fila["t"])
+    return vectores, tiempos
+
+
+def resumen_direccion(filas: list[dict]) -> None:
+    """Temblor de dirección, extensión y ruido de profundidad, por canal.
+
+    EL RUIDO DE PROFUNDIDAD es la cifra del §3.3.1 en su forma limpia: el
+    temblor de la posición de la mano en CENTIMETROS en cada eje del tronco.
+    Con la dirección normalizada no se podía separar —al normalizar, la
+    profundidad se mezcla con la vertical—; con ``p_*``, en metros, sí. Solo
+    significa algo en una etiqueta QUIETA: en movimiento mide el movimiento.
+    """
+    for lado in ("L", "R"):
+        direcciones, t_dir = _vectores(filas, "h", lado)
+        if len(direcciones) < 10:
+            continue
+        linea = (
+            f"    arm{lado}  direccion: temblor "
+            f"{_fmt(temblor_direccion(direcciones, t_dir))} grados"
+        )
+        extensiones = [
+            f.get(f"ext_{lado}", float("nan"))
+            for f in filas
+            if f.get(f"estimado_{lado}", 1)
+        ]
+        extensiones = [e for e in extensiones if e == e]
+        if len(extensiones) >= 10:
+            linea += (
+                f"   extension med {statistics.median(extensiones):.2f}"
+                f" [p05 {percentil(extensiones, 5):.2f},"
+                f" p95 {percentil(extensiones, 95):.2f}]"
+            )
+        print(linea)
+
+        posiciones, t_pos = _vectores(filas, "p", lado)
+        if len(posiciones) < 10:
+            continue
+        cm = [temblor([100.0 * p[k] for p in posiciones], t_pos) for k in range(3)]
+        if None in cm:
+            continue
+        plano = (cm[0] + cm[1]) / 2.0
+        razon = cm[2] / plano if plano > 0 else float("nan")
+        veredicto = (
+            "la PROFUNDIDAD tiembla mas: respalda el 3.3.1"
+            if razon > 1.5
+            else ("EMPATAN" if razon > 0.67 else "OJO: tiembla menos la profundidad")
+        )
+        print(
+            f"           mano en cm: lateral {cm[0]:.2f}  vertical {cm[1]:.2f}"
+            f"  PROFUNDIDAD {cm[2]:.2f}  -> x{razon:.2f} ({veredicto})"
+        )
 
 
 def resumen_bloque(nombre: str, filas: list[dict]) -> None:
@@ -226,6 +339,8 @@ def resumen_bloque(nombre: str, filas: list[dict]) -> None:
                 f"    abduccion {media_abd:.3f} vs flexion {media_flex:.3f} "
                 f"-> x{razon:.2f}  ({veredicto})"
             )
+
+    resumen_direccion(filas)
 
     for lado, clave in (("L", "recortado_L"), ("R", "recortado_R")):
         recortados = sum(f[clave] for f in filas)
@@ -313,6 +428,14 @@ def resumen_ganancias(filas: list[dict]) -> None:
     dividir por el rango equivocado propone ganancias infladas.
     """
     print(f"{'=' * 74}\nGANANCIAS SUGERIDAS\n{'=' * 74}\n")
+    mapeos = {f.get("mapeo") or "articular" for f in filas}
+    if "articular" not in mapeos:
+        print(
+            f"  No aplican: se grabo con el mapeo {', '.join(sorted(mapeos))},\n"
+            "  que escala el gesto dentro de la envolvente del robot en vez de\n"
+            "  usar ganancias (H36). Su papel lo cumple ARM_ALCANCE_HUMANO.\n"
+        )
+        return
     print(
         "  Desde el PERCENTIL, no desde el extremo (H24). Objetivo de la\n"
         f"  abduccion: el rango 1D a flexion 0 ({ARM_ABDUCCION_1D[Side.L]}).\n"
@@ -379,6 +502,8 @@ def main(argv: list[str] | None = None) -> int:
         "izq->izq" if e else "izq->der" for e in sorted(espejos, reverse=True)
     )
     print(f"Politica de espejo durante la grabacion: {politica}")
+    mapeos = sorted({f.get("mapeo") or "articular" for f in filas})
+    print(f"Mapeo(s) durante la grabacion: {', '.join(mapeos)}")
     if len(espejos) > 1:
         print(
             "AVISO: el espejo cambio a mitad de sesion. Los canales de antes y\n"

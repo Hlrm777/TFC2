@@ -1,10 +1,12 @@
-"""Compara los dos mapeos de brazos reproduciendo una sesión grabada.
+"""Compara los mapeos de brazos reproduciendo una sesión grabada.
 
 Pasa la MISMA sesión (un CSV de ``arm_tracker --record``) por el mapeo
-``articular`` del P5 original y por el mapeo ``direccion`` del P5.3, con la
-misma cadena real de ``ArmTracker`` —filtros, recorte, gracia, reposo y límite
-de velocidad— y sin cámara. Así la comparación es sobre los mismos frames y
-no depende de que el operador repita el gesto.
+``articular`` del P5 original, por el ``direccion`` del P5.3 y —si el CSV trae
+los vectores en metros ``p_*`` y ``c_*``, grabaciones del P5.4 en adelante—
+por el ``posicion`` del P5.4, con la misma cadena real de ``ArmTracker``
+—filtros, recorte, gracia, reposo y límite de velocidad— y sin cámara. Así la
+comparación es sobre los mismos frames y no depende de que el operador repita
+el gesto.
 
 De dónde sale la dirección del brazo de cada frame:
 
@@ -33,6 +35,12 @@ Qué mide, por canal del robot y por mapeo:
 ``temblor``
     Paso angular de la punta del robot por frame (p50 y p95), solo en frames
     medidos: en reposo o en rampa no es temblor.
+``corr prof``
+    Solo con ``p_*``: entre la PROFUNDIDAD de la mano en metros —cuánto está
+    por delante del hombro, sin normalizar— y la componente anterior de la
+    punta del robot. Es la queja del H38 en un número: «recojo la mano y el
+    robot sigue adelante». La dirección normalizada no la ve; el mapeo
+    ``posicion`` existe para verla.
 
 Uso::
 
@@ -81,7 +89,11 @@ def leer_sesion(ruta: Path) -> dict:
     if not filas:
         raise SystemExit(f"{ruta} está vacío")
     t = np.array([_float(f["t"]) for f in filas])
-    sesion = {"t": t, "direccion": {}, "crudo": {}, "fuente": {}}
+    sesion = {
+        "t": t, "direccion": {}, "crudo": {}, "fuente": {},
+        "vector": {}, "largo": {},
+        "con_posicion": "p_lat_L" in filas[0] and "c_lat_L" in filas[0],
+    }
     for lado in (Side.L, Side.R):
         s = lado.value
         crudo = np.array(
@@ -104,6 +116,17 @@ def leer_sesion(ruta: Path) -> dict:
         sesion["direccion"][lado] = h
         sesion["crudo"][lado] = crudo
         sesion["fuente"][lado] = fuente
+        if sesion["con_posicion"]:
+            # El largo del brazo se reconstruye igual que en el tracker:
+            # |hombro→codo| + |codo→destino|, los dos en el mismo marco.
+            p = np.array(
+                [[_float(f.get(f"{e}_{s}")) for e in ("p_lat", "p_sup", "p_ant")] for f in filas]
+            )
+            c = np.array(
+                [[_float(f.get(f"{e}_{s}")) for e in ("c_lat", "c_sup", "c_ant")] for f in filas]
+            )
+            sesion["vector"][lado] = p
+            sesion["largo"][lado] = np.linalg.norm(c, axis=1) + np.linalg.norm(p - c, axis=1)
     return sesion
 
 
@@ -122,7 +145,15 @@ def reproducir(sesion: dict, mapeo: str, **kwargs) -> dict:
         pose = ArmAngles()
         for lado in (Side.L, Side.R):
             campo_abd, campo_flex = CANALES[lado]
-            if mapeo == "direccion":
+            if mapeo == "posicion":
+                p = sesion["vector"][lado][i]
+                largo = sesion["largo"][lado][i]
+                salida = (
+                    tracker.map_posicion(lado, p, largo, ti)
+                    if np.all(np.isfinite(p)) and np.isfinite(largo)
+                    else None
+                )
+            elif mapeo == "direccion":
                 h = sesion["direccion"][lado][i]
                 salida = (
                     tracker.map_direccion(lado, h, ti) if np.all(np.isfinite(h)) else None
@@ -154,6 +185,14 @@ def _puntas(angulos: np.ndarray) -> np.ndarray:
     return np.array([direccion(a, f) for a, f in angulos])
 
 
+def _correlacion(a: np.ndarray, b: np.ndarray) -> float:
+    """Pearson, o NaN si alguna serie no varía: una punta de robot inmóvil no
+    tiene correlación con nada, y ``np.corrcoef`` lo diría con un aviso."""
+    if len(a) < 2 or np.std(a) < 1e-12 or np.std(b) < 1e-12:
+        return float("nan")
+    return float(np.corrcoef(a, b)[0, 1])
+
+
 def _angulo_entre(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     return np.degrees(np.arccos(np.clip(np.sum(u * v, axis=1), -1.0, 1.0)))
 
@@ -175,13 +214,20 @@ def metricas(sesion: dict, salida: dict, lado: Side) -> dict:
     desvio = float(np.sum(paso_robot[pares]) / max(np.sum(paso_humano[pares]), 1e-9))
 
     correlacion = tuple(
-        float(np.corrcoef(hn[medido, k], puntas[medido, k])[0, 1]) for k in range(3)
+        _correlacion(hn[medido, k], puntas[medido, k]) for k in range(3)
     )
+    corr_profundidad = None
+    if sesion.get("con_posicion"):
+        p = sesion["vector"][lado]
+        con_p = medido & np.all(np.isfinite(p), axis=1)
+        if con_p.sum() > 10:
+            corr_profundidad = _correlacion(p[con_p, 2], puntas[con_p, 2])
     return {
         "frames_medidos": int(medido.sum()),
         "saltos": saltos,
         "desvio": desvio,
         "correlacion": correlacion,
+        "corr_profundidad": corr_profundidad,
         "temblor_p50": float(np.percentile(paso_robot[pares], 50)),
         "temblor_p95": float(np.percentile(paso_robot[pares], 95)),
     }
@@ -203,7 +249,7 @@ def _figura(sesion: dict, salidas: dict, ruta: Path, lado: Side) -> None:
     ventana = (t >= centro - 10.0) & (t <= centro + 10.0)
 
     fig, ejes = plt.subplots(3, 1, figsize=(10, 7.5), sharex=True)
-    colores = {"articular": "#c0392b", "direccion": "#2471a3"}
+    colores = {"articular": "#c0392b", "direccion": "#2471a3", "posicion": "#1d9e75"}
     ejes[0].plot(t[ventana], h[ventana, 2], color="#555", lw=1.2, label="operador")
     for mapeo, salida in salidas.items():
         puntas = _puntas(salida["comando"][lado])
@@ -217,7 +263,7 @@ def _figura(sesion: dict, salidas: dict, ruta: Path, lado: Side) -> None:
     for eje in ejes:
         eje.grid(alpha=0.3)
         eje.legend(loc="upper right", fontsize=8)
-    fig.suptitle(f"Canal {CANALES[lado][0]}: mismo tramo de la sesión por los dos mapeos")
+    fig.suptitle(f"Canal {CANALES[lado][0]}: mismo tramo de la sesión por cada mapeo")
     fig.tight_layout()
     fig.savefig(ruta, dpi=150)
     plt.close(fig)
@@ -241,6 +287,10 @@ def main(argv: list[str] | None = None) -> int:
         "articular": reproducir(sesion, "articular"),
         "direccion": reproducir(sesion, "direccion", **extra),
     }
+    if sesion["con_posicion"]:
+        salidas["posicion"] = reproducir(sesion, "posicion", **extra)
+    else:
+        print("(sin columnas p_*/c_*: el mapeo 'posicion' no se puede reproducir)")
 
     print(f"Sesión: {args.csv}  ({len(sesion['t'])} frames, {sesion['t'][-1]:.0f} s)")
     rango = salidas["direccion"]["flexion_range"]
@@ -253,14 +303,20 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"   {'mapeo':10s} {'saltos':>7s} {'desvio':>7s} "
             f"{'corr lat/sup/ant':>18s} {'temblor p50/p95':>16s}"
+            + ("   corr prof" if sesion["con_posicion"] else "")
         )
         for mapeo, salida in salidas.items():
             m = metricas(sesion, salida, lado)
             c = m["correlacion"]
+            profundidad = (
+                f"   {m['corr_profundidad']:.2f}"
+                if m["corr_profundidad"] is not None
+                else ""
+            )
             print(
                 f"   {mapeo:10s} {m['saltos']:7d} {m['desvio']:7.2f} "
                 f"   {c[0]:.2f}/{c[1]:.2f}/{c[2]:.2f}     "
-                f"{m['temblor_p50']:.2f}/{m['temblor_p95']:.2f} °/frame"
+                f"{m['temblor_p50']:.2f}/{m['temblor_p95']:.2f} °/frame{profundidad}"
             )
         print(
             f"   cambios de rama del mapeo 'direccion': "

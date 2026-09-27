@@ -514,20 +514,27 @@ class ArmConfig:
     reposo_flexion: float = 0.0
     gracia_s: float = 0.5
     velocidad_max: float = 180.0
-    # -- retargeting por dirección (P5.3, ver retarget.py) -------------------
-    # ``mapeo = "direccion"`` sustituye a las cuatro ganancias y a las dos
-    # banderas de inversión, que solo se aplican con ``mapeo = "articular"``.
+    # -- retargeting por dirección y posición (P5.3-P5.4, ver retarget.py) ---
+    # ``mapeo = "posicion"`` (P5.4, por defecto) y ``"direccion"`` (P5.3)
+    # sustituyen a las cuatro ganancias y a las dos banderas de inversión, que
+    # solo se aplican con ``mapeo = "articular"``. "posicion" es "direccion"
+    # más la extensión del brazo: al recoger la mano con la muñeca por fuera del
+    # tronco, el brazo del robot retrocede hacia la cruz; al cruzarla hacia
+    # dentro se va cerrando hasta su tope interno. ``banda_tronco`` es lo que
+    # tarda en cerrarse, en fracción del largo del brazo: 0.3 = la muñeca en la
+    # mitad del cuerpo.
     # ``flexion_min = -180`` quita la costura del frente (el brazo que daba la
     # vuelta al acercar las manos a la cámara); ``-90`` vuelve al rango que
     # cubrió el barrido de agosto, con histéresis en la costura. La zona hasta
     # -180 está barrida (limits._TABLE_EXT_*) y la unión y el motor del brazo no
     # chocan; el cable no está en el CAD y se declara como supuesto de diseño.
-    mapeo: str = "direccion"
+    mapeo: str = "posicion"
     flexion_min: float = -180.0
     alcance_humano: float = 90.0
     rodilla: float = 0.8
     margen_tabla: float = 2.0
     histeresis_rama: float = 15.0
+    banda_tronco: float = 0.3
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "ArmConfig":
@@ -562,6 +569,7 @@ class ArmConfig:
             histeresis_rama=_env_float(
                 env, "ARM_HISTERESIS_RAMA", cls.histeresis_rama
             ),
+            banda_tronco=_env_float(env, "ARM_BANDA_TRONCO", cls.banda_tronco),
         )
 
 

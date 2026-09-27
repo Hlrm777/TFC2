@@ -78,6 +78,7 @@ from .limits import (
 __all__ = [
     "polares",
     "direccion",
+    "direccion_por_posicion",
     "al_frente",
     "alcance_robot",
     "escala_radial",
@@ -85,12 +86,22 @@ __all__ = [
     "RetargetBrazo",
     "Retargeting",
     "ALCANCE_HUMANO",
+    "BANDA_TRONCO",
 ]
 
 #: Ángulo entre el brazo del operador y el lateral que se toma como su
 #: recorrido completo, en grados. 90° es el brazo apuntando recto arriba, al
 #: frente o abajo. Más allá (cruzando por delante del cuerpo) se satura.
 ALCANCE_HUMANO: float = 90.0
+
+#: Ancho de la franja, en fracción del largo del brazo del operador, en la que
+#: ``direccion_por_posicion`` pasa de abrir el brazo (muñeca en el borde del
+#: tronco) a llevarlo a su tope interno (muñeca en la MITAD DEL CUERPO).
+#:
+#: 0.3 es esa mitad: media espalda son unos 18 cm y el brazo, hasta el centro de
+#: la mano, unos 60. Más estrecha, el robot llega antes a su tope y el paso por
+#: el borde se vuelve brusco; más ancha, tarda más en cerrarse.
+BANDA_TRONCO: float = 0.3
 
 
 # --------------------------------------------------------------------------
@@ -130,6 +141,112 @@ def direccion(abduccion: float, flexion: float) -> tuple[float, float, float]:
     a = math.radians(abduccion)
     f = math.radians(flexion)
     return (math.cos(a), math.sin(a) * math.cos(f), math.sin(a) * math.sin(f))
+
+
+def direccion_por_posicion(
+    q, banda: float | None = None
+) -> tuple[float, float, float]:
+    """Dirección del brazo del robot a partir de la POSICION de la mano del
+    operador, no solo de su dirección (P5.4, mapeo ``posicion``).
+
+    ``q = (L, S, A)`` es el vector hombro→mano en el marco del tronco
+    **dividido por el largo del brazo del operador en ese frame** (hombro→codo
+    + codo→mano). Por la desigualdad triangular ``|q| ≤ 1``: vale 1 con el
+    brazo estirado y baja al doblar el codo.
+
+    POR QUE LA DIRECCION SOLA NO BASTA
+    ----------------------------------
+    ``direccion`` descarta la distancia: recoger la mano hacia el cuerpo a lo
+    largo de la misma línea no cambia hacia dónde apunta, y el robot se queda
+    adelante (H38: 32 s acercando y alejando las manos sin que la componente
+    anterior de la dirección bajara de 0.78 el 95 % del tiempo). El brazo del
+    robot no se acorta, pero sí puede girar.
+
+    LA REGLA (propuesta del operador, 2026-09-27)
+    ---------------------------------------------
+    «Lo que el codo esconde al doblarse, el robot lo despliega hacia el
+    costado». Se implementa como un GIRO: la dirección de la mano rota hacia la
+    cruz (el lateral) una fracción ``s`` del ángulo que las separa, con::
+
+        s = w · (1 − |q|)
+
+    - Brazo estirado: ``s = 0`` y el robot sigue la dirección exacta de la
+      mano, la misma que da ``direccion``. Apuntar no cambia.
+    - Mano recogida a la altura del hombro: el brazo retrocede hacia la cruz,
+      tanto más cuanto más recogida está.
+    - Lo lateral y lo vertical de la mano se conservan, porque se gira DESDE su
+      dirección: un brazo doblado que se mueve de lado sigue moviendo al robot,
+      algo atenuado.
+    - La mano a medio camino del costado ya da la cruz: la cámara no deja
+      estirar los brazos en cruz, y no hace falta.
+    - Cruzar hacia dentro cierra el brazo poco a poco hasta su tope interno,
+      que alcanza con la muñeca en la mitad del cuerpo (ver el pliegue).
+
+``w`` ES LA SEGUNDA CORRECCION DEL OPERADOR: el giro solo actúa con la
+    muñeca POR FUERA del borde del tronco (``L ≥ 0``, lateral del hombro). Si la
+    mano cruza por delante del cuerpo, abrir el brazo sería el gesto contrario
+    al que se hace. ``w`` no salta de 1 a 0 en el borde: baja con un paso suave a
+    lo largo de ``banda`` hacia dentro. Un corte seco sería otra costura como la
+    del H35, justo donde el operador tiene las manos casi siempre —delante de
+    los hombros—.
+
+    EL PLIEGUE ES LA TERCERA: lo que la mano cruza hacia dentro (``L < 0``) se
+    cuenta como PROFUNDIDAD, ``(L, S, A) → (0, S, hypot(A, L))``, antes de
+    girar. El robot no puede cruzar —su tope interno, a la altura del hombro, son
+    ~70° desde la cruz, medidos en el barrido de colisiones—, así que dejar que
+    la dirección apuntara a través del cuerpo solo servía para saturarlo de
+    golpe: sin pliegue, con la mano recogida, llegaba a su tope con la muñeca
+    apenas 7 cm por dentro y ahí se quedaba. Con el pliegue la dirección nunca
+    pasa del frente, y el brazo se va cerrando poco a poco a lo largo de la
+    franja hasta su tope, que alcanza con la muñeca en la mitad del cuerpo. El
+    operador lo pidió así: «una función con factor de conversión, para que
+    llegue lenta al máximo del robot», sin esperar a que lo pare el visor.
+
+    POR QUE UN GIRO Y NO UNA SUMA. La primera versión sumaba el largo escondido
+    como un vector lateral y normalizaba, ``q + w·(1 − |q|)·lateral``. Da lo
+    mismo lejos del cuerpo, pero con la mano pegada al pecho, en la franja del
+    borde, la suma dominaba sobre la mano y un milímetro de movimiento giraba el
+    brazo varios grados (la derivada crece como ``1/A``). El giro está acotado
+    por construcción: como mucho, el ángulo entre la mano y la cruz, que con el
+    pliegue no pasa de 90°. Y el pliegue quita además el único punto singular
+    que tenía la regla —la mano apuntando al lado contrario, donde el plano del
+    giro no existe—, porque ya no hay dirección que apunte hacia dentro.
+
+    Consecuencias a declarar: con las manos recogidas por fuera del tronco el
+    robot queda entre abierto y en cruz; y la regla se apoya más que
+    ``direccion`` en la profundidad de BlazePose, que es su coordenada más
+    débil.
+
+    Raises:
+        ValueError: si ``q`` no tiene tres componentes finitas o ``banda`` no
+            es positiva.
+    """
+    if banda is None:
+        banda = BANDA_TRONCO
+    if not banda > 0.0:
+        raise ValueError("banda debe ser positiva")
+    L, S, A = (float(v) for v in q)
+    if not all(math.isfinite(v) for v in (L, S, A)):
+        raise ValueError(f"la posición no es finita: {q!r}")
+    extension = math.sqrt(L * L + S * S + A * A)
+    if extension < 1e-9:
+        return (1.0, 0.0, 0.0)
+    # El pliegue: lo que cruza hacia dentro cuenta como profundidad. Conserva
+    # la norma, así que la extensión no cambia.
+    lateral = max(L, 0.0)
+    anterior = math.hypot(max(A, 0.0), min(L, 0.0))
+    mano = (lateral / extension, S / extension, anterior / extension)
+
+    giro = (1.0 - _suave(-L / banda)) * max(0.0, 1.0 - extension)
+    theta = math.acos(max(-1.0, min(1.0, mano[0])))
+    seno = math.sin(theta)
+    if giro <= 0.0 or seno < 1e-9:
+        # Nada que girar, o la mano ya apunta a la cruz.
+        norma = math.sqrt(sum(c * c for c in mano))
+        return tuple(c / norma for c in mano) if norma > 1e-9 else (1.0, 0.0, 0.0)
+    a = math.sin((1.0 - giro) * theta) / seno
+    b = math.sin(giro * theta) / seno
+    return (a * mano[0] + b, a * mano[1], a * mano[2])
 
 
 def al_frente(h) -> tuple[float, float, float] | None:

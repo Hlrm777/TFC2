@@ -514,6 +514,19 @@ class ArmConfig:
     reposo_flexion: float = 0.0
     gracia_s: float = 0.5
     velocidad_max: float = 180.0
+    # -- retargeting por dirección (P5.3, ver retarget.py) -------------------
+    # ``mapeo = "direccion"`` sustituye a las cuatro ganancias y a las dos
+    # banderas de inversión, que solo se aplican con ``mapeo = "articular"``.
+    # ``flexion_min = -180`` quita la costura del frente (el brazo que daba la
+    # vuelta al acercar las manos a la cámara); ``-90`` vuelve al rango que
+    # cubrió el barrido, con histéresis en la costura. Pendiente de confirmar en
+    # el CAD que la unión del hombro admite -180.
+    mapeo: str = "direccion"
+    flexion_min: float = -180.0
+    alcance_humano: float = 90.0
+    rodilla: float = 0.8
+    margen_tabla: float = 2.0
+    histeresis_rama: float = 15.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "ArmConfig":
@@ -540,6 +553,14 @@ class ArmConfig:
             reposo_flexion=_env_float(env, "ARM_REPOSO_FLEXION", cls.reposo_flexion),
             gracia_s=_env_float(env, "ARM_GRACIA_S", cls.gracia_s),
             velocidad_max=_env_float(env, "ARM_VELOCIDAD_MAX", cls.velocidad_max),
+            mapeo=_env_str(env, "ARM_MAPEO", cls.mapeo),
+            flexion_min=_env_float(env, "ARM_FLEXION_MIN", cls.flexion_min),
+            alcance_humano=_env_float(env, "ARM_ALCANCE_HUMANO", cls.alcance_humano),
+            rodilla=_env_float(env, "ARM_RODILLA", cls.rodilla),
+            margen_tabla=_env_float(env, "ARM_MARGEN_TABLA", cls.margen_tabla),
+            histeresis_rama=_env_float(
+                env, "ARM_HISTERESIS_RAMA", cls.histeresis_rama
+            ),
         )
 
 

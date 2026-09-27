@@ -137,8 +137,8 @@
 
       <div class="dof">
         <div class="row"><span class="name">Brazo izq · flexión</span><span class="val" id="v-arLtw">0.0°</span></div>
-        <input type="range" id="s-arLtw" min="-90" max="90" value="0" step="0.5">
-        <div class="lim"><span>−90°</span><span>+90°</span></div>
+        <input type="range" id="s-arLtw" min="-180" max="90" value="0" step="0.5">
+        <div class="lim"><span>−180°</span><span>+90°</span></div>
       </div>
 
       <div class="dof">
@@ -149,8 +149,8 @@
 
       <div class="dof">
         <div class="row"><span class="name">Brazo der · flexión</span><span class="val" id="v-arRtw">0.0°</span></div>
-        <input type="range" id="s-arRtw" min="-90" max="90" value="0" step="0.5">
-        <div class="lim"><span>−90°</span><span>+90°</span></div>
+        <input type="range" id="s-arRtw" min="-180" max="90" value="0" step="0.5">
+        <div class="lim"><span>−180°</span><span>+90°</span></div>
       </div>
 
       <div class="btnrow">
@@ -720,6 +720,15 @@
      si la punta del brazo (bolita) lo cruza, se considera contacto y
      los sliders revierten el movimiento. back:-1 → espalda mira a -Y
      (verificado visualmente por Harold con el plano visible). */
+  /* Flexión extendida a −180° (P5.3 del plan maestro, sep-2026). ±90° era
+     solo el rango de estos sliders, no un tope del servo (XL430: 360° en modo
+     posición), y con él «brazo al frente horizontal» quedaba en el tope y con
+     dos soluciones: el arm tracker saltaba entre ellas y el brazo daba la
+     vuelta por la pose en cruz. Con −180 una sola rama (abducción ≤ 0) cubre
+     todo el hemisferio frontal. (a, f) y (−a, f±180) ponen el brazo en la
+     misma dirección, girado 180° sobre su eje, que no se ve porque el brazo
+     es simétrico; lo que SÍ cambia es la unión y el motor del brazo: revisar
+     que no interfieran con el tronco. */
   const BACKPLANE = { back:-1, marginMM:20, enabled:true };
   const PAIR_FILE = {'brazo izq':'Brazo_Izq_W.stl','brazo der':'Brazo_Der_W.stl'};
   let planeMesh = null; const armTips = {};

@@ -35,7 +35,14 @@ import time
 from collections import deque
 from collections.abc import Callable, Hashable
 
-__all__ = ["OneEuroFilter", "EMAFilter", "SlewLimiter", "ClassHysteresis"]
+__all__ = [
+    "OneEuroFilter",
+    "OneEuroVector",
+    "EMAFilter",
+    "SlewLimiter",
+    "SlewLimiterND",
+    "ClassHysteresis",
+]
 
 #: Reloj por defecto. perf_counter y NO monotonic: ver la nota del módulo.
 _DEFAULT_CLOCK = time.perf_counter
@@ -192,6 +199,116 @@ class OneEuroFilter:
 
         self._x_prev = x_hat
         self._dx_prev = dx_hat
+        self._t_prev = now
+        return x_hat
+
+
+class OneEuroVector:
+    """Filtro One Euro sobre un vector, con UN solo corte para todas las
+    componentes.
+
+    Por qué no tres ``OneEuroFilter`` independientes
+    ------------------------------------------------
+    Lo que se filtra es la **dirección del brazo**, un vector unitario. Con un
+    corte por componente, cada eje se suavizaría con un retardo distinto según
+    su propia velocidad, y el vector filtrado **giraría** respecto al medido: el
+    filtro cambiaría hacia dónde apunta el brazo, no solo cuánto tiembla. Con un
+    corte común, calculado con la **norma** de la velocidad, el suavizado es una
+    combinación convexa del vector anterior y el nuevo, que no introduce
+    rotaciones espurias.
+
+    Y por qué se filtra el vector y no los ángulos: los ángulos del cardán son
+    coordenadas esféricas, singulares en el polo (brazo en cruz) y
+    discontinuas en la costura de ±180°. Un pasabajos que promedia +179° y
+    −179° da 0°: medio giro inventado. El vector no tiene ninguno de los dos
+    problemas.
+
+    ``beta`` está en las unidades del vector por segundo. Para un vector
+    unitario, 1 unidad/s ≈ 57°/s, así que el ``beta`` equivalente al de un
+    filtro en grados es ``beta_grados * 180 / pi``.
+
+    Quien llame debe **renormalizar** la salida: la combinación convexa de dos
+    unitarios no es unitaria.
+    """
+
+    def __init__(
+        self,
+        min_cutoff: float = 1.0,
+        beta: float = 0.0,
+        d_cutoff: float = 1.0,
+        *,
+        clock: Callable[[], float] = _DEFAULT_CLOCK,
+    ) -> None:
+        if min_cutoff <= 0.0:
+            raise ValueError(f"min_cutoff debe ser positivo, se recibió {min_cutoff!r}")
+        if d_cutoff <= 0.0:
+            raise ValueError(f"d_cutoff debe ser positivo, se recibió {d_cutoff!r}")
+        if beta < 0.0:
+            raise ValueError(f"beta no puede ser negativo, se recibió {beta!r}")
+        self.min_cutoff = float(min_cutoff)
+        self.beta = float(beta)
+        self.d_cutoff = float(d_cutoff)
+        self._clock = clock
+        self._x: tuple[float, ...] | None = None
+        self._dx: tuple[float, ...] | None = None
+        self._t_prev: float | None = None
+        self._last_dt: float | None = None
+        self._degenerate_dt = 0
+
+    @property
+    def initialized(self) -> bool:
+        return self._x is not None
+
+    @property
+    def degenerate_dt_count(self) -> int:
+        return self._degenerate_dt
+
+    def reset(self) -> None:
+        self._x = None
+        self._dx = None
+        self._t_prev = None
+        self._last_dt = None
+
+    def __call__(
+        self, value, timestamp: float | None = None
+    ) -> tuple[float, ...]:
+        """Filtra una muestra vectorial y devuelve el vector suavizado.
+
+        Raises:
+            ValueError: si alguna componente no es finita, o si la dimensión
+                cambia respecto a la muestra anterior.
+        """
+        x = tuple(float(v) for v in value)
+        if not all(math.isfinite(v) for v in x):
+            raise ValueError(f"la muestra no es finita: {x!r}")
+        now = self._clock() if timestamp is None else float(timestamp)
+
+        if self._x is None:
+            self._x = x
+            self._dx = tuple(0.0 for _ in x)
+            self._t_prev = now
+            return x
+        if len(x) != len(self._x):
+            raise ValueError("la dimensión de la muestra cambió")
+
+        dt = now - self._t_prev
+        if dt <= 0.0:
+            self._degenerate_dt += 1
+            dt = self._last_dt if self._last_dt is not None else _FALLBACK_DT
+        else:
+            self._last_dt = dt
+
+        a_d = _alpha(self.d_cutoff, dt)
+        dx = tuple(
+            prev + a_d * ((xi - xp) / dt - prev)
+            for xi, xp, prev in zip(x, self._x, self._dx)
+        )
+        velocidad = math.sqrt(sum(v * v for v in dx))
+        a = _alpha(self.min_cutoff + self.beta * velocidad, dt)
+        x_hat = tuple(xp + a * (xi - xp) for xi, xp in zip(x, self._x))
+
+        self._x = x_hat
+        self._dx = dx
         self._t_prev = now
         return x_hat
 
@@ -358,6 +475,94 @@ class SlewLimiter:
             delta = -maximo
 
         self._y += delta
+        self._t_prev = now
+        return self._y
+
+
+class SlewLimiterND:
+    """Límite de velocidad sobre un VECTOR de articulaciones, coordinado.
+
+    Limita la **norma** del paso, no cada componente por separado. La
+    diferencia se ve en cualquier salto grande: con un ``SlewLimiter`` por
+    articulación, la que tiene que recorrer menos llega antes y la otra sigue
+    sola, así que el brazo describe una L en el espacio articular —y en el
+    cartesiano, una trayectoria que el operador no pidió—. Con el límite sobre
+    la norma, las dos llegan a la vez y el camino es la recta entre la pose de
+    partida y la de llegada.
+
+    Para pasos pequeños (el gesto normal) no hace nada, igual que el escalar.
+    El precio en latencia es el mismo: un salto de ``d`` grados de norma tarda
+    ``d / max_rate`` segundos.
+    """
+
+    def __init__(
+        self,
+        max_rate: float,
+        *,
+        clock: Callable[[], float] = _DEFAULT_CLOCK,
+    ) -> None:
+        if not max_rate > 0.0:
+            raise ValueError(f"max_rate debe ser positivo, se recibió {max_rate!r}")
+        self.max_rate = float(max_rate)
+        self._clock = clock
+        self._y: tuple[float, ...] | None = None
+        self._t_prev: float | None = None
+        self._last_dt: float | None = None
+        self._degenerate_dt = 0
+
+    @property
+    def initialized(self) -> bool:
+        return self._y is not None
+
+    @property
+    def value(self) -> tuple[float, ...] | None:
+        return self._y
+
+    @property
+    def degenerate_dt_count(self) -> int:
+        return self._degenerate_dt
+
+    def reset(self, value=None) -> None:
+        """Olvida el estado, o lo fija en ``value`` sin rampa. Ver
+        ``SlewLimiter.reset``."""
+        if value is not None:
+            value = tuple(float(v) for v in value)
+            if not all(math.isfinite(v) for v in value):
+                raise ValueError(f"el valor no es finito: {value!r}")
+        self._y = value
+        self._t_prev = None
+        self._last_dt = None
+
+    def __call__(self, target, timestamp: float | None = None) -> tuple[float, ...]:
+        objetivo = tuple(float(v) for v in target)
+        if not all(math.isfinite(v) for v in objetivo):
+            raise ValueError(f"el objetivo no es finito: {objetivo!r}")
+        now = self._clock() if timestamp is None else float(timestamp)
+
+        if self._y is None:
+            self._y = objetivo
+            self._t_prev = now
+            return objetivo
+        if len(objetivo) != len(self._y):
+            raise ValueError("la dimensión del objetivo cambió")
+
+        if self._t_prev is None:
+            dt = _FALLBACK_DT
+        else:
+            dt = now - self._t_prev
+            if dt <= 0.0:
+                self._degenerate_dt += 1
+                dt = self._last_dt if self._last_dt is not None else _FALLBACK_DT
+            else:
+                self._last_dt = dt
+
+        delta = [o - y for o, y in zip(objetivo, self._y)]
+        norma = math.sqrt(sum(d * d for d in delta))
+        maximo = self.max_rate * dt
+        if norma > maximo:
+            escala = maximo / norma
+            delta = [d * escala for d in delta]
+        self._y = tuple(y + d for y, d in zip(self._y, delta))
         self._t_prev = now
         return self._y
 

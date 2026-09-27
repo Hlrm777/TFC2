@@ -69,6 +69,7 @@ __all__ = [
     "ArmClamp",
     "HeadClamp",
     "FLEXION_RANGE",
+    "FLEXION_RANGE_EXTENDIDO",
     "HEAD_PAN_RANGE",
     "HEAD_PAN_TARGET_RANGE",
     "HEAD_TILT_RANGE",
@@ -77,6 +78,7 @@ __all__ = [
     "clamp_head",
     "clamp_arm",
     "arm_abduccion_range",
+    "arm_abduccion_range_extendido",
 ]
 
 
@@ -148,6 +150,21 @@ class AbduccionPolicy(Enum):
 # --------------------------------------------------------------------------
 
 FLEXION_RANGE: tuple[float, float] = (-90.0, 90.0)
+
+#: Rango de flexión EXTENDIDO, el que usa el retargeting por dirección (P5.3).
+#:
+#: ±90° **no es un límite del mecanismo**: es el rango de los sliders del visor,
+#: y el barrido 2D solo exploró dentro de él. El servo previsto (Dynamixel
+#: XL430-W250-T) gira 360° en modo posición. Lo que sí impone ±90° es una
+#: COSTURA en «brazo al frente horizontal»: para cruzarla el brazo tiene que
+#: pasar por la pose en cruz (ver ``retarget.py``). Extender la flexión hasta
+#: −180° permite cubrir todo el hemisferio frontal con una sola rama de la
+#: cinemática inversa, sin esa costura.
+#:
+#: Pendiente de confirmar en el CAD: que la unión del hombro y el cableado
+#: admitan ese giro. Mientras tanto se puede volver a ±90° con
+#: ``TELMEOW_ARM_FLEXION_MIN=-90``.
+FLEXION_RANGE_EXTENDIDO: tuple[float, float] = (-180.0, 90.0)
 HEAD_PAN_RANGE: tuple[float, float] = (-90.0, 90.0)
 HEAD_TILT_RANGE: tuple[float, float] = (-39.0, 42.0)  # asimétrico
 
@@ -372,6 +389,37 @@ def arm_abduccion_range(
     return (lower, upper)
 
 
+def arm_abduccion_range_extendido(
+    flexion: float,
+    lado: Side | str,
+    *,
+    policy: AbduccionPolicy = AbduccionPolicy.TABLE,
+) -> tuple[float, float]:
+    """Como ``arm_abduccion_range`` pero válida para flexiones en [−180, 180].
+
+    Fuera de ±90° no hay barrido, pero no hace falta: el cardán es ideal en el
+    sentido que importa aquí —el eje de abducción es perpendicular al de
+    flexión y la dirección de reposo del brazo va sobre el eje de flexión—, así
+    que ``(a, f)`` y ``(−a, f ± 180)`` ponen el brazo **en la misma dirección**,
+    solo girado 180° sobre su propio eje. El brazo es simétrico alrededor de su
+    eje (medido en ``Brazo_Der_W.stl``: radios iguales a ±2 mm), así que la
+    colisión brazo-tronco y el plano posterior dan lo mismo en las dos. De ahí::
+
+        rango(f) = (−max(f ∓ 180), −min(f ∓ 180))    para |f| > 90
+
+    Lo que esa equivalencia NO cubre es la pieza de unión y el motor que viaja
+    con el brazo, que sí giran distinto. Se declara y se verifica en el visor.
+    """
+    side = Side.parse(lado)
+    flexion = _check_finite(flexion, "flexion")
+    flexion = min(180.0, max(-180.0, flexion))
+    if FLEXION_RANGE[0] <= flexion <= FLEXION_RANGE[1]:
+        return arm_abduccion_range(flexion, side, policy=policy)
+    equivalente = flexion + 180.0 if flexion < 0.0 else flexion - 180.0
+    lower, upper = arm_abduccion_range(equivalente, side, policy=policy)
+    return (-upper, -lower)
+
+
 # --------------------------------------------------------------------------
 # API principal
 # --------------------------------------------------------------------------
@@ -383,6 +431,7 @@ def clamp_arm(
     lado: Side | str,
     *,
     policy: AbduccionPolicy = AbduccionPolicy.TABLE,
+    flexion_range: tuple[float, float] = FLEXION_RANGE,
 ) -> ArmClamp:
     """Recorta la pose de un brazo a su espacio admisible.
 
@@ -406,6 +455,10 @@ def clamp_arm(
         flexion: rotación axial del brazo, en grados.
         lado: 'L'/'R', 'left'/'right' o 'izq'/'der'.
         policy: ver ``AbduccionPolicy``.
+        flexion_range: límite duro de la flexión. Por defecto ±90°, que es lo
+            que el barrido cubre; el retargeting por dirección pasa
+            ``FLEXION_RANGE_EXTENDIDO`` y fuera de ±90° el rango de abducción
+            sale de ``arm_abduccion_range_extendido``.
 
     Returns:
         ArmClamp con ambos ejes recortados y el rango aplicado en cada uno.
@@ -419,10 +472,12 @@ def clamp_arm(
     flexion = _check_finite(flexion, "flexion")
 
     # 1. El flexion primero: es límite duro y además índice de la tabla.
-    flexion_clamp = clamp_scalar(flexion, FLEXION_RANGE[0], FLEXION_RANGE[1])
+    flexion_clamp = clamp_scalar(flexion, flexion_range[0], flexion_range[1])
 
     # 2. Rango de abducción admisible en la flexión ya recortado.
-    lower, upper = arm_abduccion_range(flexion_clamp.value, side, policy=policy)
+    lower, upper = arm_abduccion_range_extendido(
+        flexion_clamp.value, side, policy=policy
+    )
 
     # 3. El abduccion, contra ese rango.
     abduccion_clamp = clamp_scalar(abduccion, lower, upper)

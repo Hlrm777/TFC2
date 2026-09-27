@@ -101,7 +101,7 @@ cambia respecto al plan original.
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
-| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · falta la sesión con cámara | |
+| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (mapeo por dirección) hecho** · falta la sesión con cámara | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -109,7 +109,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**600 pruebas en verde.** Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**734 pruebas en verde** (600 + 134 del P5.3). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -250,7 +250,7 @@ cambiar sin romper el contrato con el visor y siguen igual.
 ```
 pan          −90° … +90°
 tilt         −39° … +42°
-flexión      −90° … +90°   (ambos brazos, límite duro)   [campo armLtw/armRtw]
+flexión      −180° … +90°  (extendida en el P5.3; ±90 era el rango del slider) [campo armLtw/armRtw]
 abducción    depende de la flexión                       [campo armL/armR]
 ```
 
@@ -262,6 +262,15 @@ reposo pide −90° y se queda en −55°—, y hay que declararlo. Además, la 
 de reposo va sobre el propio eje de la flexión, así que **la singularidad del
 cardán cae en la postura de reposo**: con el brazo en cruz, la flexión no lo
 mueve.
+
+**La flexión ya no se limita a ±90° (P5.3, H35).** ±90° era el rango de los
+sliders del visor, no un tope del servo (XL430: 360° en modo posición), y el
+barrido solo exploró dentro de él. Fuera de ±90 la tabla se extiende por
+simetría: `(a, f)` y `(−a, f ± 180)` ponen el brazo en la misma dirección
+(verificado contra el rig y renderizando el visor). `clamp_arm` conserva ±90
+por defecto y el extendido se pide con `flexion_range=FLEXION_RANGE_EXTENDIDO`.
+**Pendiente de confirmar en el CAD** que la unión y el cableado del hombro
+admiten −180; si no, `TELMEOW_ARM_FLEXION_MIN=-90`.
 
 **La abducción depende de la flexión.** Las tablas 2D del barrido BVH (paso 5°,
 refinado 1°, demás DOF en home) son **la autoridad**; están en `limits.py`.
@@ -962,6 +971,104 @@ esqueleto del brazo no está pintado, el tracker tampoco lo está usando.
    `.venv`). Con `model_complexity=1` no se nota porque el `full` ya viene en el
    paquete. Dos consecuencias: la primera ejecución con un nivel distinto
    **necesita red**, y para la Raspberry Pi del P11 hay que preverlo.
+
+### P5.3 — Mapeo por dirección ✅ **hecho el 2026-09-27** · falta verlo con el operador
+
+**El síntoma** (reportado por el operador con MQTT y el visor): mucha vibración y,
+sobre todo, que al **acercar las manos a la cámara** el brazo del robot no iba
+hacia adelante sino que se movía a los lados y, de pronto, **daba una vuelta
+entera** para llegar a una posición contigua.
+
+**La causa no era la profundidad** —la `z` de `pose_world_landmarks` sí se
+usa—, **era el mapeo articular** (H35). Con la flexión en ±90°, «brazo al frente
+horizontal» solo se alcanza con la flexión en el tope y tiene dos soluciones,
+`(+ψ, +90)` y `(−ψ, −90)`. `arm_angles` elegía entre ellas con el **signo de la
+componente vertical** del brazo, que al frente ronda el cero y cambia con el
+ruido. Cada cambio mandaba el objetivo al otro extremo, y el One Euro y el
+limitador —los dos en espacio articular— lo interpolaban **pasando por la pose
+en cruz**. Medido en `brazos_2026-09-13_descartada.csv`:
+
+| | armL | armR |
+|---|---|---|
+| Saltos de flexión >90° con cambio de signo de abducción | **174** | **129** |
+| Cambio REAL de dirección del brazo en esos saltos (mediana) | 4.6° | 5.0° |
+| Tiempo del operador a ±10° de la costura (con ψ > 30°) | **25 %** | **29 %** |
+
+O sea: la zona donde el mapeo fallaba es donde el operador pasa un cuarto del
+tiempo.
+
+**Lo hecho** — `telmeow_teleop/retarget.py`, nuevo, y `mapeo="direccion"` por
+defecto en `ArmTracker` (el articular queda conmutable con `k`):
+
+1. Se trabaja con la **dirección** del brazo, `h = (L, S, A)`, y los ángulos solo
+   se calculan al final. `direccion_brazo()` sale de `arm_angles` sin cambiarlo.
+2. **One Euro vectorial** (`filters.OneEuroVector`): un corte común para las tres
+   componentes, así que el filtro puede retrasar la dirección pero no girarla, y
+   no tiene polo ni costura que promediar.
+3. **Proyección al hemisferio frontal**: lo que queda por detrás del plano
+   frontal cae en el punto admisible más cercano (plano posterior del visor).
+4. **Polares respecto al polo del cardán** —ψ = ángulo con el lateral, α = 0
+   arriba / 90 al frente / 180 abajo—, que es la parametrización natural de
+   este mecanismo: abducción = ±ψ, flexión = α o α − 180.
+5. **Escala de ψ dentro de la envolvente del robot**, que sale de las tablas 2D
+   (`alcance_robot`: ~30° arriba, ~70° al frente, ~55° abajo) y se suaviza en la
+   costura de la tabla. El operador con el brazo colgando pide exactamente el
+   reposo; más allá de 90° satura con pendiente cero (curva C¹, sin esquina
+   contra la que vibrar). **Esto sustituye a las cuatro ganancias**: las
+   provisionales del P5.2 (0.33 / 0.51) son justo `30/90` y `≈55/90` (H36).
+6. **Cinemática inversa de una sola rama** (abducción ≤ 0) con la flexión
+   extendida a −180°: cubre todo el hemisferio frontal sin costura. Con
+   `TELMEOW_ARM_FLEXION_MIN=-90` funciona igual pero con **histéresis** de 15°
+   en la costura, y cada cruce cuesta un paso por la pose en cruz: es del
+   mecanismo, no del software.
+7. **Amortiguación de la flexión en el polo** (ψ < 5° congelada, plena a 20°).
+8. **Límite de velocidad coordinado** (`filters.SlewLimiterND`): los saltos
+   grandes recorren la recta entre poses en vez de una L.
+
+**Resultado sobre la misma grabación**, con `tools/comparar_mapeo_brazos.py`
+(reproduce el CSV por los dos mapeos con la cadena real del tracker):
+
+| | articular L / R | dirección L / R |
+|---|---|---|
+| Saltos de rama | 174 / 129 | **0 / 0** |
+| Correlación componente **anterior** operador→robot | 0.64 / 0.62 | **0.93 / 0.89** |
+| Correlación componente lateral | 0.35 / 0.29 | **0.67 / 0.57** |
+| Temblor de la punta p95 (°/frame) | 10.2 / 9.5 | **7.1 / 6.7** |
+| Con flexión ±90 + histéresis: cambios de rama | — | 54 / 48 |
+
+La fila de la componente anterior es la queja del operador en un número: «acerco
+las manos y el robot no va hacia adelante». La última fila es el argumento para
+la flexión extendida.
+
+**Verificado en el visor renderizándolo** (Chromium sin pantalla, sliders): las
+poses `(−40, −135)` y `(−28, −180)` dejan el brazo donde `(+40, +45)` y
+`(+28, 0)`, y la bisección de colisiones no bloqueó ninguna. El brazo es
+simétrico alrededor de su eje (medido en `Brazo_Der_W.stl`: radios iguales a
+±2 mm), así que el giro de 180° sobre su eje que implica la otra rama no se ve.
+Lo que SÍ gira distinto es la **unión** y el **motor que viaja con el brazo**.
+
+**Cambios en el contrato**: ninguno en el JSON. El visor recibe `armLtw` en
+[−180, 90] y ya lo aplicaba; solo cambió el rango de sus dos sliders de flexión.
+El CSV gana `mapeo`, `flexion_min`, `h_lat/sup/ant_*` (la dirección cruda, que
+permite reproducir OFFLINE cualquier mapeo futuro sobre la misma sesión) y
+`psi_*`, `alfa_*`, `rama_*`.
+
+**Lo que falta, con el operador delante:**
+
+1. **Confirmar en Fusion** que la unión del hombro, el motor del brazo y el
+   cable admiten flexión hasta −180°. Si no, `TELMEOW_ARM_FLEXION_MIN=-90`.
+2. Sesión con `--publish`: acercar las manos a la cámara, subir y bajar el brazo
+   por delante, cruzar por delante del cuerpo. Alternar `k` para ver los dos
+   mapeos sobre el mismo gesto.
+3. Grabar con protocolo y pasar el CSV por `tools/comparar_mapeo_brazos.py`: las
+   cifras de la tabla de arriba salen de una grabación descartada y hay que
+   rehacerlas con la buena antes de citarlas.
+4. **Profundidad**: con las columnas nuevas se puede medir cuánto comprime
+   BlazePose la `z`. Si hiciera falta, la siguiente palanca es estimar la
+   componente anterior por **escorzo** (longitud 2D del brazo contra su
+   longitud calibrada, resolviendo la intersección rayo-esfera con la cámara) y
+   fusionarla con la de BlazePose. **No se implementa hasta medir** que hace
+   falta.
 
 ### Lo que hereda del P4 — leer antes de escribir código
 
@@ -1921,6 +2028,20 @@ equivalente en Python puro, sin privilegios de administrador.
   mano. La alternativa (hombro→codo, el ángulo articular estricto) está
   implementada y conmutable, y la elección se hizo con datos.
 
+- **«¿Cómo pasa de un brazo humano, con más grados de libertad, a uno de dos?»** *(nueva, P5.3)*
+  No pasa ángulos: pasa **la dirección** en que apunta el brazo. Se filtra como
+  vector, se escala dentro de la envolvente medida del robot (que depende de
+  hacia dónde apunte) y los ángulos del cardán se calculan al final, con una
+  sola rama de la cinemática inversa. Pasar ángulos articulares tenía una
+  costura justo en «brazo al frente» que hacía dar la vuelta al brazo; está
+  medido (H35) y se muestra con la figura de `tools/comparar_mapeo_brazos.py`.
+
+- **«¿Por qué extendió la flexión a −180° si su barrido llegaba a ±90°?»** *(nueva)*
+  Porque ±90 era el rango del slider, no del servo, y porque con ±90 la costura
+  cae en el espacio de trabajo. Fuera de ±90 no hace falta barrer: `(a, f)` y
+  `(−a, f ± 180)` son la misma dirección del brazo, y el brazo es simétrico
+  alrededor de su eje. Lo que se verificó aparte es la unión del hombro.
+
 - **«¿Su accuracy de emoción generaliza a otras personas?»**
   El modelo se entrena con FER-2013 (multi-sujeto), no con el dataset propio.
   Pero FER-2013 subrepresenta adultos mayores, que son el operador destacado.
@@ -2809,6 +2930,8 @@ instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 | **H31** | Una bandera **enclavada** hacía que el HUD y el CSV declararan como observada una vertical de tronco **congelada** (9.8 % de caderas vistas frente a 86.5 % declarado). Un indicador de origen tiene que ser fresco o decir su edad | P5, §7.14 |
 | **H32** | La visibilidad de la mano se medía con el **mínimo de cuatro** landmarks y la del codo con **uno**, así que la comparación mano-frente-a-codo estaba sesgada por el agregador. Puerta corregida a la muñeca | P5, §7.15 |
 | **H33** | **Las ganancias sí hacen falta, y solo en abducción** (~0.33/0.51): el recorrido del hombro humano desborda el del robot, que se recortó en el 67-75 % de los frames. Consecuencia del H30. En flexión coinciden | P5, §0.5 |
+| **H35** | **El brazo «daba la vuelta» por una costura del mapeo articular, no por la profundidad**: con flexión ±90, «al frente» tiene dos soluciones y se elegía por el signo de una componente que al frente es ruido (303 saltos en 9 min). Retargeting por dirección y flexión extendida a −180 | P5.3, §0.5 |
+| **H36** | Las ganancias de abducción del H33 **no son ganancias**: son la envolvente del robot entre 90°. Se sustituyen por un escalado dependiente de la dirección que sale de la tabla | P5.3 |
 | **H34** | **La exposición de la cámara sobrevive al proceso** (DirectShow la guarda en el driver) y dejó la imagen **negra a 30 fps sin ningún error**. Se pide explícitamente al abrir, y el HUD avisa del brillo | §4.0, P5, §7.16 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la

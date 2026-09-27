@@ -93,22 +93,26 @@ import numpy as np
 
 from .camera import abrir_camara, brillo_medio, describir
 from .config import AppConfig
-from .filters import EMAFilter, OneEuroFilter, SlewLimiter
+from .filters import EMAFilter, OneEuroFilter, OneEuroVector, SlewLimiter, SlewLimiterND
 from .head_tracker import apartar_si_existe
 from .limits import (
     ARM_ABDUCCION_1D,
     FLEXION_RANGE,
+    FLEXION_RANGE_EXTENDIDO,
     ArmClamp,
     Side,
     clamp_arm,
 )
+from .retarget import ALCANCE_HUMANO, RetargetBrazo, Retargeting
 
 __all__ = [
     "ArmTracker",
     "ArmAngles",
     "torso_basis",
     "arm_angles",
+    "direccion_brazo",
     "canal_del_robot",
+    "MAPEOS",
     "LANDMARKS",
     "PUNTOS_MANO",
     "EJE_ANTERIOR",
@@ -168,6 +172,15 @@ EJE_ANTERIOR: np.ndarray = np.array([0.0, 0.0, -1.0], dtype=np.float64)
 #: Solo se usa si las caderas nunca llegaron a verse. Asume al operador sentado
 #: y erguido, y hay que declararlo si acaba siendo el camino habitual.
 EJE_SUPERIOR_RESERVA: np.ndarray = np.array([0.0, -1.0, 0.0], dtype=np.float64)
+
+#: Los dos mapeos del operador al robot. Ver ``ArmTracker`` y ``retarget.py``.
+#:
+#: - ``"direccion"`` (por defecto, P5.3): filtra y escala la DIRECCION del
+#:   brazo y resuelve la cinemática inversa al final, con una sola rama.
+#: - ``"articular"`` (el del P5 original): descompone en ángulos, los filtra y
+#:   los recorta uno a uno. Tiene la costura del frente —el brazo da la vuelta
+#:   al acercar las manos a la cámara— y se conserva solo para comparar.
+MAPEOS: tuple[str, ...] = ("direccion", "articular")
 
 #: Nombre del campo MQTT de cada (lado del robot, eje).
 CANALES: dict[Side, tuple[str, str]] = {
@@ -311,6 +324,49 @@ def torso_basis(
     return (u_lat, u_ant, u_sup)
 
 
+def direccion_brazo(
+    hombro: np.ndarray,
+    destino: np.ndarray,
+    base: tuple[np.ndarray, np.ndarray, np.ndarray],
+    inclinacion: float = 0.0,
+) -> tuple[float, float, float] | None:
+    """Dirección unitaria hombro→destino en el marco del robot: ``(L, S, A)``.
+
+    Componentes sobre la terna del tronco (lateral hacia afuera, superior,
+    anterior), con la inclinación del eje de flexión ya deshecha (ver
+    ``INCLINACION_FLEXION`` y ``arm_angles``). Es la entrada del retargeting por
+    dirección, y también la de ``arm_angles``, que solo la pasa a ángulos.
+
+    Devuelve ``None`` si el brazo tiene longitud nula o algo no es finito.
+    """
+    h = _normalizar(
+        np.asarray(destino, dtype=np.float64) - np.asarray(hombro, dtype=np.float64)
+    )
+    if h is None:
+        return None
+
+    u_lat, u_ant, u_sup = base
+    componente_lateral = float(np.dot(h, u_lat))
+    componente_superior = float(np.dot(h, u_sup))
+    componente_anterior = float(np.dot(h, u_ant))
+
+    # Deshacer la inclinación del eje de flexión: una rotación de -inclinacion
+    # en el plano frontal, que es el de la abducción. Su signo depende del
+    # sentido de la abducción y no del de la flexión, así que no queda pendiente
+    # de la verificación del canal `tw`.
+    if inclinacion:
+        radianes = math.radians(inclinacion)
+        coseno, seno = math.cos(radianes), math.sin(radianes)
+        componente_lateral, componente_superior = (
+            componente_lateral * coseno + componente_superior * seno,
+            -componente_lateral * seno + componente_superior * coseno,
+        )
+    resultado = (componente_lateral, componente_superior, componente_anterior)
+    if not all(math.isfinite(v) for v in resultado):
+        return None
+    return resultado
+
+
 def arm_angles(
     hombro: np.ndarray,
     destino: np.ndarray,
@@ -389,28 +445,10 @@ def arm_angles(
         singularidad. ``None`` entero si el brazo tiene longitud nula o si algo
         no es finito.
     """
-    h = _normalizar(
-        np.asarray(destino, dtype=np.float64) - np.asarray(hombro, dtype=np.float64)
-    )
-    if h is None:
+    direccion = direccion_brazo(hombro, destino, base, inclinacion)
+    if direccion is None:
         return None
-
-    u_lat, u_ant, u_sup = base
-    componente_lateral = float(np.dot(h, u_lat))
-    componente_superior = float(np.dot(h, u_sup))
-    componente_anterior = float(np.dot(h, u_ant))
-
-    # Deshacer la inclinación del eje de flexión: una rotación de -inclinacion
-    # en el plano frontal, que es el de la abducción. Su signo depende del
-    # sentido de la abducción y no del de la flexión, así que no queda pendiente
-    # de la verificación del canal `tw`.
-    if inclinacion:
-        radianes = math.radians(inclinacion)
-        coseno, seno = math.cos(radianes), math.sin(radianes)
-        componente_lateral, componente_superior = (
-            componente_lateral * coseno + componente_superior * seno,
-            -componente_lateral * seno + componente_superior * coseno,
-        )
+    componente_lateral, componente_superior, componente_anterior = direccion
 
     fuera_del_eje = math.hypot(componente_superior, componente_anterior)
     signo = -1.0 if componente_superior < 0.0 else 1.0
@@ -529,8 +567,19 @@ class ArmAngles:
 class ArmTracker:
     """Estima los cuatro canales de brazo del robot desde frames RGB.
 
-    Cadena por canal: estimar la dirección del brazo → descomponerla en el
-    cardán → ganancia por sentido → invertir si toca → One Euro → ``clamp_arm``.
+    Dos mapeos, conmutables en caliente (``mapeo``, tecla ``k`` del demo):
+
+    ``"direccion"`` (por defecto, P5.3)
+        dirección del brazo → One Euro **vectorial** → proyección al frente →
+        escala dentro de la envolvente del robot → cinemática inversa de una
+        sola rama → ``clamp_arm``. Ver ``retarget.py``. Los sentidos salen de la
+        cinemática directa verificada en el visor, así que las banderas de
+        inversión y las cuatro ganancias **no intervienen**: su papel lo cumple
+        ``alcance_humano``.
+    ``"articular"`` (el del P5 original)
+        dirección → ángulos del cardán → ganancia por sentido → inversión → One
+        Euro por ángulo → ``clamp_arm``. Tiene la costura del frente; se conserva
+        para poder comparar los dos sobre la misma sesión.
 
     Args:
         mirror: Con ``True`` el brazo izquierdo físico del operador manda sobre
@@ -555,6 +604,13 @@ class ArmTracker:
             segundo. Ver ``comando`` y ``filters.SlewLimiter``.
         retencion_tronco_s: cuánto se conserva la vertical del tronco derivada
             de las caderas cuando dejan de verse. Ver ``RETENCION_TRONCO_S``.
+        mapeo: ``"direccion"`` o ``"articular"``.
+        flexion_min: tope inferior de la flexión. −180 (por defecto) quita la
+            costura del frente; −90 es el rango que cubrió el barrido. Ver
+            ``limits.FLEXION_RANGE_EXTENDIDO``.
+        alcance_humano, rodilla, margen_tabla, histeresis_rama:
+            parámetros del retargeting por dirección; ver
+            ``retarget.RetargetBrazo``.
     """
 
     def __init__(
@@ -578,8 +634,19 @@ class ArmTracker:
         gracia_s: float = 0.5,
         velocidad_max: float = 180.0,
         retencion_tronco_s: float = RETENCION_TRONCO_S,
+        mapeo: str = "direccion",
+        flexion_min: float = FLEXION_RANGE_EXTENDIDO[0],
+        alcance_humano: float = ALCANCE_HUMANO,
+        rodilla: float = 0.8,
+        margen_tabla: float = 2.0,
+        histeresis_rama: float = 15.0,
+        pose_estimator=None,
         clock=time.perf_counter,
     ) -> None:
+        if mapeo not in MAPEOS:
+            raise ValueError(f"mapeo debe ser uno de {MAPEOS}, se recibió {mapeo!r}")
+        if not -180.0 <= flexion_min <= FLEXION_RANGE[0]:
+            raise ValueError("flexion_min debe estar entre -180 y -90")
         if target not in ("mano", "codo"):
             raise ValueError(f"target debe ser 'mano' o 'codo', se recibió {target!r}")
         ganancias = (gain_abduccion, gain_aduccion, gain_flexion, gain_extension)
@@ -606,7 +673,10 @@ class ArmTracker:
         self.retencion_tronco_s = float(retencion_tronco_s)
 
         self._clock = clock
-        self._pose = mp.solutions.pose.Pose(
+        # ``pose_estimator`` permite usar la cadena de mapeo sin BlazePose: las
+        # pruebas y tools/comparar_mapeo_brazos.py reproducen una sesión grabada
+        # desde el CSV, sin cámara. Tiene que ofrecer process() y close().
+        self._pose = pose_estimator if pose_estimator is not None else mp.solutions.pose.Pose(
             static_image_mode=False,
             model_complexity=model_complexity,
             # Deliberadamente DESACTIVADO. MediaPipe trae su propio suavizado
@@ -643,14 +713,46 @@ class ArmTracker:
             for lado in (Side.L, Side.R)
         }
 
+        # -- retargeting por dirección (P5.3) --------------------------------
+        self._mapeo = mapeo
+        self.flexion_range: tuple[float, float] = (
+            float(flexion_min),
+            FLEXION_RANGE[1],
+        )
+        # beta en unidades de vector unitario por segundo: 1/s ≈ 57°/s. Se
+        # convierte para que el mismo ARM_BETA signifique lo mismo en los dos
+        # mapeos.
+        self._filtros_direccion: dict[Side, OneEuroVector] = {
+            lado: OneEuroVector(min_cutoff, beta * 180.0 / math.pi, clock=clock)
+            for lado in (Side.L, Side.R)
+        }
+        self._retarget: dict[Side, RetargetBrazo] = {
+            lado: RetargetBrazo(
+                lado,
+                flexion_range=self.flexion_range,
+                alcance_humano=alcance_humano,
+                rodilla=rodilla,
+                margen=margen_tabla,
+                histeresis=histeresis_rama,
+            )
+            for lado in (Side.L, Side.R)
+        }
+        self._direcciones: dict[Side, tuple[float, float, float]] = {}
+        self._retargetings: dict[Side, Retargeting] = {}
+
         # -- etapa de salida: de la estimación al comando ------------------
         # La pose de reposo pasa por clamp_arm igual que cualquier otra: así no
         # hay forma de que una configuración descuidada mande al robot a una
         # postura que su mecanismo no admite.
         self._reposo: dict[Side, tuple[float, float]] = {
-            lado: clamp_arm(reposo_abduccion, reposo_flexion, lado).as_tuple
+            lado: clamp_arm(
+                reposo_abduccion, reposo_flexion, lado,
+                flexion_range=self.flexion_range,
+            ).as_tuple
             for lado in (Side.L, Side.R)
         }
+        for lado, (abd, flex) in self._reposo.items():
+            self._retarget[lado].reset(abd, flex)
         self._limitadores: dict[Side, tuple[SlewLimiter, SlewLimiter]] = {}
         self._objetivo: dict[Side, tuple[float, float]] = {}
         for lado in (Side.L, Side.R):
@@ -664,6 +766,14 @@ class ArmTracker:
             limitador_flex.reset(flex)
             self._limitadores[lado] = (limitador_abd, limitador_flex)
             self._objetivo[lado] = (abd, flex)
+        # En el mapeo por dirección el límite es COORDINADO (sobre la norma de
+        # las dos articulaciones): un salto grande —volver al reposo, recuperar
+        # el brazo— recorre la recta entre las dos poses en vez de una L.
+        self._limitadores_nd: dict[Side, SlewLimiterND] = {}
+        for lado in (Side.L, Side.R):
+            limitador = SlewLimiterND(velocidad_max, clock=clock)
+            limitador.reset(self._reposo[lado])
+            self._limitadores_nd[lado] = limitador
         self._t_estimado: dict[Side, float] = {}
         self._estimado: dict[Side, bool] = {Side.L: False, Side.R: False}
 
@@ -679,6 +789,54 @@ class ArmTracker:
         vivo. Es el comportamiento correcto, no un defecto.
         """
         return dict(self._clamps)
+
+    @property
+    def mapeo(self) -> str:
+        return self._mapeo
+
+    @mapeo.setter
+    def mapeo(self, valor: str) -> None:
+        """Cambia de mapeo en caliente SIN salto: el limitador del mapeo nuevo
+        arranca donde está el comando del viejo."""
+        if valor not in MAPEOS:
+            raise ValueError(f"mapeo debe ser uno de {MAPEOS}, se recibió {valor!r}")
+        if valor == self._mapeo:
+            return
+        for lado in (Side.L, Side.R):
+            limitador_abd, limitador_flex = self._limitadores[lado]
+            nd = self._limitadores_nd[lado]
+            if valor == "direccion":
+                actual = (limitador_abd.value, limitador_flex.value)
+                if None not in actual:
+                    nd.reset(actual)
+                    self._retarget[lado].reset(*actual)
+            else:
+                actual = nd.value
+                if actual is not None:
+                    # En articular la flexión vuelve a ±90: se recorta para que
+                    # el limitador no arranque fuera del rango de ese mapeo.
+                    abd, flex = clamp_arm(actual[0], actual[1], lado).as_tuple
+                    limitador_abd.reset(abd)
+                    limitador_flex.reset(flex)
+            self._filtros_direccion[lado].reset()
+        self._mapeo = valor
+
+    @property
+    def direcciones(self) -> dict[Side, tuple[float, float, float]]:
+        """Dirección hombro→destino del último frame, ``(L, S, A)`` en el marco
+        del robot y SIN filtrar, por canal. Va al CSV: con ella se puede
+        reproducir offline cualquier mapeo sobre la misma sesión
+        (``tools/comparar_mapeo_brazos.py``)."""
+        return dict(self._direcciones)
+
+    @property
+    def retargetings(self) -> dict[Side, Retargeting]:
+        """Último paso del retargeting por dirección, por canal: ψ, α, rama."""
+        return dict(self._retargetings)
+
+    @property
+    def cambios_de_rama(self) -> dict[Side, int]:
+        return {lado: r.cambios_de_rama for lado, r in self._retarget.items()}
 
     @property
     def raw_angles(self) -> dict[Side, tuple[float, float]]:
@@ -939,6 +1097,7 @@ class ArmTracker:
 
         self._frames_sin_pose = 0
         self._raw.clear()
+        self._direcciones.clear()
         ahora = self._clock()
         u_sup = self._actualizar_tronco(mundo, ahora)
         if u_sup is None:
@@ -1001,11 +1160,12 @@ class ArmTracker:
         if self.invert_abduccion:
             inclinacion = -inclinacion
 
-        crudo = arm_angles(
-            self._punto(mundo, etiqueta, "hombro"), destino, base, inclinacion
-        )
-        if crudo is None:
+        hombro = self._punto(mundo, etiqueta, "hombro")
+        direccion = direccion_brazo(hombro, destino, base, inclinacion)
+        crudo = arm_angles(hombro, destino, base, inclinacion)
+        if crudo is None or direccion is None:
             return None
+        self._direcciones[canal] = direccion
 
         abduccion, flexion = crudo
         if flexion is None:
@@ -1026,7 +1186,40 @@ class ArmTracker:
             extremo[0] = min(extremo[0], valor)
             extremo[1] = max(extremo[1], valor)
 
+        if self._mapeo == "direccion":
+            return self.map_direccion(canal, direccion, timestamp)
         return self.map_to_robot(canal, abduccion, flexion, timestamp)
+
+    def map_direccion(
+        self,
+        canal: Side | str,
+        direccion,
+        timestamp: float | None = None,
+    ) -> tuple[float, float] | None:
+        """Retargeting por dirección para un canal: One Euro vectorial →
+        ``RetargetBrazo``. Ver ``retarget.py``.
+
+        Separada de ``process`` por lo mismo que ``map_to_robot``: se puede
+        probar —y reproducir desde un CSV— sin cámara ni MediaPipe.
+
+        Devuelve ``None`` si la dirección no es finita o es degenerada; quien
+        llame conserva el último valor de ese brazo.
+        """
+        canal = Side.parse(canal)
+        try:
+            h = tuple(float(v) for v in direccion)
+        except (TypeError, ValueError):
+            return None
+        if len(h) != 3 or not all(math.isfinite(v) for v in h):
+            return None
+        ahora = self._clock() if timestamp is None else timestamp
+        suave = self._filtros_direccion[canal](h, ahora)
+        paso = self._retarget[canal](suave)
+        if paso is None:
+            return None
+        self._retargetings[canal] = paso
+        self._clamps[canal] = paso.recorte
+        return paso.as_tuple
 
     def map_to_robot(
         self,
@@ -1132,9 +1325,14 @@ class ArmTracker:
                 objetivo = self._objetivo[canal] if en_gracia else self._reposo[canal]
 
             self._objetivo[canal] = objetivo
-            limitador_abd, limitador_flex = self._limitadores[canal]
-            setattr(salida, campo_abd, limitador_abd(objetivo[0], ahora))
-            setattr(salida, campo_flex, limitador_flex(objetivo[1], ahora))
+            if self._mapeo == "direccion":
+                abd, flex = self._limitadores_nd[canal](objetivo, ahora)
+                setattr(salida, campo_abd, abd)
+                setattr(salida, campo_flex, flex)
+            else:
+                limitador_abd, limitador_flex = self._limitadores[canal]
+                setattr(salida, campo_abd, limitador_abd(objetivo[0], ahora))
+                setattr(salida, campo_flex, limitador_flex(objetivo[1], ahora))
         return salida
 
     @property
@@ -1199,6 +1397,19 @@ def _dibujar_barra(frame_bgr, x: int, y: int, fraccion: float, recortado: bool) 
     cv2.rectangle(frame_bgr, (x, y - 8), (x + ANCHO_BARRA, y + 2), (90, 90, 90), 1)
     posicion = int(x + max(0.0, min(1.0, fraccion)) * ANCHO_BARRA)
     cv2.rectangle(frame_bgr, (posicion - 2, y - 8), (posicion + 2, y + 2), color, -1)
+
+
+def _direccion_csv(direccion) -> list[str]:
+    if direccion is None:
+        return ["", "", ""]
+    return [f"{v:.5f}" for v in direccion]
+
+
+def _retarget_csv(paso: Retargeting | None, vivo: bool) -> list[str]:
+    # Solo si se estimó ESTE frame: un ψ de hace un segundo no es una medida.
+    if paso is None or not vivo:
+        return ["", "", ""]
+    return [f"{paso.psi_humano:.3f}", f"{paso.alfa:.3f}", str(paso.rama)]
 
 
 def _demo(argv: list[str] | None = None) -> int:
@@ -1267,7 +1478,14 @@ def _demo(argv: list[str] | None = None) -> int:
         "  varios segundos despues de un arrastre. Comparar dos capturas de\n"
         "  momentos distintos NO es fiable; ya llevo a una conclusion falsa una\n"
         "  vez. Mueve una sola cosa y no toques la camara entre medias.\n\n"
+        "MAPEO (P5.3)\n"
+        "  Por defecto 'direccion': se filtra y escala HACIA DONDE APUNTA el\n"
+        "  brazo y los angulos del robot se calculan al final, con una sola\n"
+        "  rama. Asi el brazo no da la vuelta al acercar las manos a la camara.\n"
+        "  'k' alterna con el mapeo 'articular' del P5 para comparar. En\n"
+        "  'direccion' las ganancias y las teclas b/f no intervienen.\n\n"
         "TECLAS\n"
+        "  k = alternar mapeo (direccion <-> articular)\n"
         "  m = alternar espejo (que brazo manda sobre cual)\n"
         "  t = alternar destino (mano <-> codo)\n"
         "  b = invertir abduccion    f = invertir flexion\n"
@@ -1296,6 +1514,16 @@ def _demo(argv: list[str] | None = None) -> int:
         reposo_flexion=cfg.arm.reposo_flexion,
         gracia_s=cfg.arm.gracia_s,
         velocidad_max=cfg.arm.velocidad_max,
+        mapeo=cfg.arm.mapeo,
+        flexion_min=cfg.arm.flexion_min,
+        alcance_humano=cfg.arm.alcance_humano,
+        rodilla=cfg.arm.rodilla,
+        margen_tabla=cfg.arm.margen_tabla,
+        histeresis_rama=cfg.arm.histeresis_rama,
+    )
+    print(
+        f"mapeo = {tracker.mapeo}   flexion en "
+        f"[{tracker.flexion_range[0]:g}, {tracker.flexion_range[1]:g}]\n"
     )
 
     # Import perezoso a propósito: el módulo tiene que poder usarse sin
@@ -1351,6 +1579,13 @@ def _demo(argv: list[str] | None = None) -> int:
                 "gain_abduccion", "gain_aduccion",
                 "gain_flexion", "gain_extension",
                 "ancho", "alto",
+                # P5.3. La dirección cruda permite reproducir OFFLINE cualquier
+                # mapeo sobre esta misma sesión (tools/comparar_mapeo_brazos.py).
+                "mapeo", "flexion_min",
+                "h_lat_L", "h_sup_L", "h_ant_L",
+                "h_lat_R", "h_sup_R", "h_ant_R",
+                "psi_L", "alfa_L", "rama_L",
+                "psi_R", "alfa_R", "rama_R",
             ]
         )
         print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
@@ -1389,6 +1624,8 @@ def _demo(argv: list[str] | None = None) -> int:
 
             crudos = tracker.raw_angles
             recortes = tracker.last_clamp
+            direcciones = tracker.direcciones
+            retargetings = tracker.retargetings
             for fila, canal in enumerate((Side.L, Side.R)):
                 campo_abd, campo_flex = CANALES[canal]
                 valor_abd = getattr(mando, campo_abd)
@@ -1429,6 +1666,22 @@ def _demo(argv: list[str] | None = None) -> int:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1,
                     )
 
+            if tracker.mapeo == "direccion":
+                partes = []
+                for canal in (Side.L, Side.R):
+                    paso = retargetings.get(canal)
+                    if paso is not None and estimado.get(canal, False):
+                        partes.append(
+                            f"{canal.value}: psi {paso.psi_humano:5.1f}->"
+                            f"{paso.psi_robot:4.1f} alfa {paso.alfa:5.1f}"
+                        )
+                cv2.putText(
+                    frame,
+                    "   ".join(partes),
+                    (10, 118),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 255), 1,
+                )
+
             espejo = "izq->izq" if tracker.mirror else "izq->der"
             signos = (
                 f"abd{'-' if tracker.invert_abduccion else '+'}"
@@ -1436,7 +1689,8 @@ def _demo(argv: list[str] | None = None) -> int:
             )
             cv2.putText(
                 frame,
-                f"{tracker.target}  {espejo}  {signos}   {fps_real:4.1f} fps",
+                f"{tracker.mapeo}  {tracker.target}  {espejo}  {signos}   "
+                f"{fps_real:4.1f} fps",
                 (10, 134),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                 (255, 255, 0) if fps_real >= 20 else (0, 165, 255), 2,
@@ -1550,6 +1804,11 @@ def _demo(argv: list[str] | None = None) -> int:
                         f"{tracker.gain_flexion:.2f}",
                         f"{tracker.gain_extension:.2f}",
                         width, height,
+                        tracker.mapeo, f"{tracker.flexion_range[0]:g}",
+                        *_direccion_csv(direcciones.get(Side.L)),
+                        *_direccion_csv(direcciones.get(Side.R)),
+                        *_retarget_csv(retargetings.get(Side.L), vivo_l),
+                        *_retarget_csv(retargetings.get(Side.R), vivo_r),
                     ]
                 )
                 cv2.putText(
@@ -1586,12 +1845,21 @@ def _demo(argv: list[str] | None = None) -> int:
                 tracker.target = "codo" if tracker.target == "mano" else "mano"
                 tracker.reset_extremes()
                 print(f"destino = {tracker.target}")
+            elif tecla == ord("k"):
+                tracker.mapeo = (
+                    "articular" if tracker.mapeo == "direccion" else "direccion"
+                )
+                print(f"mapeo = {tracker.mapeo}")
             elif tecla == ord("b"):
                 tracker.invert_abduccion = not tracker.invert_abduccion
                 print(f"invert_abduccion = {tracker.invert_abduccion}")
+                if tracker.mapeo == "direccion":
+                    print("  (no interviene en el mapeo 'direccion')")
             elif tecla == ord("f"):
                 tracker.invert_flexion = not tracker.invert_flexion
                 print(f"invert_flexion = {tracker.invert_flexion}")
+                if tracker.mapeo == "direccion":
+                    print("  (no interviene en el mapeo 'direccion')")
             elif tecla == ord("r"):
                 tracker.reset_extremes()
                 print("extremos reiniciados")

@@ -13,6 +13,8 @@ Módulos:
     publisher     -- publicación de poses por MQTT hacia el visor
     head_tracker  -- pose de la cabeza por Face Mesh + solvePnP
     arm_tracker   -- pose de los brazos por BlazePose (abducción y flexión)
+    retarget      -- de la dirección del brazo del operador a los ángulos del
+                     cardán del robot, sin la costura del frente (P5.3)
 
 ``config``, ``limits`` y ``filters`` usan solo biblioteca estándar, así que toda
 su lógica se puede validar sin instalar TensorFlow ni MediaPipe.
@@ -60,4 +62,5 @@ __all__ = [
     "publisher",
     "head_tracker",
     "arm_tracker",
+    "retarget",
 ]

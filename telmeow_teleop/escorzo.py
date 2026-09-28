@@ -48,12 +48,15 @@ EL ANCLA: la distancia de los hombros a la cámara sale de comparar su
 separación en la imagen con la que da BlazePose en metros. Su profundidad
 relativa —el tronco girado— la aporta BlazePose, que en el tronco sí es fiable.
 
-LO QUE HAY QUE DECLARAR: la focal de la cámara no está calibrada; se usa la
-misma convención que el head tracker, ``focal = ancho de la imagen``, ajustable
-con ``ARM_FOCAL_RELATIVA``. Un error en la focal, o en la escala del cuerpo de
-BlazePose, escala la escena entera sin cambiar las direcciones del brazo, que
-es lo que se usa; lo que sí altera es la perspectiva de los segmentos lejos del
-plano de los hombros. Se valida con la grabación de puntos 2D y 3D.
+LO QUE HAY QUE DECLARAR: la focal de la cámara no está calibrada con un patrón.
+Se ESTIMO con la grabación de validación del 2026-09-27 (``FOCAL_RELATIVA``,
+ajustable con ``ARM_FOCAL_RELATIVA``). Un error en la escala del cuerpo de
+BlazePose escala la escena entera sin cambiar las direcciones del brazo; uno en
+la focal, en cambio, altera la perspectiva, y de ella depende cuánto se separan
+las dos soluciones de cada hueso. Con la focal del head tracker
+(``focal = ancho``) el gesto de las manos junto a la cara quedaba justo en la
+frontera entre las dos, y bastaba un cambio de 0.4 a 0.6 en ``PESO_PLANO`` para
+pasar de 27° a 3° de la cruz (H41).
 
 Solo biblioteca estándar y numpy, sin estado: todo se prueba con una cámara
 sintética (``tests/test_escorzo.py``).
@@ -73,6 +76,7 @@ __all__ = [
     "reconstruir_brazo",
     "PESO_PLANO",
     "PESO_CONTINUIDAD",
+    "FOCAL_RELATIVA",
 ]
 
 #: Peso de la preferencia por el plano de la articulación anterior, por metro
@@ -90,6 +94,21 @@ PESO_PLANO: float = 0.4
 #: metro. Menor que el de BlazePose (1): solo desempata. Con 1.5 se probó, en
 #: papel, que el brazo quedaba atrapado en el plano al acercarlo a la cámara.
 PESO_CONTINUIDAD: float = 0.3
+
+#: Focal de la cámara integrada del operador dividida por el ancho de la imagen:
+#: unos 71° de campo horizontal, lo normal en la webcam de un portátil.
+#:
+#: ESTIMADA, no calibrada (H41). Rehaciendo offline el escorzo de las dos
+#: grabaciones de validación del 2026-09-27 con focales de 0.5 a 1.2, las de 0.6
+#: a 0.8 son las únicas que aciertan a la vez los dos gestos de referencia: las
+#: manos junto a la cara con los codos abajo quedan en el plano (el robot a
+#: 0-23° de la cruz, frente a 27-29° con 1.0) y los brazos estirados hacia la
+#: cámara siguen delante (el robot a 55-62°, su tope es 68°). Y es lo que sale
+#: de la geometría: 190 px entre hombros a 0.6-0.9 m de la cámara dan 0.5-0.85.
+#: Con 1.0, la convención del head tracker, el primer gesto quedaba en la
+#: frontera entre las dos soluciones. Se confirma midiendo la cámara (una hoja
+#: A4 a distancia conocida).
+FOCAL_RELATIVA: float = 0.7
 
 
 @dataclass(frozen=True)

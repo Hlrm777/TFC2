@@ -93,7 +93,7 @@ import numpy as np
 
 from .camera import abrir_camara, brillo_medio, describir
 from .config import AppConfig
-from .escorzo import Camara, anclar_hombros, interseccion
+from .escorzo import FOCAL_RELATIVA, Camara, anclar_hombros, interseccion
 from .filters import EMAFilter, OneEuroFilter, OneEuroVector, SlewLimiter, SlewLimiterND
 from .head_tracker import apartar_si_existe
 from .limits import (
@@ -218,6 +218,37 @@ FUNDIDO_REPOSO: float = 15.0
 #: Alfa del suavizado del largo de cada hueso para el escorzo. Los huesos no
 #: cambian de largo; lo que varía entre frames es el ruido de BlazePose.
 ALFA_HUESO: float = 0.1
+
+#: Segundos que tarda la confianza en la mano en llegar a 1 desde que entra en
+#: cuadro (P5.6, H40).
+#:
+#: La visibilidad de BlazePose NO basta para fiarse de una mano. Con el brazo
+#: colgando, la mano queda por debajo del cuadro y BlazePose la inventa: salta
+#: de un frame al siguiente entre «colgando, fuera de la imagen» y «doblada
+#: hacia arriba, delante del pecho», y en las dos da visibilidades de 0.7-0.96.
+#: Seguir esa mano era el saltito del brazo quieto (grabación del 2026-09-27:
+#: el brazo izquierdo colgando en reposo solo el 16 % del tiempo mientras el
+#: derecho saludaba). Una mano de verdad, en cambio, se queda en cuadro. Así
+#: que la mano cuenta en cuanto está DENTRO de la imagen y va ganando peso a lo
+#: largo de este tiempo; si sale del cuadro o se pierde, vuelve a empezar.
+#:
+#: Medido sobre la grabación: con 0.5 s el brazo colgando queda en reposo el
+#: 71-100 % del tiempo en vez del 16-76 %, y en los gestos el comando no cambia
+#: en el 90 % de los frames —solo tarda en fiarse de una mano que acaba de
+#: entrar en cuadro, mientras tanto la lleva el codo—.
+RAMPA_MANO_S: float = 0.5
+
+#: Margen del borde de la imagen, en fracción del alto (15 px a 480), dentro del
+#: cual el escorzo no corrige el CODO si la mano no es de fiar (P5.6, H40).
+#:
+#: Un codo en el borde no es una observación sino una extrapolación: el brazo
+#: sigue fuera de cuadro. Con el brazo colgando, el escorzo lo hacía saltar
+#: entre sus dos soluciones —5 cm detrás del hombro y 17 cm delante— de un frame
+#: al siguiente. Con la mano a la vista, en cambio, el codo del borde es un
+#: punto bien visto donde se juntan brazo y antebrazo (las manos junto a la cara
+#: con los codos abajo), y ahí sí se corrige: sin hacerlo, ese gesto volvía a
+#: quedarse al frente.
+MARGEN_BORDE: float = 0.03
 
 
 def _paso_suave(x: float) -> float:
@@ -690,7 +721,10 @@ class ArmTracker:
         escorzo: corregir la profundidad de BlazePose con la imagen y el largo
             de los huesos. Ver ``escorzo.py``.
         focal_relativa: focal de la cámara dividida por el ancho de la imagen,
-            para el escorzo. 1.0 es la convención sin calibrar del head tracker.
+            para el escorzo. Ver ``escorzo.FOCAL_RELATIVA``.
+        rampa_mano: segundos que tarda en contar entera una mano que acaba de
+            entrar en cuadro. 0 la cuenta en cuanto entra; fuera de la imagen
+            no cuenta nunca. Ver ``RAMPA_MANO_S``.
         banda_tronco: lo que tarda el brazo del robot en cerrarse hasta su
             tope interno cuando la muñeca cruza hacia dentro del tronco, en
             fracción del largo del brazo (0.3 = la mitad del cuerpo). Ver
@@ -725,9 +759,10 @@ class ArmTracker:
         margen_tabla: float = 2.0,
         histeresis_rama: float = 15.0,
         banda_tronco: float = BANDA_TRONCO,
-        zona_reposo: float = 25.0,
+        zona_reposo: float = 35.0,
         escorzo: bool = True,
-        focal_relativa: float = 1.0,
+        focal_relativa: float = FOCAL_RELATIVA,
+        rampa_mano: float = RAMPA_MANO_S,
         pose_estimator=None,
         clock=time.perf_counter,
     ) -> None:
@@ -743,6 +778,8 @@ class ArmTracker:
             raise ValueError("zona_reposo debe estar entre 0 y 90 grados")
         if not focal_relativa > 0.0:
             raise ValueError("focal_relativa debe ser positiva")
+        if not rampa_mano >= 0.0:
+            raise ValueError("rampa_mano no puede ser negativa")
         ganancias = (gain_abduccion, gain_aduccion, gain_flexion, gain_extension)
         if min(ganancias) <= 0.0:
             raise ValueError("las ganancias deben ser positivas")
@@ -857,6 +894,11 @@ class ArmTracker:
         self._escorzo_previo: dict[Side, tuple[float | None, float | None]] = {}
         self._imagen = None
         self._camara: Camara | None = None
+        # -- confianza en la mano (P5.6) ----------------------------------------
+        self.rampa_mano = float(rampa_mano)
+        self._mano_vista_desde: dict[Side, float] = {}
+        self._confianzas_mano: dict[Side, float] = {}
+        self._hombros_mundo: tuple[float, float] | None = None
 
         # -- etapa de salida: de la estimación al comando ------------------
         # La pose de reposo pasa por clamp_arm igual que cualquier otra: así no
@@ -1006,6 +1048,23 @@ class ArmTracker:
         """Píxeles de hombro, codo y mano de cada canal en el último frame: la
         medida que el escorzo toma por buena."""
         return {canal: dict(puntos) for canal, puntos in self._puntos_imagen.items()}
+
+    @property
+    def confianzas_mano(self) -> dict[Side, float]:
+        """Confianza en la mano de cada canal en el último frame: 0 fuera de
+        cuadro o sin ver, sube hasta 1 a lo largo de ``rampa_mano`` desde que
+        entra. Multiplica su visibilidad antes del híbrido. Ver
+        ``RAMPA_MANO_S``."""
+        return dict(self._confianzas_mano)
+
+    @property
+    def hombros_mundo(self) -> tuple[float, float] | None:
+        """``(ancho, dz)`` de los hombros en ``pose_world_landmarks``, en metros:
+        su separación en el plano de la imagen —con la que el escorzo ancla la
+        distancia a la cámara— y la profundidad del hombro del canal L menos la
+        del R —el tronco girado—. Va al CSV para que el escorzo se pueda rehacer
+        offline exactamente: sin ellos hubo que reconstruirlos de su salida."""
+        return self._hombros_mundo
 
     @property
     def extensiones(self) -> dict[Side, float]:
@@ -1243,6 +1302,70 @@ class ArmTracker:
             return None
         return w_mano / denominador
 
+    def _pixeles(
+        self, etiqueta: Side, nombres_mano: list[str]
+    ) -> dict[str, tuple[float, float]] | None:
+        """Píxeles de hombro, codo y mano (el centroide de ``nombres_mano``) de
+        un brazo en el último frame, o ``None`` sin imagen —pruebas,
+        reproducciones desde un CSV—."""
+        if self._imagen is None:
+            return None
+        imagen, ancho, alto = self._imagen
+
+        def pixel(nombre: str) -> tuple[float, float]:
+            lm = imagen[LANDMARKS[etiqueta][nombre]]
+            return (float(lm.x) * ancho, float(lm.y) * alto)
+
+        return {
+            "hombro": pixel("hombro"),
+            "codo": pixel("codo"),
+            "mano": tuple(
+                float(np.mean([pixel(n)[k] for n in nombres_mano])) for k in (0, 1)
+            ),
+        }
+
+    def _dentro(self, punto: tuple[float, float], margen: float = 0.0) -> bool:
+        """Si un píxel cae dentro de la imagen, a ``margen`` px del borde."""
+        _, ancho, alto = self._imagen
+        u, v = punto
+        return (
+            math.isfinite(u)
+            and math.isfinite(v)
+            and margen <= u <= ancho - margen
+            and margen <= v <= alto - margen
+        )
+
+    def _confianza_mano(
+        self,
+        canal: Side,
+        pixel_mano: tuple[float, float] | None,
+        vis_mano: float,
+        ahora: float,
+    ) -> float:
+        """Cuánto fiarse de la mano, de 0 a 1 (P5.6, H40).
+
+        La mano es OBSERVABLE si está dentro de la imagen y BlazePose le da
+        algo de visibilidad (por encima de donde el híbrido deja de contarla).
+        Desde que lo es, la confianza sube con un paso suave a lo largo de
+        ``rampa_mano``; en cuanto deja de serlo, vuelve a cero y la cuenta
+        empieza de nuevo. Una mano que BlazePose inventa por debajo del cuadro y
+        que salta dentro y fuera no llega nunca a contar; una de verdad cuenta
+        entera al cabo de medio segundo.
+
+        Sin imagen no hay cuadro que mirar y vale 1: las pruebas y las
+        reproducciones desde un CSV siguen como antes.
+        """
+        if pixel_mano is None or self._imagen is None:
+            return 1.0
+        umbral_minimo = self.min_visibility - MARGEN_VISIBILIDAD
+        if not (vis_mano > umbral_minimo and self._dentro(pixel_mano)):
+            self._mano_vista_desde.pop(canal, None)
+            return 0.0
+        desde = self._mano_vista_desde.setdefault(canal, ahora)
+        if self.rampa_mano <= 0.0:
+            return 1.0
+        return _paso_suave((ahora - desde) / self.rampa_mano)
+
     def _escorzo_brazo(
         self,
         mundo,
@@ -1251,7 +1374,7 @@ class ArmTracker:
         hombro: np.ndarray,
         codo: np.ndarray,
         mano: np.ndarray,
-        nombres_mano: list[str],
+        pixeles: dict[str, tuple[float, float]] | None,
         vis_codo: float,
         vis_mano: float,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -1259,44 +1382,35 @@ class ArmTracker:
         ``pose_world_landmarks``: mismo origen y orientación que BlazePose, así
         que todo lo que viene después no cambia.
 
+        ``vis_mano`` es la visibilidad YA multiplicada por la confianza en la
+        mano (``_confianza_mano``): una mano de la que no se fía el híbrido
+        tampoco se corrige, ni cuenta para el largo del antebrazo.
+
         Solo se corrige lo que se ve: una articulación bajo el umbral conserva
-        la posición relativa que le dio BlazePose. Sin imagen —pruebas,
-        reproducciones desde un CSV— o con el escorzo apagado, devuelve los de
-        BlazePose tal cual.
+        la posición relativa que le dio BlazePose, y lo mismo el codo en el
+        borde de la imagen si la mano no es de fiar (``MARGEN_BORDE``). Sin
+        imagen o con el escorzo apagado, devuelve los de BlazePose tal cual.
         """
         umbral = self.min_visibility
+        mano_vista = vis_mano >= umbral
         # Largo de cada hueso, suavizado, y solo con las dos puntas a la vista.
         largos = self._largos_hueso[canal]
         brazo_f, antebrazo_f = self._huesos[canal]
         if vis_codo >= umbral:
             largos[0] = brazo_f(float(np.linalg.norm(codo - hombro)))
-        if vis_codo >= umbral and vis_mano >= umbral:
+        if vis_codo >= umbral and mano_vista:
             largos[1] = antebrazo_f(float(np.linalg.norm(mano - codo)))
 
-        if not self.escorzo or self._imagen is None or self._camara is None:
+        if not self.escorzo or pixeles is None or self._camara is None:
             return codo, mano
         imagen, ancho, alto = self._imagen
         camara = self._camara
-
-        def pixel(lado: Side, nombre: str) -> tuple[float, float]:
-            lm = imagen[LANDMARKS[lado][nombre]]
-            return (float(lm.x) * ancho, float(lm.y) * alto)
-
-        img_hombro = pixel(etiqueta, "hombro")
-        img_codo = pixel(etiqueta, "codo")
-        img_mano = tuple(
-            float(np.mean([pixel(etiqueta, n)[k] for n in nombres_mano]))
-            for k in (0, 1)
-        )
-        self._puntos_imagen[canal] = {
-            "hombro": img_hombro,
-            "codo": img_codo,
-            "mano": img_mano,
-        }
+        img_hombro, img_codo, img_mano = pixeles["hombro"], pixeles["codo"], pixeles["mano"]
+        lm_contrario = imagen[LANDMARKS[etiqueta.opposite]["hombro"]]
         anclas = anclar_hombros(
             camara,
             img_hombro,
-            pixel(etiqueta.opposite, "hombro"),
+            (float(lm_contrario.x) * ancho, float(lm_contrario.y) * alto),
             hombro,
             self._punto(mundo, etiqueta.opposite, "hombro"),
         )
@@ -1307,8 +1421,11 @@ class ArmTracker:
         largo_antebrazo = (
             largos[1] if largos[1] is not None else float(np.linalg.norm(mano - codo))
         )
+        margen = MARGEN_BORDE * alto
+        corregir_codo = vis_codo >= umbral and (self._dentro(img_codo, margen) or mano_vista)
+        corregir_mano = mano_vista and self._dentro(img_mano, margen)
         previo_codo, previo_mano = self._escorzo_previo.get(canal, (None, None))
-        if vis_codo >= umbral:
+        if corregir_codo:
             codo_3d, _ = interseccion(
                 camara.rayo(*img_codo),
                 hombro_3d,
@@ -1318,7 +1435,7 @@ class ArmTracker:
             )
         else:
             codo_3d = hombro_3d + (codo - hombro)
-        if vis_mano >= umbral:
+        if corregir_mano:
             mano_3d, _ = interseccion(
                 camara.rayo(*img_mano),
                 codo_3d,
@@ -1333,6 +1450,25 @@ class ArmTracker:
             float(mano_3d[2] - codo_3d[2]),
         )
         return hombro + (codo_3d - hombro_3d), hombro + (mano_3d - hombro_3d)
+
+    def _medir_hombros(self, mundo) -> tuple[float, float] | None:
+        """``(ancho, dz)`` de los hombros en el mundo de BlazePose; ver
+        ``hombros_mundo``. El dz va POR CANAL (L menos R), no por etiqueta, para
+        que el CSV se lea sin volver a razonar sobre el espejo."""
+        z_canal = {}
+        puntos = []
+        for etiqueta in (Side.L, Side.R):
+            punto = self._punto(mundo, etiqueta, "hombro")
+            canal = canal_del_robot(
+                etiqueta, frame_espejado=self.frame_espejado, mirror=self.mirror
+            )
+            z_canal[canal] = float(punto[2])
+            puntos.append(punto)
+        ancho = float(math.hypot(*(puntos[0][:2] - puntos[1][:2])))
+        dz = z_canal[Side.L] - z_canal[Side.R]
+        if not (math.isfinite(ancho) and math.isfinite(dz)):
+            return None
+        return (ancho, dz)
 
     def _actualizar_tronco(self, mundo, ahora: float) -> np.ndarray | None:
         """Vertical del tronco, suavizada, o la reserva si no hay caderas.
@@ -1397,6 +1533,10 @@ class ArmTracker:
             self._frames_sin_pose += 1
             self._landmarks_imagen = None
             self._tronco_fresco = False
+            # Sin pose no se ve ninguna mano: la confianza vuelve a empezar.
+            self._mano_vista_desde.clear()
+            self._confianzas_mano.clear()
+            self._hombros_mundo = None
             return None
         mundo = mundo.landmark
         self._landmarks_imagen = resultado.pose_landmarks
@@ -1424,6 +1564,8 @@ class ArmTracker:
         self._puntos_imagen.clear()
         self._pesos_mano.clear()
         self._pesos_reposo.clear()
+        self._confianzas_mano.clear()
+        self._hombros_mundo = self._medir_hombros(mundo)
         ahora = self._clock()
         u_sup = self._actualizar_tronco(mundo, ahora)
         if u_sup is None:
@@ -1474,6 +1616,17 @@ class ArmTracker:
             vis_codo if self.target == "codo" else vis_mano
         )
         self._visibilidades[f"codo_{canal.value}"] = vis_codo
+        # La visibilidad de BlazePose no basta para fiarse de la mano (H40): la
+        # que inventa por debajo del cuadro llega con 0.7-0.96. Se multiplica
+        # por la confianza, que exige verla dentro de la imagen un rato.
+        pixeles = self._pixeles(etiqueta, nombres_mano)
+        if pixeles is not None:
+            self._puntos_imagen[canal] = pixeles
+        confianza = self._confianza_mano(
+            canal, None if pixeles is None else pixeles["mano"], vis_mano, timestamp
+        )
+        self._confianzas_mano[canal] = confianza
+        vis_mano = vis_mano * confianza
         peso_mano = self._peso_mano(vis_mano, vis_codo)
         if vis_hombro < self.min_visibility or peso_mano is None:
             return None
@@ -1504,7 +1657,7 @@ class ArmTracker:
 
         codo, mano = self._escorzo_brazo(
             mundo, etiqueta, canal, hombro, codo_bp, mano_bp,
-            nombres_mano, vis_codo, vis_mano,
+            pixeles, vis_codo, vis_mano,
         )
 
         # El largo del brazo se mide EN CADA FRAME, con sus dos segmentos, y no
@@ -1970,6 +2123,8 @@ def _demo(argv: list[str] | None = None) -> int:
         "  Con el brazo colgando, el robot se queda exactamente en reposo.\n"
         "  La profundidad de BlazePose se corrige con la imagen (escorzo):\n"
         "  si un hueso se ve con todo su largo, no apunta a la camara.\n"
+        "  Una mano solo cuenta dentro del cuadro, y entera al cabo de medio\n"
+        "  segundo: la que BlazePose inventa bajo el cuadro no mueve el brazo.\n"
         "  'k' recorre posicion -> direccion -> articular, solo para comparar\n"
         "  el mismo gesto; el programa final usa un unico mapeo. Fuera de\n"
         "  'articular', las ganancias y las teclas b/f no intervienen.\n\n"
@@ -2013,11 +2168,13 @@ def _demo(argv: list[str] | None = None) -> int:
         zona_reposo=cfg.arm.zona_reposo,
         escorzo=cfg.arm.escorzo,
         focal_relativa=cfg.arm.focal_relativa,
+        rampa_mano=cfg.arm.rampa_mano,
     )
     print(
         f"destino = {tracker.target}   escorzo = "
         f"{'si' if tracker.escorzo else 'no'} (focal {tracker.focal_relativa:g} x ancho)"
         f"   zona de reposo = {tracker.zona_reposo:g} grados"
+        f"   rampa de la mano = {tracker.rampa_mano:g} s"
     )
     print(
         f"mapeo = {tracker.mapeo}   flexion en "
@@ -2110,6 +2267,13 @@ def _demo(argv: list[str] | None = None) -> int:
                 "img_hombro_x_R", "img_hombro_y_R", "img_codo_x_R",
                 "img_codo_y_R", "img_mano_x_R", "img_mano_y_R",
                 "escorzo", "focal_rel",
+                # P5.6. confianza_mano_*: la rampa de la mano (0 fuera de cuadro,
+                # 1 al cabo de rampa_mano segundos a la vista). hombros_*: el
+                # ancla del escorzo —separación de los hombros en el plano de la
+                # imagen y su diferencia de profundidad, en metros de BlazePose—,
+                # para rehacerlo offline sin reconstruirla.
+                "confianza_mano_L", "confianza_mano_R",
+                "hombros_ancho_m", "hombros_dz_m",
             ]
         )
         print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
@@ -2158,6 +2322,8 @@ def _demo(argv: list[str] | None = None) -> int:
             vectores_bp = tracker.vectores_bp
             vectores_codo_bp = tracker.vectores_codo_bp
             puntos_imagen = tracker.puntos_imagen
+            confianzas_mano = tracker.confianzas_mano
+            hombros = tracker.hombros_mundo
             for fila, canal in enumerate((Side.L, Side.R)):
                 campo_abd, campo_flex = CANALES[canal]
                 valor_abd = getattr(mando, campo_abd)
@@ -2366,6 +2532,9 @@ def _demo(argv: list[str] | None = None) -> int:
                         *_imagen_csv(puntos_imagen.get(Side.L)),
                         *_imagen_csv(puntos_imagen.get(Side.R)),
                         int(tracker.escorzo), f"{tracker.focal_relativa:g}",
+                        _f(confianzas_mano.get(Side.L)),
+                        _f(confianzas_mano.get(Side.R)),
+                        *(("", "") if hombros is None else (f"{hombros[0]:.5f}", f"{hombros[1]:.5f}")),
                     ]
                 )
                 # Una línea por debajo de la de MQTT: con --publish y --record a

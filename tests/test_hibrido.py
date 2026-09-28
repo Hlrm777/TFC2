@@ -19,14 +19,17 @@ import numpy as np
 import pytest
 
 from telmeow_teleop.arm_tracker import (
+    FUNDIDO_REPOSO,
     LANDMARKS,
     PUNTOS_MANO,
+    RAMPA_MANO_S,
     TARGETS,
     ArmTracker,
 )
 from telmeow_teleop.config import AppConfig
-from telmeow_teleop.escorzo import Camara
+from telmeow_teleop.escorzo import FOCAL_RELATIVA, Camara
 from telmeow_teleop.limits import Side
+from telmeow_teleop.retarget import ALCANCE_HUMANO
 from test_arm_tracker import HOMBRO_IZQ, LandmarkFalso, mundo_falso
 
 ADELANTE = np.array([0.0, 0.0, -1.0])
@@ -174,7 +177,8 @@ def test_dentro_de_la_zona_el_reposo_es_exacto():
 
 def test_fuera_de_la_zona_no_toca_nada():
     tracker, _ = _tracker()
-    for grados in (40.0, 60.0, 120.0):
+    fin_del_fundido = tracker.zona_reposo + FUNDIDO_REPOSO
+    for grados in (fin_del_fundido, 60.0, 120.0):
         assert tracker.aplicar_reposo(Side.L, _direccion_a(grados), (-30.0, -80.0)) \
             == (-30.0, -80.0)
 
@@ -182,7 +186,8 @@ def test_fuera_de_la_zona_no_toca_nada():
 def test_la_zona_se_funde_sin_costura():
     tracker, _ = _tracker()
     anterior = None
-    for grados in np.linspace(20.0, 45.0, 251):
+    zona = tracker.zona_reposo
+    for grados in np.linspace(zona - 5.0, zona + FUNDIDO_REPOSO + 5.0, 251):
         salida = np.array(tracker.aplicar_reposo(Side.L, _direccion_a(grados), (-30.0, -80.0)))
         if anterior is not None:
             assert np.max(np.abs(salida - anterior)) < 1.0
@@ -272,7 +277,12 @@ def test_el_escorzo_devuelve_al_plano_la_mano_de_la_foto_1():
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
     anterior = {}
     for escorzo in (True, False):
-        tracker = _con_mundo(mundo, imagen, escorzo=escorzo, zona_reposo=0.0)
+        # La focal de la cámara con que se hizo la escena, y la mano contada
+        # desde el primer frame: aquí se prueba el escorzo, no la rampa.
+        tracker = _con_mundo(
+            mundo, imagen, escorzo=escorzo, zona_reposo=0.0,
+            focal_relativa=1.0, rampa_mano=0.0,
+        )
         tracker.process(frame)
         anterior[escorzo] = tracker.vectores[Side.L][2]     # componente anterior
         assert tracker.vectores_bp[Side.L][2] > 0.2        # BlazePose: la mano delante
@@ -307,13 +317,21 @@ def test_sin_imagen_el_escorzo_no_cambia_nada():
 
 
 def test_los_valores_por_defecto():
+    """Los del P5.6, medidos con la grabación del 2026-09-27. ``config.py`` no
+    puede importar los módulos (solo biblioteca estándar), así que los repite:
+    esta prueba es la que impide que las dos copias se separen."""
     tracker, _ = _tracker()
     assert tracker.target == "hibrido" == TARGETS[0]
-    assert tracker.zona_reposo == 25.0
+    assert tracker.zona_reposo == 35.0
     assert tracker.escorzo is True
+    assert tracker.focal_relativa == FOCAL_RELATIVA == 0.7
+    assert tracker.rampa_mano == RAMPA_MANO_S == 0.5
+    assert ALCANCE_HUMANO == 80.0
     cfg = AppConfig.from_env({})
-    assert (cfg.arm.target, cfg.arm.zona_reposo, cfg.arm.escorzo, cfg.arm.focal_relativa) \
-        == ("hibrido", 25.0, True, 1.0)
+    assert (cfg.arm.target, cfg.arm.zona_reposo, cfg.arm.escorzo) == ("hibrido", 35.0, True)
+    assert cfg.arm.focal_relativa == FOCAL_RELATIVA
+    assert cfg.arm.rampa_mano == RAMPA_MANO_S
+    assert cfg.arm.alcance_humano == ALCANCE_HUMANO
     assert cfg.arm.banda_tronco == 0.1
 
 
@@ -323,14 +341,19 @@ def test_la_configuracion_lee_los_parametros_nuevos():
         "TELMEOW_ARM_ESCORZO": "0",
         "TELMEOW_ARM_FOCAL_RELATIVA": "0.83",
         "TELMEOW_ARM_TARGET": "codo",
+        "TELMEOW_ARM_RAMPA_MANO": "0.2",
     })
     assert (cfg.arm.zona_reposo, cfg.arm.escorzo, cfg.arm.focal_relativa, cfg.arm.target) \
         == (15.0, False, 0.83, "codo")
+    assert cfg.arm.rampa_mano == 0.2
 
 
 @pytest.mark.parametrize(
     "kwargs",
-    [{"target": "pie"}, {"zona_reposo": -1.0}, {"zona_reposo": 90.0}, {"focal_relativa": 0.0}],
+    [
+        {"target": "pie"}, {"zona_reposo": -1.0}, {"zona_reposo": 90.0},
+        {"focal_relativa": 0.0}, {"rampa_mano": -0.1},
+    ],
 )
 def test_el_tracker_valida_los_parametros_del_p5_5(kwargs):
     with pytest.raises(ValueError):

@@ -560,6 +560,7 @@ def test_el_demo_graba_tantas_columnas_como_anuncia(monkeypatch, tmp_path):
     for nombre in (
         "p_ant_R", "c_sup_R", "ext_R", "mapeo",
         "peso_mano_R", "reposo_R", "pb_ant_R", "cb_sup_R", "img_mano_x_R", "escorzo",
+        "confianza_mano_R", "hombros_ancho_m", "hombros_dz_m",
     ):
         assert nombre in cabecera
     fila = dict(zip(cabecera, datos[-1]))

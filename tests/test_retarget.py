@@ -616,7 +616,12 @@ def test_la_grabacion_con_protocolo_confirma_el_p5_3():
 
     sesion = leer_sesion(CSV_26)
     articular = reproducir(sesion, "articular")
-    nuevo = reproducir(sesion, "direccion")
+    # Con el alcance con que se calcularon las cifras citadas (90). Con el de
+    # 80 del P5.6 aparece UN salto que no es la costura: en t = 83.0 s BlazePose
+    # tira el brazo 80° hacia el costado durante un frame, cerca del polo del
+    # cardán, y la flexión objetivo cambia 94.5° en vez de 86.7° —con la
+    # dirección del brazo cambiando de verdad, no «apenas», y sin cambio de rama—.
+    nuevo = reproducir(sesion, "direccion", alcance_humano=90.0)
     for lado in (Side.L, Side.R):
         viejo_m = metricas(sesion, articular, lado)
         nuevo_m = metricas(sesion, nuevo, lado)

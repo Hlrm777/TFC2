@@ -90,9 +90,15 @@ __all__ = [
 ]
 
 #: Ángulo entre el brazo del operador y el lateral que se toma como su
-#: recorrido completo, en grados. 90° es el brazo apuntando recto arriba, al
-#: frente o abajo. Más allá (cruzando por delante del cuerpo) se satura.
-ALCANCE_HUMANO: float = 90.0
+#: recorrido completo, en grados: ahí el robot llega a su tope. Más allá
+#: (cruzando por delante del cuerpo) se satura.
+#:
+#: 90° sería el brazo apuntando recto arriba, al frente o abajo, y eso sale de
+#: cuadro. Con los brazos estirados hacia la cámara el operador se aparta de la
+#: cruz 62-70° de mediana y ~80° en el p90 (grabación del 2026-09-27, ya con el
+#: escorzo), así que con 90 el robot se quedaba en 52-56° de sus 68° al frente.
+#: Con 80 llega a 55-62°, sin más temblor.
+ALCANCE_HUMANO: float = 80.0
 
 #: Ancho de la franja, en fracción del largo del brazo del operador, en la que
 #: ``direccion_por_posicion`` pasa de abrir el brazo (muñeca en el borde del

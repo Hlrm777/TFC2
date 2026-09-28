@@ -122,6 +122,9 @@ def cargar(ruta: Path) -> list[dict]:
         # híbrido y el de la zona de reposo.
         numericas += [f"pb_{e}_{s}" for e in ("lat", "sup", "ant")]
         numericas += [f"peso_mano_{s}", f"reposo_{s}"]
+        # P5.6: la confianza en la mano (la rampa desde que entra en cuadro).
+        numericas.append(f"confianza_mano_{s}")
+    numericas += ["hombros_ancho_m", "hombros_dz_m"]
 
     for fila in filas:
         for clave in numericas:
@@ -264,23 +267,30 @@ def resumen_direccion(filas: list[dict]) -> None:
             )
         print(linea)
 
-        posiciones, t_pos = _vectores(filas, "p", lado)
-        if len(posiciones) < 10:
-            continue
-        cm = [temblor([100.0 * p[k] for p in posiciones], t_pos) for k in range(3)]
-        if None in cm:
-            continue
-        plano = (cm[0] + cm[1]) / 2.0
-        razon = cm[2] / plano if plano > 0 else float("nan")
-        veredicto = (
-            "la PROFUNDIDAD tiembla mas: respalda el 3.3.1"
-            if razon > 1.5
-            else ("EMPATAN" if razon > 0.67 else "OJO: tiembla menos la profundidad")
-        )
-        print(
-            f"           mano en cm: lateral {cm[0]:.2f}  vertical {cm[1]:.2f}"
-            f"  PROFUNDIDAD {cm[2]:.2f}  -> x{razon:.2f} ({veredicto})"
-        )
+        # La cifra del §3.3.1 es sobre la profundidad DE BLAZEPOSE: desde el
+        # P5.5, p_* es la posición ya corregida por el escorzo y pb_* la de
+        # BlazePose. Se dan las dos cuando están; la primera es la que se cita.
+        fuentes = [("pb", "BlazePose   "), ("p", "tras escorzo")]
+        if not _vectores(filas, "pb", lado)[0]:
+            fuentes = [("p", "BlazePose   ")]
+        for prefijo, nombre in fuentes:
+            posiciones, t_pos = _vectores(filas, prefijo, lado)
+            if len(posiciones) < 10:
+                continue
+            cm = [temblor([100.0 * p[k] for p in posiciones], t_pos) for k in range(3)]
+            if None in cm:
+                continue
+            plano = (cm[0] + cm[1]) / 2.0
+            razon = cm[2] / plano if plano > 0 else float("nan")
+            veredicto = (
+                "la PROFUNDIDAD tiembla mas: respalda el 3.3.1"
+                if razon > 1.5
+                else ("EMPATAN" if razon > 0.67 else "OJO: tiembla menos la profundidad")
+            )
+            print(
+                f"           mano en cm, {nombre}: lateral {cm[0]:.2f}  vertical {cm[1]:.2f}"
+                f"  PROFUNDIDAD {cm[2]:.2f}  -> x{razon:.2f} ({veredicto})"
+            )
 
 
 def resumen_bloque(nombre: str, filas: list[dict]) -> None:
@@ -434,7 +444,7 @@ def resumen_p5_5(filas: list[dict]) -> None:
     # dejó en NaN en todas las filas.
     if all(math.isnan(f["peso_mano_L"]) and math.isnan(f["peso_mano_R"]) for f in filas):
         return
-    print(f"{'=' * 74}\nHIBRIDO, REPOSO Y ESCORZO (P5.5)\n{'=' * 74}\n")
+    print(f"{'=' * 74}\nHIBRIDO, REPOSO Y ESCORZO (P5.5-P5.6)\n{'=' * 74}\n")
     for lado in ("L", "R"):
         medidos = [f for f in filas if f.get(f"estimado_{lado}", 1)]
         pesos = [f[f"peso_mano_{lado}"] for f in medidos if f[f"peso_mano_{lado}"] == f[f"peso_mano_{lado}"]]
@@ -448,6 +458,19 @@ def resumen_p5_5(filas: list[dict]) -> None:
             f"  arm{lado}: el codo llevo el brazo en el {solo_codo:.0f} % de los frames"
             f" medidos, mezcla en el {mezcla:.0f} %; reposo exacto en el {en_reposo:.0f} %"
         )
+        # P5.6: cuánto no se fió de la mano, y por qué.
+        confianzas = [
+            f[f"confianza_mano_{lado}"]
+            for f in medidos
+            if f[f"confianza_mano_{lado}"] == f[f"confianza_mano_{lado}"]
+        ]
+        if confianzas:
+            fuera = 100 * sum(1 for c in confianzas if c <= 0.0) / len(confianzas)
+            rampa = 100 * sum(1 for c in confianzas if 0.0 < c < 1.0) / len(confianzas)
+            print(
+                f"         mano: fuera de cuadro o sin ver en el {fuera:.0f} % de los frames"
+                f" medidos, en su rampa de entrada en el {rampa:.0f} %"
+            )
         cambios = [
             100.0 * (f[f"p_ant_{lado}"] - f[f"pb_ant_{lado}"])
             for f in medidos

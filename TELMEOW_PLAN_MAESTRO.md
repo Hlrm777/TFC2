@@ -101,7 +101,7 @@ cambia respecto al plan original.
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
-| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección), P5.4 (posición) y P5.5 (híbrido, reposo, escorzo) hechos** · falta la grabación de validación | |
+| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo) y P5.6 (validación: confianza en la mano, focal, alcance) hechos** · falta verlo en el visor con el operador y medir `model_complexity` | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -109,7 +109,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**831 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**844 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -711,7 +711,7 @@ Commit: "refactor: head tracker con Face Mesh y solvePnP"
 
 ---
 
-## PROMPT 5 — Arm tracker 🟡 **código hecho** · P5.1, P5.3, P5.4 y P5.5 hechos · falta la grabación de validación
+## PROMPT 5 — Arm tracker 🟡 **código hecho** · P5.1, P5.3, P5.4, P5.5 y P5.6 hechos · falta verlo en el visor con el operador
 
 ### Lo hecho el 2026-09-06
 
@@ -1278,7 +1278,7 @@ el programa final usa un único mapeo.
    pregrabada que dispare el operador (el visor ya tiene una de demostración):
    es del P7.
 
-### P5.5 — Híbrido, zona de reposo y escorzo ✅ **hecho el 2026-09-27** · falta validarlo grabando
+### P5.5 — Híbrido, zona de reposo y escorzo ✅ **hecho el 2026-09-27** · validado en el P5.6, con tres correcciones
 
 **Lo que vio el operador**, con el visor mirando al robot desde atrás:
 
@@ -1328,8 +1328,8 @@ fuera de cuadro cede al codo, tomado como brazo estirado; entre medias, un paso
 suave. Se mezclan posiciones y no direcciones, para que el mapeo `posicion` siga
 viendo cuánto está recogida la mano.
 
-**3. La zona de reposo** (`zona_reposo` = 25°, ajustable). Con el brazo a menos
-de 25° de la vertical, el robot queda **exactamente** en reposo, se mida o no, y
+**3. La zona de reposo** (`zona_reposo` = 25°, ajustable; **35° desde el
+P5.6**). Con el brazo a menos de 25° de la vertical, el robot queda **exactamente** en reposo, se mida o no, y
 se funde con el mapeo en los 15° siguientes. El saltito era la diferencia entre
 el brazo colgando medido —`(−52.7, −12.7)` en la foto— y el reposo `(−55, 0)`
 al perderlo. El precio: los movimientos pequeños con el brazo colgando no se
@@ -1344,13 +1344,155 @@ las posiciones corregidas, y `p_*` es siempre la mano. El analizador dice cuánt
 actuó cada pieza, y la herramienta de comparación reproduce el híbrido y la
 zona de reposo. La tecla `t` recorre hibrido → mano → codo.
 
-**Lo que falta:**
+**Lo que faltaba** —la grabación de validación, ajustar `PESO_PLANO` y la focal,
+calibrar `ARM_ALCANCE_HUMANO`— se hizo en el P5.6.
 
-1. **Grabación de validación** con las columnas nuevas: manos arriba con los
-   codos atrás, el saludo, acercar las manos a la cámara, cruzar, un brazo
-   quieto mientras el otro se mueve, y posturas quietas para el §3.3.1.
-2. Con ella: ajustar `PESO_PLANO` y la focal (`ARM_FOCAL_RELATIVA`, sin
-   calibrar), y calibrar `ARM_ALCANCE_HUMANO`.
+### P5.6 — La validación, y lo que enseñó ✅ **hecho el 2026-09-28** · falta verlo en el visor
+
+**La grabación**: `validacion_2026-09-27.csv`, 270 s con protocolo —0 brazos
+colgando · 1 manos junto a la cara, codos abajo y atrás · 2 saludo con el
+derecho y el izquierdo colgando · 3 al revés · 4 acercar y alejar las manos de
+la cámara con los brazos estirados · 5 recoger los brazos con las muñecas por
+fuera · 6 cruzar por delante · 7 narración libre—, más un intento anterior
+cortado, `validacion_2026-09-27_intento.csv` (etiquetas 0-2), que sirvió de
+contraste: **todo lo que sigue se ajustó sobre una grabación y se comprobó
+sobre la otra**. Con más luz, **18-20 fps** en vez de 15; la etiqueta 0 se
+queda en 14, probablemente porque con las manos fuera de cuadro BlazePose
+vuelve a detectar más a menudo.
+
+**Cómo se evaluó.** El escorzo se rehízo offline con otros parámetros desde
+`pb_*`, `cb_*` e `img_*`, y el resto de la cadena con el `ArmTracker` real.
+Faltaba un dato —la separación de hombros de BlazePose, que usa el ancla— y se
+reconstruyó de la propia salida del escorzo: 31.5 cm, estable en todas las
+etiquetas, con las dos ecuaciones de la reconstrucción de acuerdo en un 1-9 %.
+La reproducción repite lo grabado a 1-4 cm, y la versión final se comprobó
+pasando las dos grabaciones por el tracker real: da **exactamente** las cifras
+de la simulación. Desde el P5.6 el CSV graba ese dato (`hombros_ancho_m`,
+`hombros_dz_m`) y no hará falta reconstruirlo.
+
+**1. El saltito seguía, y peor: BlazePose inventa la mano que no ve (H40).** Con
+el derecho saludando, el brazo izquierdo colgando estaba en reposo solo el
+**16 %** del tiempo, y el robot lo llevaba hasta 95° de su reposo. La mano del
+brazo colgando queda por debajo del cuadro, y BlazePose salta de un frame al
+siguiente entre esa mano —en `(127, 592)`, con el cuadro acabando en 480— y otra
+doblada hacia arriba delante del pecho —`(175, 430)`—, con **visibilidad 0.7-0.96
+en las dos**. El híbrido se fiaba de la visibilidad. Una mano de verdad no salta
+160 px ida y vuelta cada 50 ms: en los gestos, la mano se mueve 0.04 anchos de
+hombro por frame de mediana; la inventada, 0.21. Y el escorzo lo agravaba: el
+codo del brazo colgando cae en el borde inferior (y = 466-485), donde su píxel
+es una extrapolación, y lo hacía saltar entre sus dos soluciones, 5 cm detrás
+del hombro y 17 cm delante.
+
+Tres arreglos:
+
+- **Confianza en la mano** (`RAMPA_MANO_S` = 0.5 s). La mano cuenta solo
+  **dentro de la imagen**, y va ganando peso durante medio segundo desde que
+  entra; si sale o se pierde, la cuenta vuelve a empezar. La que aparece y
+  desaparece no llega a contar. Se probaron otras cuatro formas —solo exigir
+  que esté dentro, detectar la ida y vuelta, cualquier salto grande,
+  persistencia dura—, y la rampa es la única que arregla el brazo quieto sin
+  tocar los gestos: en el 90 % de sus frames el comando no cambia ni una décima
+  de grado. Los saltos grandes de los gestos resultaron ser casi siempre
+  movimientos rápidos de verdad, así que un detector de saltos frenaba justo
+  los gestos más expresivos.
+- **El codo del borde no se corrige si la mano no es de fiar** (`MARGEN_BORDE`,
+  3 % del alto). Con la mano a la vista sí se corrige: con las manos junto a la
+  cara y los codos abajo, el codo está en el borde y bien visto, y sin
+  corregirlo ese gesto volvía al frente (en el intento, de 10° a 38° de la
+  cruz).
+- **Zona de reposo 35°** (era 25°). Sentado a la mesa, el brazo colgando del
+  operador se mide a 20-37° de la vertical; el derecho descansa con el codo
+  afuera, y en la imagen se ve 37° inclinado. Con 25°, el brazo derecho quieto
+  oscilaba entre el reposo y 18° fuera de él.
+
+| Brazo quieto: frames a menos de 3° del reposo | grabado | P5.6 |
+|---|---|---|
+| izq., etiqueta 0 (los dos colgando) | 51 % | 94 % |
+| der., etiqueta 0 | 76 % | 94 % |
+| izq., etiqueta 2 (el derecho saluda) | 16 % | 71 % |
+| der., etiqueta 3 (el izquierdo saluda) | 58 % | 100 % |
+| intento: izq. y der. etiqueta 0, der. etiqueta 2 | 98 / 92 / 45 % | 100 / 100 / 99 % |
+
+Lo que queda en la etiqueta 2 son tramos en que la mano inventada se sostiene
+en cuadro más de medio segundo. En esa hipótesis BlazePose adelanta también el
+codo, el brazo se lee a 38-44° de la vertical, y la zona lo deja a medias: el
+robot se aparta 4-28° del reposo.
+
+**2. El escorzo quedaba en una frontera, y la culpa era la focal (H41).** En la
+etiqueta 1 el escorzo acercó las manos al plano solo 4-8 cm (de 27 a 19-23 cm),
+y el robot quedó a 27-29° de la cruz en vez de cerca de ella. Rehaciendo el
+escorzo con `PESO_PLANO` de 0.4 a 1.0 y focales de 0.5 a 1.2 veces el ancho:
+
+- Con la focal 1.0 del head tracker, ese gesto cae **justo en la frontera**
+  entre las dos soluciones del codo: con `PESO_PLANO` 0.4 el codo va 14.5 cm
+  delante y el robot a 27° de la cruz; con 0.6, al plano y a 3°. Una elección
+  biestable, y con 1.0 ningún `PESO_PLANO` acierta a la vez este gesto y el de
+  los brazos estirados.
+- Con focales de **0.6-0.8**, los dos gestos de referencia salen bien **a la vez
+  y en las dos grabaciones**: las manos junto a la cara vuelven al plano y los
+  brazos estirados siguen delante.
+- Y cuadra con la geometría: 190 px entre hombros a 0.6-0.9 m de la cámara dan
+  una focal de 0.5-0.85 veces el ancho; la integrada de un portátil ronda 65-75°
+  de campo horizontal.
+
+`FOCAL_RELATIVA` = **0.7** (71° de campo horizontal). `PESO_PLANO` se queda en
+0.4: con la focal buena es el que mejor deja los brazos estirados delante.
+**Queda confirmarla midiendo la cámara.**
+
+| Robot desde la cruz (mediana) | etiqueta 1, izq. / der. | etiqueta 4, izq. / der. |
+|---|---|---|
+| sin escorzo | 41 / 38° | 53 / 59° |
+| grabado (focal 1.0, alcance 90) | 27 / 29° | 52 / 47° |
+| **P5.6** (focal 0.7, alcance 80) | **0.4 / 23°** | **62 / 55°** |
+| intento, P5.6 | 10 / 16° | — |
+
+El tope del robot al frente, a la altura del hombro, es 68°.
+
+**3. `ALCANCE_HUMANO` = 80** (era 90). Con los brazos estirados hacia la cámara
+el operador se aparta de la cruz 62-70° de mediana y ~80° en el p90: apuntar
+recto al frente sale de cuadro. Con 90, el robot se quedaba en 52-56° de sus
+68°; con 80 llega a 55-62°, sin más temblor. Con 80, la grabación del P5.3 da un
+salto de flexión de 94.5° en un fallo de BlazePose de un frame —el brazo tirado
+80° al costado, cerca del polo del cardán— que con 90 era de 86.7° y no llegaba
+al umbral de la métrica. No es la costura ni un cambio de rama, y la prueba del
+P5.3 reproduce sus cifras con el alcance con que se calcularon.
+
+**4. La cifra del §3.3.1, por fin.** En postura quieta con las manos a la vista
+(etiqueta 1), la profundidad de BlazePose tiembla **1.6-1.8 cm** y el plano de
+la imagen **0.5-0.9 cm**: **entre 2.1 y 3.0 veces más**, en las dos grabaciones
+y los dos brazos, con BlazePose sin corregir. El escorzo no la reduce
+(×2.6-4.2): hace la profundidad coherente con la imagen, no menos ruidosa.
+
+**5. El escorzo cambia mucho de solución, pero no se nota.** Salta de una
+solución a otra 54-62 veces por minuto de brazo medido, frente a 13 saltos de la
+propia profundidad de BlazePose, y la mayoría son el escorzo encendiéndose y
+apagándose (la mano cruzando el umbral, el codo el borde). Se probó a
+suavizarlo —histéresis, mezcla de las dos soluciones, peso continuo— y no
+compensa: el temblor de la punta del robot es el mismo con y sin escorzo
+(narración: 2.0-2.4° por frame de mediana y 9.0° en el p95, contra 1.9 y 8.5 sin
+él). El One Euro y el limitador de velocidad lo absorben.
+
+**Lo que cambia en el contrato**: nada en el JSON. Por defecto, `zona_reposo`
+35, `focal_relativa` 0.7, `alcance_humano` 80 y `rampa_mano` 0.5, nuevo
+(`TELMEOW_ARM_RAMPA_MANO`). El CSV gana `confianza_mano_*` y
+`hombros_ancho_m`/`hombros_dz_m`. El analizador da la cifra del §3.3.1 con
+BlazePose sin corregir —y la de después del escorzo al lado— y cuánto no se
+fió de la mano. **13 pruebas nuevas**, 12 de ellas en
+`tests/test_confianza_mano.py`, con la escena de la grabación: con la mano inventada el brazo quieto no se aparta del
+reposo —sin la rampa, 9° en cada frame, el paso máximo del limitador—, y la
+misma mano, sostenida, sí mueve el brazo.
+
+**Lo que falta, con el operador delante:**
+
+1. Una sesión con `--publish` para ver en el visor lo que dicen los números: el
+   brazo quieto quieto, las manos junto a la cara llevando el robot hacia la
+   cruz, el saludo con el brazo en horizontal.
+2. **Medir la focal**: una hoja A4 en horizontal frente a la cámara, a 50 cm de
+   la lente medidos con cinta, y una captura. Con su ancho en píxeles,
+   `focal = píxeles × 0.50 / 0.297`.
+3. Dos dudas sobre lo grabado: en la etiqueta 1, ¿los codos quedaron atrás o
+   apoyados en la mesa?; en la 2, ¿la mano izquierda colgaba o estaba apoyada?
+4. Medir el coste de `model_complexity` y cerrar el P5.
 
 ### Lo que hereda del P4 — leer antes de escribir código
 
@@ -1997,10 +2139,13 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    - **La flexión es menos fiable que la abducción, y ahora por una razón
      medible.** La abducción vive en el **plano de imagen**, donde MediaPipe es
      preciso; la flexión depende de la **coordenada de profundidad**, que es la
-     componente débil de BlazePose en monocular. La cifra que lo respalda es la
-     razón de temblor entre los dos canales, que da
-     `tools/analizar_registro_brazos.py` sobre una grabación de reposo. **Falta
-     medirla** (P5.1).
+     componente débil de BlazePose en monocular. **Medido el 2026-09-27**
+     (P5.6): en postura quieta con las manos a la vista, la posición de la mano
+     que da BlazePose tiembla **1.6-1.8 cm en profundidad** frente a **0.5-0.9
+     cm en el plano de la imagen**, entre **2.1 y 3.0 veces más**, en dos
+     grabaciones y con los dos brazos. Es la cifra limpia: la razón de temblor
+     entre los dos canales del robot mezcla la profundidad con la geometría del
+     cardán. La da `tools/analizar_registro_brazos.py`, etiqueta a etiqueta.
    - **La flexión de codo del operador tampoco se reproduce**, porque el brazo
      del robot es un eslabón único. El mapeo usa la dirección hombro→mano, así
      que se conserva hacia dónde apunta el brazo pero no su forma. Es un
@@ -2078,10 +2223,20 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
     con la imagen y con el largo de los huesos, pero cada hueso tiene dos
     posturas que dan los mismos píxeles, y se elige entre ellas con un criterio
     —parecido a BlazePose, preferencia por el plano del tronco, continuidad—, no
-    con una medida. La focal de la cámara no está calibrada (convención
-    `focal = ancho`, la del head tracker). Ninguna de las dos cosas cambia la
-    escala de las direcciones del brazo, que es lo que se usa, pero sí la
-    perspectiva de los segmentos lejos del plano de los hombros.
+    con una medida. Y la elección depende de la focal, que no está calibrada
+    con un patrón sino **estimada con la grabación de validación** (H41): con
+    la convención del head tracker (`focal = ancho`), el gesto de las manos
+    junto a la cara quedaba en la frontera entre las dos soluciones; con 0.7
+    veces el ancho, él y el de los brazos estirados salen bien a la vez, en dos
+    grabaciones. Se confirma midiendo la cámara.
+
+14. **Una mano solo cuenta si se ve dentro del cuadro, y al cabo de medio
+    segundo** (H40). BlazePose inventa la mano que queda fuera de la imagen, y
+    con visibilidad alta, así que la visibilidad no basta. El precio: una mano
+    que entra en cuadro tarda medio segundo en mandar entera —mientras tanto el
+    brazo lo lleva el codo—, y los gestos en el mismo borde del cuadro los
+    sigue el codo. Y el de la zona de reposo, ahora de 35°: los movimientos
+    pequeños con el brazo colgando no se transmiten.
 
 ---
 
@@ -2362,7 +2517,18 @@ equivalente en Python puro, sin privilegios de administrador.
   hueso a qué distancia de la anterior está: la articulación queda en la
   intersección de un rayo con una esfera (Taylor, 2000). Queda una ambigüedad
   de dos soluciones por hueso que se resuelve por preferencia, y se declara
-  (§3.3.13).
+  (§3.3.13). Si preguntan por la focal: se estimó con dos grabaciones de
+  validación, como la única que acierta a la vez dos gestos de referencia
+  opuestos —manos junto a la cara, brazos estirados hacia la cámara—, y cuadra
+  con la geometría del puesto (H41).
+
+- **«¿Qué pasa cuando BlazePose se equivoca de mano?»** *(nueva, P5.6)*
+  Pasa, y con visibilidad alta: con el brazo colgando bajo la mesa, BlazePose
+  inventa la mano y la hace saltar de un frame al siguiente entre dos sitios, con
+  visibilidades de 0.7-0.96. Por eso la mano solo cuenta dentro del cuadro y al
+  cabo de medio segundo sostenida (H40). Medido: el brazo quieto pasó de estar
+  en reposo el 16 % del tiempo al 71 %, y en los gestos el comando no cambia en
+  el 90 % de los frames.
 
 - **«¿Cómo pasa de un brazo humano, con más grados de libertad, a uno de dos?»** *(nueva, P5.3)*
   No pasa ángulos: pasa **la dirección** en que apunta el brazo. Se filtra como
@@ -2599,15 +2765,16 @@ from telmeow_teleop.arm_tracker import (ArmTracker, ArmAngles, arm_angles,
 
 t = ArmTracker(mirror=True,            # brazo izq. FISICO del operador -> armL
                frame_espejado=True,    # = cfg.camera.flip · hecho, no politica
-               target="mano",          # "mano" (por defecto) o "codo"
+               target="hibrido",       # P5.5 · "hibrido" (defecto), "mano" o "codo"
                invert_abduccion=False, invert_flexion=False,  # verificado, H30
                reposo_abduccion=-55.0, reposo_flexion=0.0,    # NO es el cero
                gracia_s=0.5, velocidad_max=180.0,             # grados/s
                mapeo="posicion",       # P5.4 · "direccion" (P5.3) · "articular"
                banda_tronco=0.1,       # cierre al cruzar el tronco, x largo (6 cm)
-               zona_reposo=25.0,       # P5.5 · grados desde la vertical; 0 la apaga
+               zona_reposo=35.0,       # P5.6 · grados desde la vertical; 0 la apaga
                escorzo=True,           # P5.5 · corregir la profundidad (H39)
-               focal_relativa=1.0)     # focal / ancho de imagen, sin calibrar
+               focal_relativa=0.7,     # P5.6 · focal / ancho, estimada (H41)
+               rampa_mano=0.5)         # P5.6 · s hasta fiarse de una mano (H40)
 t.process(frame_rgb) -> ArmAngles | None      # ESTIMACION · None = sin pose
 t.comando(pose, timestamp=None) -> ArmAngles  # COMANDO · nunca tiene huecos
 t.map_posicion(canal, vector_m, largo_m, timestamp=None)   # P5.4 · sin camara
@@ -2621,6 +2788,8 @@ t.pesos_mano        # {Side: 0..1} · cuánto mandó la mano frente al codo
 t.pesos_reposo      # {Side: 0..1} · cuánto se llevó al reposo
 t.vectores_bp ; t.vectores_codo_bp  # BlazePose ANTES del escorzo (CSV pb_*, cb_*)
 t.puntos_imagen     # {Side: {hombro, codo, mano: (u, v)}} · píxeles (CSV img_*)
+t.confianzas_mano   # {Side: 0..1} · P5.6 · 0 fuera de cuadro, 1 tras la rampa
+t.hombros_mundo     # (ancho, dz) de BlazePose en m · el ancla del escorzo (CSV hombros_*)
 t.aplicar_reposo(canal, direccion, salida)  # la zona de reposo, sin cámara
 t.last_clamp        # {Side: ArmClamp} · lower/upper/fraction/clamped para el HUD
 t.raw_angles        # {Side: (abduccion, flexion)} crudos del operador
@@ -2723,9 +2892,10 @@ aquí y se prueba sin cámara (`tests/test_retarget.py`, `tests/test_posicion.py
 
 ```python
 from telmeow_teleop.escorzo import (Camara, interseccion, anclar_hombros,
-                                    reconstruir_brazo, PESO_PLANO, PESO_CONTINUIDAD)
+                                    reconstruir_brazo, PESO_PLANO, PESO_CONTINUIDAD,
+                                    FOCAL_RELATIVA)
 
-cam = Camara.desde_imagen(ancho, alto, focal_relativa=1.0)
+cam = Camara.desde_imagen(ancho, alto, focal_relativa=FOCAL_RELATIVA)  # 0.7 (H41)
 cam.rayo(u, v) ; cam.proyectar(punto_3d)
 anclar_hombros(cam, img_a, img_b, mundo_a, mundo_b) -> (hombro_a, hombro_b) | None
 interseccion(rayo, centro, radio, dz_bp, dz_previa=None) -> (punto, exacto)
@@ -3334,6 +3504,8 @@ instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 | **H34** | **La exposición de la cámara sobrevive al proceso** (DirectShow la guarda en el driver) y dejó la imagen **negra a 30 fps sin ningún error**. Se pide explícitamente al abrir, y el HUD avisa del brillo | §4.0, P5, §7.16 |
 | **H35** | **El brazo «daba la vuelta» por una costura del mapeo articular, no por la profundidad**: con flexión ±90, «al frente» tiene dos soluciones y se elegía por el signo de una componente que al frente es ruido (303 saltos en 9 min). Retargeting por dirección y flexión extendida a −180 | P5.3, §0.5 |
 | **H36** | Las ganancias de abducción del H33 **no son ganancias**: son la envolvente del robot entre 90°. Se sustituyen por un escalado dependiente de la dirección que sale de la tabla | P5.3 |
+| **H41** | **La focal del head tracker dejaba el escorzo en una frontera**: con `focal = ancho`, las manos junto a la cara caían justo entre las dos soluciones del codo (27° de la cruz con `PESO_PLANO` 0.4, 3° con 0.6), y ningún peso acertaba a la vez ese gesto y el de los brazos estirados. Con 0.7 veces el ancho aciertan los dos en dos grabaciones, y cuadra con la geometría del puesto. Estimada, falta medirla | P5.6, §3.3.13 |
+| **H40** | **BlazePose inventa la mano que no ve, y con visibilidad alta**: con el brazo colgando, la mano bajo el cuadro saltaba cada frame a una doblada delante del pecho con visibilidad 0.7-0.96, y el híbrido la seguía; el brazo quieto estaba en reposo el 16 % del tiempo. La visibilidad no basta: la mano cuenta dentro del cuadro y tras medio segundo sostenida (71-100 %). Y el codo en el borde del cuadro no se corrige por escorzo sin mano fiable | P5.6, §3.3.14 |
 | **H39** | **BlazePose ponía las manos 35 cm por delante cuando estaban junto a la cara**: con los codos abajo y las manos levantadas, su profundidad las dejaba 32-37 cm delante de los hombros mientras la imagen mostraba brazo y antebrazo casi con todo su largo. Ningún mapeo podía dar el gesto. Corrección por escorzo (rayo-esfera, Taylor 2000) con una ambigüedad resuelta por preferencia | P5.5, §3.3.13 |
 | **H38** | **La dirección hombro→mano no ve la retracción**: al normalizar se tira la distancia, y con el codo doblado la mano queda delante del pecho, así que el robot apunta adelante con el brazo recogido. 32 s acercando y alejando las manos sin que la componente anterior bajara de 0.78 el 95 % del tiempo. Mapeo `posicion`, propuesto por el operador | P5.4, §3.3.12 |
 | **H37** | **La simetría aproximaba la zona extendida, pero no la medía**: el reflejo `(a, f) ≡ (−a, f ± 180)` falló por un paso de 5° en 6-9 de 18 filas, y en el límite usado prometía 5° de más. Barrida con los detectores del visor (tras reproducir 37/37 filas de agosto); manda lo medido. Unión y motor: 0 choques. El cable, sin CAD, pasa a supuesto declarado | P5.3, §0.5, §3.3.11 |

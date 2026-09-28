@@ -528,24 +528,33 @@ class ArmConfig:
     # cubrió el barrido de agosto, con histéresis en la costura. La zona hasta
     # -180 está barrida (limits._TABLE_EXT_*) y la unión y el motor del brazo no
     # chocan; el cable no está en el CAD y se declara como supuesto de diseño.
+    # ``alcance_humano``: lo que se aparta el operador de la cruz cuando pide al
+    # robot su tope. 80 es lo que alcanza con los brazos estirados hacia la
+    # cámara (p90 de la grabación del 2026-09-27); con 90 el robot se quedaba en
+    # 52-56° de sus 68° al frente, porque apuntar recto al frente sale de cuadro.
     mapeo: str = "posicion"
     flexion_min: float = -180.0
-    alcance_humano: float = 90.0
+    alcance_humano: float = 80.0
     rodilla: float = 0.8
     margen_tabla: float = 2.0
     histeresis_rama: float = 15.0
     banda_tronco: float = 0.1
-    # -- P5.5 ------------------------------------------------------------------
+    # -- P5.5-P5.6 ---------------------------------------------------------------
     # ``target = "hibrido"``: la mano cuando se ve y el codo de respaldo cuando
     # no. ``zona_reposo``: grados desde la vertical en los que el brazo colgando
     # deja al robot exactamente en reposo (0 la apaga); quita el saltito del
-    # brazo quieto. ``escorzo``: corregir la profundidad de BlazePose con la
-    # imagen y el largo de los huesos (H39); ``focal_relativa`` es la focal de
-    # la cámara entre el ancho de la imagen, sin calibrar (1.0, la convención del
-    # head tracker).
-    zona_reposo: float = 25.0
+    # brazo quieto. 35 y no 25: sentado a la mesa, el brazo colgando del
+    # operador se mide a 20-37° de la vertical (grabación del 2026-09-27).
+    # ``escorzo``: corregir la profundidad de BlazePose con la imagen y el largo
+    # de los huesos (H39); ``focal_relativa`` es la focal de la cámara entre el
+    # ancho de la imagen, estimada con esa grabación (H41; igual que
+    # ``escorzo.FOCAL_RELATIVA``). ``rampa_mano``: segundos que tarda en contar
+    # entera una mano que entra en cuadro; la que BlazePose inventa por debajo
+    # del cuadro no llega a contar (H40; igual que ``arm_tracker.RAMPA_MANO_S``).
+    zona_reposo: float = 35.0
     escorzo: bool = True
-    focal_relativa: float = 1.0
+    focal_relativa: float = 0.7
+    rampa_mano: float = 0.5
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "ArmConfig":
@@ -586,6 +595,7 @@ class ArmConfig:
             focal_relativa=_env_float(
                 env, "ARM_FOCAL_RELATIVA", cls.focal_relativa
             ),
+            rampa_mano=_env_float(env, "ARM_RAMPA_MANO", cls.rampa_mano),
         )
 
 

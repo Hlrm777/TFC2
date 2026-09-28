@@ -498,7 +498,7 @@ class ArmConfig:
       introduciría retardo, y la latencia es una métrica del proyecto.
     """
 
-    target: str = "mano"
+    target: str = "hibrido"
     mirror: bool = True
     invert_abduccion: bool = False
     invert_flexion: bool = False
@@ -521,8 +521,8 @@ class ArmConfig:
     # más la extensión del brazo: al recoger la mano con la muñeca por fuera del
     # tronco, el brazo del robot retrocede hacia la cruz; al cruzarla hacia
     # dentro se va cerrando hasta su tope interno. ``banda_tronco`` es lo que
-    # tarda en cerrarse, en fracción del largo del brazo: 0.3 = la muñeca en la
-    # mitad del cuerpo.
+    # tarda en cerrarse, en fracción del largo del brazo (0.1, unos 6 cm, lo
+    # eligió el operador; 0.3 sería la mitad del cuerpo).
     # ``flexion_min = -180`` quita la costura del frente (el brazo que daba la
     # vuelta al acercar las manos a la cámara); ``-90`` vuelve al rango que
     # cubrió el barrido de agosto, con histéresis en la costura. La zona hasta
@@ -534,7 +534,18 @@ class ArmConfig:
     rodilla: float = 0.8
     margen_tabla: float = 2.0
     histeresis_rama: float = 15.0
-    banda_tronco: float = 0.3
+    banda_tronco: float = 0.1
+    # -- P5.5 ------------------------------------------------------------------
+    # ``target = "hibrido"``: la mano cuando se ve y el codo de respaldo cuando
+    # no. ``zona_reposo``: grados desde la vertical en los que el brazo colgando
+    # deja al robot exactamente en reposo (0 la apaga); quita el saltito del
+    # brazo quieto. ``escorzo``: corregir la profundidad de BlazePose con la
+    # imagen y el largo de los huesos (H39); ``focal_relativa`` es la focal de
+    # la cámara entre el ancho de la imagen, sin calibrar (1.0, la convención del
+    # head tracker).
+    zona_reposo: float = 25.0
+    escorzo: bool = True
+    focal_relativa: float = 1.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "ArmConfig":
@@ -570,6 +581,11 @@ class ArmConfig:
                 env, "ARM_HISTERESIS_RAMA", cls.histeresis_rama
             ),
             banda_tronco=_env_float(env, "ARM_BANDA_TRONCO", cls.banda_tronco),
+            zona_reposo=_env_float(env, "ARM_ZONA_REPOSO", cls.zona_reposo),
+            escorzo=_env_bool(env, "ARM_ESCORZO", cls.escorzo),
+            focal_relativa=_env_float(
+                env, "ARM_FOCAL_RELATIVA", cls.focal_relativa
+            ),
         )
 
 

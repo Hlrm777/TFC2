@@ -93,6 +93,7 @@ import numpy as np
 
 from .camera import abrir_camara, brillo_medio, describir
 from .config import AppConfig
+from .escorzo import Camara, anclar_hombros, interseccion
 from .filters import EMAFilter, OneEuroFilter, OneEuroVector, SlewLimiter, SlewLimiterND
 from .head_tracker import apartar_si_existe
 from .limits import (
@@ -196,6 +197,33 @@ EJE_SUPERIOR_RESERVA: np.ndarray = np.array([0.0, -1.0, 0.0], dtype=np.float64)
 #: Los dos primeros comparten filtro vectorial, retargeting y limitador: solo
 #: cambia el vector que entra.
 MAPEOS: tuple[str, ...] = ("posicion", "direccion", "articular")
+
+#: Los tres puntos de destino, en el orden en que los recorre la tecla ``t``.
+#:
+#: - ``"hibrido"`` (por defecto, P5.5): la mano cuando se ve, y el codo de
+#:   respaldo cuando no, con un paso suave entre los dos. Ver ``_peso_mano``.
+#: - ``"mano"``: solo la mano. Si sale de cuadro, el brazo se pierde.
+#: - ``"codo"``: solo el brazo superior, el ángulo del hombro en sentido estricto.
+TARGETS: tuple[str, ...] = ("hibrido", "mano", "codo")
+
+#: Media anchura, en puntuación de visibilidad, del paso suave con que el
+#: híbrido pasa de confiar en la mano a no confiar en ella: con el umbral en
+#: 0.5, la mano pesa 0 por debajo de 0.35 y entero por encima de 0.65.
+MARGEN_VISIBILIDAD: float = 0.15
+
+#: Grados en que la zona de reposo se funde con el mapeo normal, a partir de
+#: ``zona_reposo``. Ver ``ArmTracker.aplicar_reposo``.
+FUNDIDO_REPOSO: float = 15.0
+
+#: Alfa del suavizado del largo de cada hueso para el escorzo. Los huesos no
+#: cambian de largo; lo que varía entre frames es el ruido de BlazePose.
+ALFA_HUESO: float = 0.1
+
+
+def _paso_suave(x: float) -> float:
+    x = min(1.0, max(0.0, x))
+    return x * x * (3.0 - 2.0 * x)
+
 
 #: Nombre del campo MQTT de cada (lado del robot, eje).
 CANALES: dict[Side, tuple[str, str]] = {
@@ -632,8 +660,9 @@ class ArmTracker:
             horizontalmente. Debe coincidir con ``cfg.camera.flip``: es un
             **hecho sobre la entrada**, no una preferencia, y va separado de
             ``mirror``, que sí es una política.
-        target: ``"mano"`` (centroide de los cuatro landmarks de la mano) o
-            ``"codo"`` (vector húmero). Ver ``config.ArmConfig``.
+        target: ``"hibrido"`` (por defecto: la mano, con el codo de respaldo
+            cuando la mano no se ve), ``"mano"`` (centroide de los landmarks de
+            la mano) o ``"codo"`` (vector húmero). Ver ``TARGETS``.
         invert_abduccion, invert_flexion: sentido de cada eje, compartido por
             los dos brazos porque la convención del robot es simétrica.
             **Pendientes de verificar contra el visor.**
@@ -655,6 +684,13 @@ class ArmTracker:
         alcance_humano, rodilla, margen_tabla, histeresis_rama:
             parámetros del retargeting por dirección; ver
             ``retarget.RetargetBrazo``.
+        zona_reposo: grados desde la vertical en los que el brazo colgando del
+            operador deja al robot exactamente en reposo. 0 la desactiva. Ver
+            ``aplicar_reposo``.
+        escorzo: corregir la profundidad de BlazePose con la imagen y el largo
+            de los huesos. Ver ``escorzo.py``.
+        focal_relativa: focal de la cámara dividida por el ancho de la imagen,
+            para el escorzo. 1.0 es la convención sin calibrar del head tracker.
         banda_tronco: lo que tarda el brazo del robot en cerrarse hasta su
             tope interno cuando la muñeca cruza hacia dentro del tronco, en
             fracción del largo del brazo (0.3 = la mitad del cuerpo). Ver
@@ -666,7 +702,7 @@ class ArmTracker:
         *,
         mirror: bool = True,
         frame_espejado: bool = True,
-        target: str = "mano",
+        target: str = "hibrido",
         invert_abduccion: bool = False,
         invert_flexion: bool = False,
         gain_abduccion: float = 1.0,
@@ -689,6 +725,9 @@ class ArmTracker:
         margen_tabla: float = 2.0,
         histeresis_rama: float = 15.0,
         banda_tronco: float = BANDA_TRONCO,
+        zona_reposo: float = 25.0,
+        escorzo: bool = True,
+        focal_relativa: float = 1.0,
         pose_estimator=None,
         clock=time.perf_counter,
     ) -> None:
@@ -698,8 +737,12 @@ class ArmTracker:
             raise ValueError("banda_tronco debe ser positiva")
         if not -180.0 <= flexion_min <= FLEXION_RANGE[0]:
             raise ValueError("flexion_min debe estar entre -180 y -90")
-        if target not in ("mano", "codo"):
-            raise ValueError(f"target debe ser 'mano' o 'codo', se recibió {target!r}")
+        if target not in TARGETS:
+            raise ValueError(f"target debe ser uno de {TARGETS}, se recibió {target!r}")
+        if not 0.0 <= zona_reposo < 90.0:
+            raise ValueError("zona_reposo debe estar entre 0 y 90 grados")
+        if not focal_relativa > 0.0:
+            raise ValueError("focal_relativa debe ser positiva")
         ganancias = (gain_abduccion, gain_aduccion, gain_flexion, gain_extension)
         if min(ganancias) <= 0.0:
             raise ValueError("las ganancias deben ser positivas")
@@ -795,6 +838,25 @@ class ArmTracker:
         self._vectores: dict[Side, tuple[float, float, float]] = {}
         self._vectores_codo: dict[Side, tuple[float, float, float]] = {}
         self._extensiones: dict[Side, float] = {}
+        # -- híbrido, escorzo y zona de reposo (P5.5) --------------------------
+        self.zona_reposo = float(zona_reposo)
+        self.escorzo = bool(escorzo)
+        self.focal_relativa = float(focal_relativa)
+        self._pesos_mano: dict[Side, float] = {}
+        self._pesos_reposo: dict[Side, float] = {}
+        self._vectores_bp: dict[Side, tuple[float, float, float]] = {}
+        self._vectores_codo_bp: dict[Side, tuple[float, float, float]] = {}
+        self._puntos_imagen: dict[Side, dict[str, tuple[float, float]]] = {}
+        self._huesos: dict[Side, list[EMAFilter]] = {
+            lado: [EMAFilter(ALFA_HUESO), EMAFilter(ALFA_HUESO)]
+            for lado in (Side.L, Side.R)
+        }
+        self._largos_hueso: dict[Side, list[float | None]] = {
+            lado: [None, None] for lado in (Side.L, Side.R)
+        }
+        self._escorzo_previo: dict[Side, tuple[float | None, float | None]] = {}
+        self._imagen = None
+        self._camara: Camara | None = None
 
         # -- etapa de salida: de la estimación al comando ------------------
         # La pose de reposo pasa por clamp_arm igual que cualquier otra: así no
@@ -915,10 +977,42 @@ class ArmTracker:
         return dict(self._vectores_codo)
 
     @property
+    def pesos_mano(self) -> dict[Side, float]:
+        """Cuánto pesó la mano frente al codo en el destino de cada canal: 1 =
+        solo la mano, 0 = solo el codo. Con ``target="hibrido"`` depende de la
+        visibilidad de los dos; ver ``_peso_mano``."""
+        return dict(self._pesos_mano)
+
+    @property
+    def pesos_reposo(self) -> dict[Side, float]:
+        """Cuánto se llevó cada canal hacia el reposo por colgar el brazo: 1 =
+        reposo exacto, 0 = mapeo normal. Ver ``aplicar_reposo``."""
+        return dict(self._pesos_reposo)
+
+    @property
+    def vectores_bp(self) -> dict[Side, tuple[float, float, float]]:
+        """Hombro→mano tal como lo dio BlazePose, ANTES del escorzo, en metros y
+        en el marco del robot. Junto a ``vectores`` es lo que permite medir qué
+        corrigió el escorzo."""
+        return dict(self._vectores_bp)
+
+    @property
+    def vectores_codo_bp(self) -> dict[Side, tuple[float, float, float]]:
+        """Hombro→codo de BlazePose antes del escorzo."""
+        return dict(self._vectores_codo_bp)
+
+    @property
+    def puntos_imagen(self) -> dict[Side, dict[str, tuple[float, float]]]:
+        """Píxeles de hombro, codo y mano de cada canal en el último frame: la
+        medida que el escorzo toma por buena."""
+        return {canal: dict(puntos) for canal, puntos in self._puntos_imagen.items()}
+
+    @property
     def extensiones(self) -> dict[Side, float]:
         """Cuánto está estirado el brazo del operador: ``|hombro→destino|``
-        dividido por ``|hombro→codo| + |codo→destino|``. 1 = estirado. Es lo
-        que el mapeo ``posicion`` despliega hacia el costado cuando baja."""
+        dividido por ``|hombro→codo| + |codo→mano|``. 1 = brazo estirado. Es lo
+        que el mapeo ``posicion`` despliega hacia el costado cuando baja. Con el
+        codo de respaldo (sin mano) vale 1: el codo se toma como brazo estirado."""
         return dict(self._extensiones)
 
     @property
@@ -1080,40 +1174,165 @@ class ArmTracker:
     def _visibilidad(self, mundo, lado: Side, nombre: str) -> float:
         return float(getattr(mundo[LANDMARKS[lado][nombre]], "visibility", 1.0))
 
+    def _puntos_mano(self, mundo, lado: Side) -> tuple[list[str], float]:
+        """Landmarks que forman el punto de la mano y la visibilidad de su
+        puerta, la muñeca.
+
+        Promediar los landmarks de la mano en vez de usar solo la muñeca: son
+        varias estimaciones del mismo sitio, y el promedio cancela parte de su
+        ruido independiente. Es la versión barata —sin añadir ningún modelo—
+        de pedir más puntos en la mano.
+
+        LA PUERTA ES LA MUÑECA, NO EL MINIMO DE LOS CUATRO. Con el mínimo,
+        cualquier dedo mal estimado descartaba la mano entera, y BlazePose
+        estima los dedos con bastante menos confianza que la muñeca incluso con
+        la mano a la vista. Medido en la grabación del 2026-09-13: el mínimo de
+        los cuatro pasaba el umbral en el 45-48 % de los frames mientras el codo
+        —un solo landmark— lo pasaba en el 90 %, lo que hacía parecer que la mano
+        se ve peor que el codo cuando buena parte de la diferencia era el propio
+        agregador (H32). Con la muñeca de puerta, los dos se miden igual.
+        """
+        nombres = ["muneca"]
+        for nombre in PUNTOS_MANO[1:]:
+            if self._visibilidad(mundo, lado, nombre) >= self.min_visibility:
+                nombres.append(nombre)
+        return nombres, self._visibilidad(mundo, lado, "muneca")
+
     def _destino(self, mundo, lado: Side) -> tuple[np.ndarray, float, int]:
-        """Punto que orienta el brazo, su visibilidad y de cuántos landmarks
-        salió, según ``target``."""
+        """Punto de la mano —o el codo, con ``target="codo"`` —, su visibilidad
+        y de cuántos landmarks salió. El destino EFECTIVO del híbrido, que mezcla
+        los dos, se forma en ``_brazo``."""
         if self.target == "codo":
             return (
                 self._punto(mundo, lado, "codo"),
                 self._visibilidad(mundo, lado, "codo"),
                 1,
             )
-        # Promediar los landmarks de la mano en vez de usar solo la muñeca: son
-        # varias estimaciones del mismo sitio, y el promedio cancela parte de su
-        # ruido independiente. Es la versión barata —sin añadir ningún modelo—
-        # de pedir más puntos en la mano.
-        #
-        # LA PUERTA ES LA MUÑECA, NO EL MINIMO DE LOS CUATRO. Con el mínimo,
-        # cualquier dedo mal estimado descartaba la mano entera, y BlazePose
-        # estima los dedos con bastante menos confianza que la muñeca incluso
-        # con la mano a la vista. Medido en la grabación del 2026-09-13: el
-        # mínimo de los cuatro pasaba el umbral en el 45-48 % de los frames
-        # mientras el codo —un solo landmark— lo pasaba en el 90 %, lo que hacía
-        # parecer que la mano se ve peor que el codo cuando buena parte de la
-        # diferencia era el propio agregador.
-        #
-        # Y hay un motivo de método además del técnico: `target="codo"` se mide
-        # con la visibilidad de UN landmark, así que gatear la mano con el mínimo
-        # de cuatro sesgaba la comparación mano-frente-a-codo, que es justo la
-        # decisión que esa medición tiene que resolver. Con la muñeca de puerta,
-        # los dos casos se miden igual.
-        vis_ancla = self._visibilidad(mundo, lado, "muneca")
-        puntos = [self._punto(mundo, lado, "muneca")]
-        for nombre in PUNTOS_MANO[1:]:
-            if self._visibilidad(mundo, lado, nombre) >= self.min_visibility:
-                puntos.append(self._punto(mundo, lado, nombre))
+        nombres, vis_ancla = self._puntos_mano(mundo, lado)
+        puntos = [self._punto(mundo, lado, nombre) for nombre in nombres]
         return np.mean(puntos, axis=0), vis_ancla, len(puntos)
+
+    def _peso_mano(self, vis_mano: float, vis_codo: float) -> float | None:
+        """Cuánto manda la mano frente al codo; ``None`` = el brazo no se ve.
+
+        Con ``target="hibrido"``, cada punto pesa según su visibilidad —de 0 a
+        1 a lo largo de ``2·MARGEN_VISIBILIDAD`` alrededor del umbral— y se
+        combinan así::
+
+            peso = w_mano / (w_mano + (1 − w_mano) · w_codo)
+
+        La mano visible manda entera, se vea el codo o no. La mano fuera de
+        cuadro con el codo visible cede entera al codo: es el caso para el que
+        existe el híbrido, porque sentado a la mesa las manos salen de cuadro
+        mucho más que los codos al narrar (codo 86-96 %, mano 74-75 %, sesión del
+        2026-09-26). Y entre medias el paso es suave, así que una mano que
+        parpadea en el borde del cuadro no hace saltar el brazo del robot.
+        """
+        umbral = self.min_visibility
+        if self.target == "mano":
+            return 1.0 if vis_mano >= umbral else None
+        if self.target == "codo":
+            return 0.0 if vis_codo >= umbral else None
+        if max(vis_mano, vis_codo) < umbral:
+            return None
+        base = umbral - MARGEN_VISIBILIDAD
+        w_mano = _paso_suave((vis_mano - base) / (2.0 * MARGEN_VISIBILIDAD))
+        w_codo = _paso_suave((vis_codo - base) / (2.0 * MARGEN_VISIBILIDAD))
+        denominador = w_mano + (1.0 - w_mano) * w_codo
+        if denominador <= 0.0:
+            return None
+        return w_mano / denominador
+
+    def _escorzo_brazo(
+        self,
+        mundo,
+        etiqueta: Side,
+        canal: Side,
+        hombro: np.ndarray,
+        codo: np.ndarray,
+        mano: np.ndarray,
+        nombres_mano: list[str],
+        vis_codo: float,
+        vis_mano: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Codo y mano corregidos por escorzo (``escorzo.py``), en el marco de
+        ``pose_world_landmarks``: mismo origen y orientación que BlazePose, así
+        que todo lo que viene después no cambia.
+
+        Solo se corrige lo que se ve: una articulación bajo el umbral conserva
+        la posición relativa que le dio BlazePose. Sin imagen —pruebas,
+        reproducciones desde un CSV— o con el escorzo apagado, devuelve los de
+        BlazePose tal cual.
+        """
+        umbral = self.min_visibility
+        # Largo de cada hueso, suavizado, y solo con las dos puntas a la vista.
+        largos = self._largos_hueso[canal]
+        brazo_f, antebrazo_f = self._huesos[canal]
+        if vis_codo >= umbral:
+            largos[0] = brazo_f(float(np.linalg.norm(codo - hombro)))
+        if vis_codo >= umbral and vis_mano >= umbral:
+            largos[1] = antebrazo_f(float(np.linalg.norm(mano - codo)))
+
+        if not self.escorzo or self._imagen is None or self._camara is None:
+            return codo, mano
+        imagen, ancho, alto = self._imagen
+        camara = self._camara
+
+        def pixel(lado: Side, nombre: str) -> tuple[float, float]:
+            lm = imagen[LANDMARKS[lado][nombre]]
+            return (float(lm.x) * ancho, float(lm.y) * alto)
+
+        img_hombro = pixel(etiqueta, "hombro")
+        img_codo = pixel(etiqueta, "codo")
+        img_mano = tuple(
+            float(np.mean([pixel(etiqueta, n)[k] for n in nombres_mano]))
+            for k in (0, 1)
+        )
+        self._puntos_imagen[canal] = {
+            "hombro": img_hombro,
+            "codo": img_codo,
+            "mano": img_mano,
+        }
+        anclas = anclar_hombros(
+            camara,
+            img_hombro,
+            pixel(etiqueta.opposite, "hombro"),
+            hombro,
+            self._punto(mundo, etiqueta.opposite, "hombro"),
+        )
+        if anclas is None:
+            return codo, mano
+        hombro_3d = anclas[0]
+        largo_brazo = largos[0] if largos[0] is not None else float(np.linalg.norm(codo - hombro))
+        largo_antebrazo = (
+            largos[1] if largos[1] is not None else float(np.linalg.norm(mano - codo))
+        )
+        previo_codo, previo_mano = self._escorzo_previo.get(canal, (None, None))
+        if vis_codo >= umbral:
+            codo_3d, _ = interseccion(
+                camara.rayo(*img_codo),
+                hombro_3d,
+                largo_brazo,
+                float(codo[2] - hombro[2]),
+                previo_codo,
+            )
+        else:
+            codo_3d = hombro_3d + (codo - hombro)
+        if vis_mano >= umbral:
+            mano_3d, _ = interseccion(
+                camara.rayo(*img_mano),
+                codo_3d,
+                largo_antebrazo,
+                float(mano[2] - codo[2]),
+                previo_mano,
+            )
+        else:
+            mano_3d = codo_3d + (mano - codo)
+        self._escorzo_previo[canal] = (
+            float(codo_3d[2] - hombro_3d[2]),
+            float(mano_3d[2] - codo_3d[2]),
+        )
+        return hombro + (codo_3d - hombro_3d), hombro + (mano_3d - hombro_3d)
 
     def _actualizar_tronco(self, mundo, ahora: float) -> np.ndarray | None:
         """Vertical del tronco, suavizada, o la reserva si no hay caderas.
@@ -1181,6 +1400,18 @@ class ArmTracker:
             return None
         mundo = mundo.landmark
         self._landmarks_imagen = resultado.pose_landmarks
+        # La imagen, para el escorzo. Sin ella —pruebas, reproducciones desde un
+        # CSV— se usa la profundidad de BlazePose tal cual.
+        imagen = getattr(resultado.pose_landmarks, "landmark", None)
+        forma = getattr(frame_rgb, "shape", None)
+        if imagen is not None and forma is not None and len(forma) >= 2:
+            self._imagen = (imagen, float(forma[1]), float(forma[0]))
+            self._camara = Camara.desde_imagen(
+                forma[1], forma[0], self.focal_relativa
+            )
+        else:
+            self._imagen = None
+            self._camara = None
 
         self._frames_sin_pose = 0
         self._raw.clear()
@@ -1188,6 +1419,11 @@ class ArmTracker:
         self._vectores.clear()
         self._vectores_codo.clear()
         self._extensiones.clear()
+        self._vectores_bp.clear()
+        self._vectores_codo_bp.clear()
+        self._puntos_imagen.clear()
+        self._pesos_mano.clear()
+        self._pesos_reposo.clear()
         ahora = self._clock()
         u_sup = self._actualizar_tronco(mundo, ahora)
         if u_sup is None:
@@ -1200,6 +1436,9 @@ class ArmTracker:
             )
             angulos = self._brazo(mundo, etiqueta, canal, u_sup, ahora)
             if angulos is None:
+                # La elección del escorzo del frame anterior ya no vale: tras un
+                # hueco, el brazo puede estar en cualquier sitio.
+                self._escorzo_previo.pop(canal, None)
                 continue
             campo_abd, campo_flex = CANALES[canal]
             setattr(salida, campo_abd, angulos[0])
@@ -1215,30 +1454,33 @@ class ArmTracker:
         u_sup: np.ndarray,
         timestamp: float,
     ) -> tuple[float, float] | None:
-        """Un brazo, de landmarks a ángulos del robot. ``None`` = descartarlo."""
+        """Un brazo, de landmarks a ángulos del robot. ``None`` = descartarlo.
+
+        Cadena: visibilidades → peso de la mano frente al codo → escorzo →
+        destino efectivo → mapeo → zona de reposo.
+        """
         vis_hombro = self._visibilidad(mundo, etiqueta, "hombro")
-        destino, vis_destino, n_destino = self._destino(mundo, etiqueta)
-        # Cuántos landmarks formaron el punto de destino. Es lo que dice si la
+        vis_codo = self._visibilidad(mundo, etiqueta, "codo")
+        nombres_mano, vis_mano = self._puntos_mano(mundo, etiqueta)
+        # Cuántos landmarks formaron el punto de la mano. Es lo que dice si la
         # promesa de «cuatro puntos de mano son más estables que la muñeca
-        # sola» se cumple de verdad o si el centroide colapsa casi siempre a la
-        # muñeca, en cuyo caso esa afirmación no se puede defender.
-        self._puntos_destino[canal] = n_destino
+        # sola» se cumple de verdad o si el centroide colapsa a la muñeca.
+        self._puntos_destino[canal] = 1 if self.target == "codo" else len(nombres_mano)
         # Las visibilidades se registran con el nombre del CANAL DEL ROBOT, no
         # con la etiqueta de BlazePose: el CSV tiene que poder leerse sin volver
         # a razonar sobre el espejo.
         self._visibilidades[f"hombro_{canal.value}"] = vis_hombro
-        self._visibilidades[f"destino_{canal.value}"] = vis_destino
-        self._visibilidades[f"codo_{canal.value}"] = self._visibilidad(
-            mundo, etiqueta, "codo"
+        self._visibilidades[f"destino_{canal.value}"] = (
+            vis_codo if self.target == "codo" else vis_mano
         )
-        if min(vis_hombro, vis_destino) < self.min_visibility:
+        self._visibilidades[f"codo_{canal.value}"] = vis_codo
+        peso_mano = self._peso_mano(vis_mano, vis_codo)
+        if vis_hombro < self.min_visibility or peso_mano is None:
             return None
+        self._pesos_mano[canal] = peso_mano
 
-        base = torso_basis(
-            self._punto(mundo, etiqueta, "hombro"),
-            self._punto(mundo, etiqueta.opposite, "hombro"),
-            u_sup,
-        )
+        hombro = self._punto(mundo, etiqueta, "hombro")
+        base = torso_basis(hombro, self._punto(mundo, etiqueta.opposite, "hombro"), u_sup)
         if base is None:
             return None
 
@@ -1250,30 +1492,49 @@ class ArmTracker:
         if self.invert_abduccion:
             inclinacion = -inclinacion
 
-        hombro = self._punto(mundo, etiqueta, "hombro")
+        codo_bp = self._punto(mundo, etiqueta, "codo")
+        mano_bp = np.mean([self._punto(mundo, etiqueta, n) for n in nombres_mano], axis=0)
+        for destino_dict, punto in (
+            (self._vectores_bp, mano_bp),
+            (self._vectores_codo_bp, codo_bp),
+        ):
+            vector_bp = vector_brazo(hombro, punto, base, inclinacion)
+            if vector_bp is not None:
+                destino_dict[canal] = vector_bp
+
+        codo, mano = self._escorzo_brazo(
+            mundo, etiqueta, canal, hombro, codo_bp, mano_bp,
+            nombres_mano, vis_codo, vis_mano,
+        )
+
+        # El largo del brazo se mide EN CADA FRAME, con sus dos segmentos, y no
+        # se calibra aparte. Así, con el brazo estirado la extensión vale 1 sea
+        # cual sea la escala a la que BlazePose estime el cuerpo.
+        largo_brazo = float(np.linalg.norm(codo - hombro))
+        largo = largo_brazo + float(np.linalg.norm(mano - codo))
+        if not (math.isfinite(largo) and largo_brazo > 1e-9):
+            return None
+        # El destino efectivo: la mano, el codo LLEVADO AL LARGO DEL BRAZO —es
+        # decir, el codo tomado como brazo estirado—, o una mezcla de los dos.
+        # Mezclar posiciones, y no direcciones, es lo que deja que el mapeo
+        # 'posicion' siga viendo cuánto está recogida la mano.
+        if peso_mano >= 1.0:
+            destino = mano
+        else:
+            estirado = hombro + (codo - hombro) * (largo / largo_brazo)
+            destino = estirado + peso_mano * (mano - estirado)
+
         vector = vector_brazo(hombro, destino, base, inclinacion)
         direccion = direccion_brazo(hombro, destino, base, inclinacion)
         crudo = arm_angles(hombro, destino, base, inclinacion)
         if crudo is None or direccion is None or vector is None:
             return None
         self._direcciones[canal] = direccion
-        self._vectores[canal] = vector
-
-        # El largo del brazo se mide EN CADA FRAME, con sus dos segmentos, y no
-        # se calibra aparte. Así, con el brazo estirado la extensión vale 1 sea
-        # cual sea la escala a la que BlazePose estime el cuerpo, y aunque
-        # comprima la profundidad: los dos lados del cociente se comprimen
-        # igual. Con target="codo" el destino ES el codo y la extensión es
-        # siempre 1, así que "posicion" se reduce a "direccion".
-        codo = self._punto(mundo, etiqueta, "codo")
-        vector_codo = vector_brazo(hombro, codo, base, inclinacion)
-        largo = float(np.linalg.norm(codo - hombro) + np.linalg.norm(destino - codo))
-        if vector_codo is not None:
-            self._vectores_codo[canal] = vector_codo
-        if math.isfinite(largo) and largo > 1e-9:
-            self._extensiones[canal] = min(
-                1.0, math.sqrt(sum(v * v for v in vector)) / largo
-            )
+        for destino_dict, punto in ((self._vectores, mano), (self._vectores_codo, codo)):
+            vector_corregido = vector_brazo(hombro, punto, base, inclinacion)
+            if vector_corregido is not None:
+                destino_dict[canal] = vector_corregido
+        self._extensiones[canal] = min(1.0, math.sqrt(sum(v * v for v in vector)) / largo)
 
         abduccion, flexion = crudo
         if flexion is None:
@@ -1295,10 +1556,51 @@ class ArmTracker:
             extremo[1] = max(extremo[1], valor)
 
         if self._mapeo == "posicion":
-            return self.map_posicion(canal, vector, largo, timestamp)
-        if self._mapeo == "direccion":
-            return self.map_direccion(canal, direccion, timestamp)
-        return self.map_to_robot(canal, abduccion, flexion, timestamp)
+            salida = self.map_posicion(canal, vector, largo, timestamp)
+        elif self._mapeo == "direccion":
+            salida = self.map_direccion(canal, direccion, timestamp)
+        else:
+            salida = self.map_to_robot(canal, abduccion, flexion, timestamp)
+        if salida is None:
+            return None
+        return self.aplicar_reposo(canal, direccion, salida)
+
+    def aplicar_reposo(
+        self,
+        canal: Side | str,
+        direccion,
+        salida: tuple[float, float],
+    ) -> tuple[float, float]:
+        """La zona de reposo: con el brazo del operador colgando, el robot se
+        queda EXACTAMENTE en su pose de reposo.
+
+        Es lo que quita el saltito del brazo quieto. Ese brazo cuelga en el
+        borde inferior del cuadro y se mide a ratos: medido daba, por ejemplo,
+        ``(−52.7, −12.7)`` —el brazo colgando del operador no es el reposo del
+        robot—, y sin medir el comando va al reposo, ``(−55, 0)``. Esa diferencia
+        era el salto. Dentro de la zona las dos cosas dan lo mismo.
+
+        La zona se mide como el ángulo entre la dirección del brazo y la
+        vertical hacia abajo: por debajo de ``zona_reposo`` el reposo es
+        exacto, y se funde con el mapeo normal en los ``FUNDIDO_REPOSO`` grados
+        siguientes, para no crear una costura nueva. El precio: los movimientos
+        pequeños con el brazo colgando no se transmiten.
+        """
+        canal = Side.parse(canal)
+        if self.zona_reposo <= 0.0 or direccion is None:
+            self._pesos_reposo[canal] = 0.0
+            return salida
+        hacia_abajo = -float(direccion[1])
+        angulo = math.degrees(math.acos(max(-1.0, min(1.0, hacia_abajo))))
+        peso = 1.0 - _paso_suave((angulo - self.zona_reposo) / FUNDIDO_REPOSO)
+        self._pesos_reposo[canal] = peso
+        if peso <= 0.0:
+            return salida
+        reposo_abd, reposo_flex = self._reposo[canal]
+        return (
+            reposo_abd + (1.0 - peso) * (salida[0] - reposo_abd),
+            reposo_flex + (1.0 - peso) * (salida[1] - reposo_flex),
+        )
 
     def map_posicion(
         self,
@@ -1567,6 +1869,15 @@ def _vector_csv(vector) -> list[str]:
     return [f"{v:.5f}" for v in vector]
 
 
+def _imagen_csv(puntos: dict[str, tuple[float, float]] | None) -> list[str]:
+    # Píxeles con una décima: el escorzo trabaja a esa escala.
+    if not puntos:
+        return [""] * 6
+    return [
+        f"{puntos[nombre][k]:.1f}" for nombre in ("hombro", "codo", "mano") for k in (0, 1)
+    ]
+
+
 def _retarget_csv(paso: Retargeting | None, vivo: bool) -> list[str]:
     # Solo si se estimó ESTE frame: un ψ de hace un segundo no es una medida.
     if paso is None or not vivo:
@@ -1650,17 +1961,22 @@ def _demo(argv: list[str] | None = None) -> int:
         "  y, ademas, cuanto lo tienes recogido. Lo que tu codo esconde al\n"
         "  doblarse, el robot lo abre hacia el costado, pero solo con la muneca\n"
         "  por fuera del tronco: si cruzas la mano por delante del cuerpo, el\n"
-        "  brazo se va cerrando poco a poco hasta su tope, que alcanza con la\n"
-        "  muneca en la mitad del cuerpo. Con el brazo estirado es igual que\n"
-        "  'direccion'.\n"
-        "  El HUD muestra 'ext': 1.00 = brazo estirado.\n"
+        "  brazo se va cerrando hasta su tope en unos 6 cm. Con el brazo\n"
+        "  estirado es igual que 'direccion'.\n"
+        "  El HUD muestra 'ext': 1.00 = brazo estirado.\n\n"
+        "DESTINO Y PROFUNDIDAD (P5.5)\n"
+        "  Por defecto 'hibrido': manda tu mano cuando se ve y tu codo cuando\n"
+        "  no; el HUD muestra 'mano' = cuanto pesa la mano (1.0 = solo mano).\n"
+        "  Con el brazo colgando, el robot se queda exactamente en reposo.\n"
+        "  La profundidad de BlazePose se corrige con la imagen (escorzo):\n"
+        "  si un hueso se ve con todo su largo, no apunta a la camara.\n"
         "  'k' recorre posicion -> direccion -> articular, solo para comparar\n"
         "  el mismo gesto; el programa final usa un unico mapeo. Fuera de\n"
         "  'articular', las ganancias y las teclas b/f no intervienen.\n\n"
         "TECLAS\n"
         "  k = cambiar de mapeo (posicion -> direccion -> articular)\n"
         "  m = alternar espejo (que brazo manda sobre cual)\n"
-        "  t = alternar destino (mano <-> codo)\n"
+        "  t = cambiar de destino (hibrido -> mano -> codo)\n"
         "  b = invertir abduccion    f = invertir flexion\n"
         "  r = reiniciar extremos\n"
         "  z/Z = ganancia ABDUCCION -/+     x/X = ganancia ADUCCION  -/+\n"
@@ -1694,6 +2010,14 @@ def _demo(argv: list[str] | None = None) -> int:
         margen_tabla=cfg.arm.margen_tabla,
         histeresis_rama=cfg.arm.histeresis_rama,
         banda_tronco=cfg.arm.banda_tronco,
+        zona_reposo=cfg.arm.zona_reposo,
+        escorzo=cfg.arm.escorzo,
+        focal_relativa=cfg.arm.focal_relativa,
+    )
+    print(
+        f"destino = {tracker.target}   escorzo = "
+        f"{'si' if tracker.escorzo else 'no'} (focal {tracker.focal_relativa:g} x ancho)"
+        f"   zona de reposo = {tracker.zona_reposo:g} grados"
     )
     print(
         f"mapeo = {tracker.mapeo}   flexion en "
@@ -1770,6 +2094,22 @@ def _demo(argv: list[str] | None = None) -> int:
                 "c_lat_L", "c_sup_L", "c_ant_L",
                 "c_lat_R", "c_sup_R", "c_ant_R",
                 "ext_L", "ext_R",
+                # P5.5. Con el escorzo, p_* y c_* son las posiciones CORREGIDAS;
+                # pb_* y cb_* las de BlazePose antes de corregir, y img_* los
+                # píxeles que el escorzo tomó por buenos. Con las tres se puede
+                # rehacer offline el escorzo con otra focal u otros pesos.
+                # peso_mano_*: cuánto mandó la mano frente al codo (híbrido);
+                # reposo_*: cuánto se llevó el canal al reposo.
+                "peso_mano_L", "peso_mano_R", "reposo_L", "reposo_R",
+                "pb_lat_L", "pb_sup_L", "pb_ant_L",
+                "pb_lat_R", "pb_sup_R", "pb_ant_R",
+                "cb_lat_L", "cb_sup_L", "cb_ant_L",
+                "cb_lat_R", "cb_sup_R", "cb_ant_R",
+                "img_hombro_x_L", "img_hombro_y_L", "img_codo_x_L",
+                "img_codo_y_L", "img_mano_x_L", "img_mano_y_L",
+                "img_hombro_x_R", "img_hombro_y_R", "img_codo_x_R",
+                "img_codo_y_R", "img_mano_x_R", "img_mano_y_R",
+                "escorzo", "focal_rel",
             ]
         )
         print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
@@ -1813,6 +2153,11 @@ def _demo(argv: list[str] | None = None) -> int:
             vectores = tracker.vectores
             vectores_codo = tracker.vectores_codo
             extensiones = tracker.extensiones
+            pesos_mano = tracker.pesos_mano
+            pesos_reposo = tracker.pesos_reposo
+            vectores_bp = tracker.vectores_bp
+            vectores_codo_bp = tracker.vectores_codo_bp
+            puntos_imagen = tracker.puntos_imagen
             for fila, canal in enumerate((Side.L, Side.R)):
                 campo_abd, campo_flex = CANALES[canal]
                 valor_abd = getattr(mando, campo_abd)
@@ -1860,9 +2205,14 @@ def _demo(argv: list[str] | None = None) -> int:
                     if paso is not None and estimado.get(canal, False):
                         extension = extensiones.get(canal)
                         texto_ext = "" if extension is None else f"ext {extension:.2f} "
+                        peso = pesos_mano.get(canal)
+                        texto_mano = "" if peso is None else f"mano {peso:.1f} "
+                        reposo = pesos_reposo.get(canal, 0.0)
+                        texto_reposo = " REP" if reposo > 0.5 else ""
                         partes.append(
-                            f"{canal.value}: {texto_ext}psi {paso.psi_humano:3.0f}->"
-                            f"{paso.psi_robot:2.0f} alfa {paso.alfa:3.0f}"
+                            f"{canal.value}: {texto_mano}{texto_ext}psi "
+                            f"{paso.psi_humano:3.0f}->{paso.psi_robot:2.0f} "
+                            f"alfa {paso.alfa:3.0f}{texto_reposo}"
                         )
                 cv2.putText(
                     frame,
@@ -1878,7 +2228,8 @@ def _demo(argv: list[str] | None = None) -> int:
             )
             cv2.putText(
                 frame,
-                f"{tracker.mapeo}  {tracker.target}  {espejo}  {signos}   "
+                f"{tracker.mapeo}  {tracker.target}{'+esc' if tracker.escorzo else ''}"
+                f"  {espejo}  {signos}   "
                 f"{fps_real:4.1f} fps",
                 (10, 134),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55,
@@ -2004,6 +2355,17 @@ def _demo(argv: list[str] | None = None) -> int:
                         *_vector_csv(vectores_codo.get(Side.R)),
                         _f(extensiones.get(Side.L)),
                         _f(extensiones.get(Side.R)),
+                        _f(pesos_mano.get(Side.L)),
+                        _f(pesos_mano.get(Side.R)),
+                        _f(pesos_reposo.get(Side.L)),
+                        _f(pesos_reposo.get(Side.R)),
+                        *_vector_csv(vectores_bp.get(Side.L)),
+                        *_vector_csv(vectores_bp.get(Side.R)),
+                        *_vector_csv(vectores_codo_bp.get(Side.L)),
+                        *_vector_csv(vectores_codo_bp.get(Side.R)),
+                        *_imagen_csv(puntos_imagen.get(Side.L)),
+                        *_imagen_csv(puntos_imagen.get(Side.R)),
+                        int(tracker.escorzo), f"{tracker.focal_relativa:g}",
                     ]
                 )
                 # Una línea por debajo de la de MQTT: con --publish y --record a
@@ -2040,7 +2402,8 @@ def _demo(argv: list[str] | None = None) -> int:
                 tracker.mirror = not tracker.mirror
                 print(f"espejo: {'izq->izq' if tracker.mirror else 'izq->der'}")
             elif tecla == ord("t"):
-                tracker.target = "codo" if tracker.target == "mano" else "mano"
+                siguiente = (TARGETS.index(tracker.target) + 1) % len(TARGETS)
+                tracker.target = TARGETS[siguiente]
                 tracker.reset_extremes()
                 print(f"destino = {tracker.target}")
             elif tecla == ord("k"):

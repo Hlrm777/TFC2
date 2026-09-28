@@ -118,6 +118,10 @@ def cargar(ruta: Path) -> list[dict]:
         numericas += [f"p_{e}_{s}" for e in ("lat", "sup", "ant")]
         numericas += [f"c_{e}_{s}" for e in ("lat", "sup", "ant")]
         numericas.append(f"ext_{s}")
+        # P5.5: lo que dio BlazePose antes del escorzo, el peso de la mano en el
+        # híbrido y el de la zona de reposo.
+        numericas += [f"pb_{e}_{s}" for e in ("lat", "sup", "ant")]
+        numericas += [f"peso_mano_{s}", f"reposo_{s}"]
 
     for fila in filas:
         for clave in numericas:
@@ -418,6 +422,46 @@ def resumen_visibilidad(filas: list[dict]) -> None:
     print()
 
 
+def resumen_p5_5(filas: list[dict]) -> None:
+    """Híbrido, zona de reposo y escorzo: cuánto actuó cada uno.
+
+    La cifra del escorzo es la que valida el H39: cuánto movió la mano en
+    profundidad respecto a lo que dijo BlazePose. Si en los gestos de manos
+    arriba la mueve 20-30 cm hacia el plano y en los de acercar la mano a la
+    cámara apenas la toca, está haciendo lo que debe.
+    """
+    # Grabaciones anteriores al P5.5: las columnas no existen y cargar() las
+    # dejó en NaN en todas las filas.
+    if all(math.isnan(f["peso_mano_L"]) and math.isnan(f["peso_mano_R"]) for f in filas):
+        return
+    print(f"{'=' * 74}\nHIBRIDO, REPOSO Y ESCORZO (P5.5)\n{'=' * 74}\n")
+    for lado in ("L", "R"):
+        medidos = [f for f in filas if f.get(f"estimado_{lado}", 1)]
+        pesos = [f[f"peso_mano_{lado}"] for f in medidos if f[f"peso_mano_{lado}"] == f[f"peso_mano_{lado}"]]
+        reposos = [f[f"reposo_{lado}"] for f in medidos if f[f"reposo_{lado}"] == f[f"reposo_{lado}"]]
+        if not pesos:
+            continue
+        solo_codo = 100 * sum(1 for p in pesos if p < 0.05) / len(pesos)
+        mezcla = 100 * sum(1 for p in pesos if 0.05 <= p < 0.95) / len(pesos)
+        en_reposo = 100 * sum(1 for r in reposos if r > 0.95) / max(1, len(reposos))
+        print(
+            f"  arm{lado}: el codo llevo el brazo en el {solo_codo:.0f} % de los frames"
+            f" medidos, mezcla en el {mezcla:.0f} %; reposo exacto en el {en_reposo:.0f} %"
+        )
+        cambios = [
+            100.0 * (f[f"p_ant_{lado}"] - f[f"pb_ant_{lado}"])
+            for f in medidos
+            if f[f"p_ant_{lado}"] == f[f"p_ant_{lado}"] and f[f"pb_ant_{lado}"] == f[f"pb_ant_{lado}"]
+        ]
+        if len(cambios) >= 10:
+            print(
+                f"         escorzo: la mano cambio en profundidad mediana {statistics.median(cambios):+.1f} cm"
+                f" [p05 {percentil(cambios, 5):+.1f}, p95 {percentil(cambios, 95):+.1f}]"
+                "  (negativo = la llevo hacia el plano)"
+            )
+    print()
+
+
 def resumen_ganancias(filas: list[dict]) -> None:
     """Ganancias que harían falta para cubrir el rango del robot.
 
@@ -534,6 +578,7 @@ def main(argv: list[str] | None = None) -> int:
             resumen_bloque(destino, por_destino[destino])
 
     resumen_visibilidad(filas)
+    resumen_p5_5(filas)
     resumen_ganancias(filas)
 
     resoluciones = {(f.get("ancho"), f.get("alto")) for f in filas}

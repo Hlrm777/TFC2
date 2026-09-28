@@ -101,7 +101,7 @@ cambia respecto al plan original.
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
-| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección) y P5.4 (posición) hechos** · falta verlos con el operador y grabar con protocolo | |
+| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección), P5.4 (posición) y P5.5 (híbrido, reposo, escorzo) hechos** · falta la grabación de validación | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -109,7 +109,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**790 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**831 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -711,7 +711,7 @@ Commit: "refactor: head tracker con Face Mesh y solvePnP"
 
 ---
 
-## PROMPT 5 — Arm tracker 🟡 **código hecho** · P5.1, P5.3 y P5.4 hechos · falta la sesión con protocolo
+## PROMPT 5 — Arm tracker 🟡 **código hecho** · P5.1, P5.3, P5.4 y P5.5 hechos · falta la grabación de validación
 
 ### Lo hecho el 2026-09-06
 
@@ -1215,8 +1215,9 @@ s = w(L) · (1 − |q|)
 
 del ángulo que las separa. `w` vale 1 con la muñeca por fuera del borde del
 tronco (lateral del hombro) y baja a 0 con un paso suave a lo largo de
-`banda_tronco` hacia dentro: 0.3 del largo del brazo, unos 18 cm, que es **la
-mitad del cuerpo**. Antes de girar, lo que la mano cruza hacia dentro se
+`banda_tronco` hacia dentro: **0.1 del largo del brazo, unos 6 cm, que eligió el
+operador** probándolo en el dibujo interactivo (0.3, unos 18 cm, sería la mitad
+del cuerpo). Antes de girar, lo que la mano cruza hacia dentro se
 **pliega** como profundidad, `(L, S, A) → (0, S, hypot(A, L))`: el robot no
 puede cruzar —su tope interno a la altura del hombro son 70° desde la cruz,
 medidos en el barrido de colisiones—, y sin el pliegue la dirección apuntaba a
@@ -1227,7 +1228,7 @@ de 11° a su tope en los primeros 7 cm hacia dentro y ahí se quedaba.
 |---|---|
 | Brazo estirado | **Idéntico a `direccion`**: apuntar no cambia |
 | Recoger la mano al frente | El brazo vuelve hacia la cruz, **lineal**: ψ = 90° × extensión |
-| Cruzar hacia dentro con la mano recogida | Se **cierra poco a poco**: 11° en el borde, 33° a 7 cm, 61° a 12 cm, y su tope (68°) con la muñeca en la mitad del cuerpo |
+| Cruzar hacia dentro con la mano recogida | Se **cierra poco a poco**: 11° en el borde, 21° a 1.5 cm, 44° a 3 cm, 65° a 4.5 cm y su tope (68°) a 6 cm |
 | 18 cm de lado con el codo doblado | ~10° de robot: se transmite, atenuado |
 | Mano a medio camino del costado | **La cruz**: la cámara no deja estirar los brazos en cruz, y no hace falta |
 
@@ -1276,6 +1277,80 @@ el programa final usa un único mapeo.
    salir bien con ningún mapeo. La salida realista es una animación
    pregrabada que dispare el operador (el visor ya tiene una de demostración):
    es del P7.
+
+### P5.5 — Híbrido, zona de reposo y escorzo ✅ **hecho el 2026-09-27** · falta validarlo grabando
+
+**Lo que vio el operador**, con el visor mirando al robot desde atrás:
+
+1. Con las manos levantadas junto a la cara y los codos abajo —«muevo mis
+   brazos para atrás»— el robot dejaba los brazos al frente. Por lo mismo, el
+   saludo (subir y bajar el brazo en horizontal) no se traducía.
+2. Al mover un solo brazo, el otro, quieto y colgando, daba un saltito.
+3. Pidió el camino 3, el híbrido: «el más robusto cuando no se vean mis manos
+   pero sí los codos».
+4. Eligió la franja del borde del tronco al 10 % (P5.4).
+
+**1. El H39: el fallo era la profundidad de BlazePose, no el mapeo.** Con los
+números del HUD, BlazePose ponía las manos **32-37 cm por delante** de los
+hombros y 3-4 cm por encima. En la imagen, brazo y antebrazo se veían casi con
+todo su largo —32 y 28 cm aparentes frente a ~30 y ~27 reales—: estaban casi en
+el plano de la imagen. Con la mano «adelante», ningún mapeo podía dar el gesto.
+Es el §3.3.1 en la práctica, y la razón de que el P5.3 dejara anotado el escorzo
+como «no se implementa hasta medir que hace falta»: esta es esa medición.
+
+**La corrección: escorzo** (`telmeow_teleop/escorzo.py`). La imagen dice por qué
+rayo de la cámara se ve cada articulación, y el largo del hueso a qué distancia
+de la anterior está. El codo queda en la intersección de su rayo con una esfera
+centrada en el hombro, y la mano en la de su rayo con una centrada en el codo
+—la reconstrucción de Taylor (2000)—, con la cámara como modelo de agujero y los
+hombros anclados por su separación en la imagen. La perspectiva está incluida,
+y a un metro importa. En la escena de la foto reconstruida con su geometría:
+**sin escorzo, el robot a 32° de la cruz hacia delante y abajo; con escorzo, a
+0.8°**, que es la cruz que el operador dibujó.
+
+**La ambigüedad, que hay que declarar (§3.3.13).** El rayo corta la esfera en
+dos puntos. Con perspectiva, hasta un hueso en el plano tiene una segunda
+solución que apunta a la cámara: en la foto, el codo podía estar 2 cm detrás del
+hombro o 22 cm hacia la cámara. Se elige con un coste de tres términos:
+parecido a BlazePose, preferencia por el plano (`PESO_PLANO` = 0.4) y
+continuidad con el frame anterior como desempate (`PESO_CONTINUIDAD` = 0.3). El
+0.4 sale de un margen estrecho: el codo de la foto pide más de 0.39 para
+quedarse en el plano, y una mano que se acerca 25 cm a la cámara pide menos de
+0.49 para no quedarse atrás. Depende de cuánto se equivoque BlazePose, así que
+**se valida con la grabación**. La mano de la foto no tiene ese problema: sus
+dos soluciones quedan a −7 y +9 cm del plano del codo, así que vuelve al plano
+diga BlazePose lo que diga.
+
+**2. El híbrido** (`target="hibrido"`, por defecto). Cada punto pesa según su
+visibilidad —de 0 a 1 entre 0.35 y 0.65— y se combinan como
+`peso = w_mano / (w_mano + (1 − w_mano) · w_codo)`: la mano visible manda entera;
+fuera de cuadro cede al codo, tomado como brazo estirado; entre medias, un paso
+suave. Se mezclan posiciones y no direcciones, para que el mapeo `posicion` siga
+viendo cuánto está recogida la mano.
+
+**3. La zona de reposo** (`zona_reposo` = 25°, ajustable). Con el brazo a menos
+de 25° de la vertical, el robot queda **exactamente** en reposo, se mida o no, y
+se funde con el mapeo en los 15° siguientes. El saltito era la diferencia entre
+el brazo colgando medido —`(−52.7, −12.7)` en la foto— y el reposo `(−55, 0)`
+al perderlo. El precio: los movimientos pequeños con el brazo colgando no se
+transmiten.
+
+**Lo que cambia en el contrato**: nada en el JSON. `ArmConfig` gana `target`
+(`hibrido`), `zona_reposo`, `escorzo` y `focal_relativa` (`TELMEOW_ARM_*`). El
+CSV gana `peso_mano_*`, `reposo_*`, `pb_*`/`cb_*` (BlazePose antes del
+escorzo), `img_*` (los píxeles) y `escorzo`/`focal_rel`: con ellos el escorzo se
+puede rehacer offline con otra focal u otros pesos. `p_*` y `c_*` pasan a ser
+las posiciones corregidas, y `p_*` es siempre la mano. El analizador dice cuánto
+actuó cada pieza, y la herramienta de comparación reproduce el híbrido y la
+zona de reposo. La tecla `t` recorre hibrido → mano → codo.
+
+**Lo que falta:**
+
+1. **Grabación de validación** con las columnas nuevas: manos arriba con los
+   codos atrás, el saludo, acercar las manos a la cámara, cruzar, un brazo
+   quieto mientras el otro se mueve, y posturas quietas para el §3.3.1.
+2. Con ella: ajustar `PESO_PLANO` y la focal (`ARM_FOCAL_RELATIVA`, sin
+   calibrar), y calibrar `ARM_ALCANCE_HUMANO`.
 
 ### Lo que hereda del P4 — leer antes de escribir código
 
@@ -1727,6 +1802,18 @@ Commit: "test: evaluacion comparativa de reconocimiento de emociones"
 
 ## PROMPT 10 — Panel de control del operador ⬜
 
+**Ideas del operador (2026-09-27), para cuando llegue este prompt.** El narrador
+**no sostiene un libro físico**: ve el libro digitalizado en la interfaz,
+junto a sí mismo y al robot. Dos distribuciones posibles:
+
+- **Tres columnas**: al centro, lo que ve el robot (sus ojos); a la izquierda,
+  partida en dos, el robot tal como se ve y el operador a sí mismo (lo que capta
+  la cámara); a la derecha, el texto.
+- **Dos filas**: abajo, el libro digitalizado; arriba, partida en tres, el robot
+  tal como se ve, lo que ve el robot y el operador a sí mismo.
+
+Consecuencia ya aplicada al P5: la postura de «sostener el libro» no se evalúa.
+
 ```
 Crea `telmeow_teleop/control_panel.py`. Elige entre Tkinter o una página HTML
 servida localmente con websockets; si eliges HTML, sírvela en un puerto distinto
@@ -1985,6 +2072,16 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
     codo doblado llega atenuado; y los gestos de mano y muñeca —saludar moviendo
     solo la mano— no tienen contrapartida. Con las manos recogidas por fuera
     del tronco el robot queda entre abierto y en cruz.
+
+13. **La profundidad del brazo es una reconstrucción con una ambigüedad
+    resuelta por preferencia.** El escorzo (P5.5) hace la profundidad coherente
+    con la imagen y con el largo de los huesos, pero cada hueso tiene dos
+    posturas que dan los mismos píxeles, y se elige entre ellas con un criterio
+    —parecido a BlazePose, preferencia por el plano del tronco, continuidad—, no
+    con una medida. La focal de la cámara no está calibrada (convención
+    `focal = ancho`, la del head tracker). Ninguna de las dos cosas cambia la
+    escala de las direcciones del brazo, que es lo que se usa, pero sí la
+    perspectiva de los segmentos lejos del plano de los hombros.
 
 ---
 
@@ -2254,9 +2351,18 @@ equivalente en Python puro, sin privilegios de administrador.
   se despliega hacia el costado: al recoger la mano, el brazo del robot gira
   hacia la cruz en proporción a cuánto está recogido. Solo con la muñeca por
   fuera del tronco; si la mano cruza por delante del cuerpo, el brazo se va
-  cerrando poco a poco hasta su tope, que alcanza con la muñeca en la mitad del
-  cuerpo. La regla la propuso el propio operador tras ver que, con la dirección
+  cerrando poco a poco hasta su tope, que alcanza a unos 6 cm del borde del
+  tronco. La regla la propuso el propio operador tras ver que, con la dirección
   sola, recoger la mano dejaba el robot apuntando adelante (H38, medido).
+
+- **«¿Cómo sabe a qué profundidad está el brazo, con una sola cámara?»** *(nueva, P5.5)*
+  No se fía de la profundidad de BlazePose, que es su coordenada más débil: se
+  midió que ponía las manos 35 cm por delante cuando estaban junto a la cara
+  (H39). La imagen dice por qué rayo se ve cada articulación, y el largo del
+  hueso a qué distancia de la anterior está: la articulación queda en la
+  intersección de un rayo con una esfera (Taylor, 2000). Queda una ambigüedad
+  de dos soluciones por hueso que se resuelve por preferencia, y se declara
+  (§3.3.13).
 
 - **«¿Cómo pasa de un brazo humano, con más grados de libertad, a uno de dos?»** *(nueva, P5.3)*
   No pasa ángulos: pasa **la dirección** en que apunta el brazo. Se filtra como
@@ -2498,7 +2604,10 @@ t = ArmTracker(mirror=True,            # brazo izq. FISICO del operador -> armL
                reposo_abduccion=-55.0, reposo_flexion=0.0,    # NO es el cero
                gracia_s=0.5, velocidad_max=180.0,             # grados/s
                mapeo="posicion",       # P5.4 · "direccion" (P5.3) · "articular"
-               banda_tronco=0.3)       # cierre hasta la mitad del cuerpo, x largo
+               banda_tronco=0.1,       # cierre al cruzar el tronco, x largo (6 cm)
+               zona_reposo=25.0,       # P5.5 · grados desde la vertical; 0 la apaga
+               escorzo=True,           # P5.5 · corregir la profundidad (H39)
+               focal_relativa=1.0)     # focal / ancho de imagen, sin calibrar
 t.process(frame_rgb) -> ArmAngles | None      # ESTIMACION · None = sin pose
 t.comando(pose, timestamp=None) -> ArmAngles  # COMANDO · nunca tiene huecos
 t.map_posicion(canal, vector_m, largo_m, timestamp=None)   # P5.4 · sin camara
@@ -2507,7 +2616,12 @@ t.map_to_robot(canal, abduccion, flexion, timestamp=None)  # articular
 t.mapeo             # settable en caliente y sin salto
 t.vectores ; t.vectores_codo  # {Side: (L, S, A)} en METROS · CSV p_* y c_*
 t.extensiones       # {Side: |p| / (|c| + |p - c|)} · 1 = brazo estirado
-t.direcciones ; t.retargetings  # dirección cruda (CSV h_*) · psi, alfa, rama
+t.direcciones ; t.retargetings  # dirección efectiva (CSV h_*) · psi, alfa, rama
+t.pesos_mano        # {Side: 0..1} · cuánto mandó la mano frente al codo
+t.pesos_reposo      # {Side: 0..1} · cuánto se llevó al reposo
+t.vectores_bp ; t.vectores_codo_bp  # BlazePose ANTES del escorzo (CSV pb_*, cb_*)
+t.puntos_imagen     # {Side: {hombro, codo, mano: (u, v)}} · píxeles (CSV img_*)
+t.aplicar_reposo(canal, direccion, salida)  # la zona de reposo, sin cámara
 t.last_clamp        # {Side: ArmClamp} · lower/upper/fraction/clamped para el HUD
 t.raw_angles        # {Side: (abduccion, flexion)} crudos del operador
 t.raw_extremes ; t.reset_extremes() ; t.suggested_gains()
@@ -2604,6 +2718,25 @@ RetargetBrazo(lado)(h) -> Retargeting | None   # direccion -> angulos, una rama
 
 Solo biblioteca estándar y `limits`. Todo lo que decide el mapeo del brazo vive
 aquí y se prueba sin cámara (`tests/test_retarget.py`, `tests/test_posicion.py`).
+
+## `escorzo.py`
+
+```python
+from telmeow_teleop.escorzo import (Camara, interseccion, anclar_hombros,
+                                    reconstruir_brazo, PESO_PLANO, PESO_CONTINUIDAD)
+
+cam = Camara.desde_imagen(ancho, alto, focal_relativa=1.0)
+cam.rayo(u, v) ; cam.proyectar(punto_3d)
+anclar_hombros(cam, img_a, img_b, mundo_a, mundo_b) -> (hombro_a, hombro_b) | None
+interseccion(rayo, centro, radio, dz_bp, dz_previa=None) -> (punto, exacto)
+reconstruir_brazo(cam, hombro_3d, img_codo, img_mano, largo_brazo,
+                  largo_antebrazo, dz_codo_bp, dz_mano_bp, previo=None)
+    -> (codo, mano, (dz_codo, dz_mano))
+```
+
+Sin estado, solo numpy, probado con una cámara sintética
+(`tests/test_escorzo.py`): el brazo verdadero se proyecta, se le da a BlazePose
+una profundidad equivocada y se exige recuperar el verdadero.
 
 ## `publisher.py`
 
@@ -3201,6 +3334,7 @@ instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 | **H34** | **La exposición de la cámara sobrevive al proceso** (DirectShow la guarda en el driver) y dejó la imagen **negra a 30 fps sin ningún error**. Se pide explícitamente al abrir, y el HUD avisa del brillo | §4.0, P5, §7.16 |
 | **H35** | **El brazo «daba la vuelta» por una costura del mapeo articular, no por la profundidad**: con flexión ±90, «al frente» tiene dos soluciones y se elegía por el signo de una componente que al frente es ruido (303 saltos en 9 min). Retargeting por dirección y flexión extendida a −180 | P5.3, §0.5 |
 | **H36** | Las ganancias de abducción del H33 **no son ganancias**: son la envolvente del robot entre 90°. Se sustituyen por un escalado dependiente de la dirección que sale de la tabla | P5.3 |
+| **H39** | **BlazePose ponía las manos 35 cm por delante cuando estaban junto a la cara**: con los codos abajo y las manos levantadas, su profundidad las dejaba 32-37 cm delante de los hombros mientras la imagen mostraba brazo y antebrazo casi con todo su largo. Ningún mapeo podía dar el gesto. Corrección por escorzo (rayo-esfera, Taylor 2000) con una ambigüedad resuelta por preferencia | P5.5, §3.3.13 |
 | **H38** | **La dirección hombro→mano no ve la retracción**: al normalizar se tira la distancia, y con el codo doblado la mano queda delante del pecho, así que el robot apunta adelante con el brazo recogido. 32 s acercando y alejando las manos sin que la componente anterior bajara de 0.78 el 95 % del tiempo. Mapeo `posicion`, propuesto por el operador | P5.4, §3.3.12 |
 | **H37** | **La simetría aproximaba la zona extendida, pero no la medía**: el reflejo `(a, f) ≡ (−a, f ± 180)` falló por un paso de 5° en 6-9 de 18 filas, y en el límite usado prometía 5° de más. Barrida con los detectores del visor (tras reproducir 37/37 filas de agosto); manda lo medido. Unión y motor: 0 choques. El cable, sin CAD, pasa a supuesto declarado | P5.3, §0.5, §3.3.11 |
 

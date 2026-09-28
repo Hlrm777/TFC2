@@ -94,6 +94,7 @@ def leer_sesion(ruta: Path) -> dict:
         "vector": {}, "largo": {},
         "con_posicion": "p_lat_L" in filas[0] and "c_lat_L" in filas[0],
     }
+    con_peso = "peso_mano_L" in filas[0]
     for lado in (Side.L, Side.R):
         s = lado.value
         crudo = np.array(
@@ -125,8 +126,18 @@ def leer_sesion(ruta: Path) -> dict:
             c = np.array(
                 [[_float(f.get(f"{e}_{s}")) for e in ("c_lat", "c_sup", "c_ant")] for f in filas]
             )
+            largo_codo = np.linalg.norm(c, axis=1)
+            largo = largo_codo + np.linalg.norm(p - c, axis=1)
+            if con_peso:
+                # P5.5: p_* es siempre la MANO; el destino que usó el tracker es
+                # la mezcla del híbrido con el codo llevado al largo del brazo.
+                peso = np.array([_float(f.get(f"peso_mano_{s}")) for f in filas])
+                peso = np.where(np.isfinite(peso), peso, 1.0)[:, None]
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    estirado = c * (largo / largo_codo)[:, None]
+                p = estirado + peso * (p - estirado)
             sesion["vector"][lado] = p
-            sesion["largo"][lado] = np.linalg.norm(c, axis=1) + np.linalg.norm(p - c, axis=1)
+            sesion["largo"][lado] = largo
     return sesion
 
 
@@ -165,6 +176,12 @@ def reproducir(sesion: dict, mapeo: str, **kwargs) -> dict:
                     if math.isfinite(a) and math.isfinite(f)
                     else None
                 )
+            if salida is not None and mapeo != "articular":
+                # La zona de reposo, igual que en el tracker, sobre la dirección
+                # efectiva que se grabó en h_*.
+                h = sesion["direccion"][lado][i]
+                if np.all(np.isfinite(h)):
+                    salida = tracker.aplicar_reposo(lado, h / np.linalg.norm(h), salida)
             if salida is not None:
                 setattr(pose, campo_abd, salida[0])
                 setattr(pose, campo_flex, salida[1])

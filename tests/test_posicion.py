@@ -199,12 +199,18 @@ def test_cruzar_hacia_dentro_llega_al_tope_poco_a_poco(lado):
     from telmeow_teleop.retarget import RetargetBrazo
 
     tope = RetargetBrazo(lado)(direccion_por_posicion((-0.6, 0.0, 0.2))).psi_robot
+    # La pendiente máxima de la regla es 90° · max(w') · (1 − |q|), con
+    # max(w') = 1.5 / banda (el paso suave), y la escala del robot la estira como
+    # mucho un 11 %: el límite por paso sale de ahí, no de un número a ojo. Con
+    # la franja del operador (0.1) son unos 16° por cada 0.6 cm de mano.
+    paso = 0.01
+    limite = paso * 90.0 * (1.5 / BANDA_TRONCO) * 1.2
     anterior = None
-    for L in np.arange(0.0, -0.4, -0.01):         # pasos de 0.6 cm
+    for L in np.arange(0.0, -0.4, -paso):         # pasos de 0.6 cm
         psi = RetargetBrazo(lado)(direccion_por_posicion((L, 0.0, 0.145))).psi_robot
         if anterior is not None:
             assert psi >= anterior - 1e-9
-            assert psi - anterior < 4.0
+            assert psi - anterior < limite
         if L > -0.6 * BANDA_TRONCO:
             assert psi < tope - 5.0               # todavía no ha llegado
         anterior = psi
@@ -551,7 +557,10 @@ def test_el_demo_graba_tantas_columnas_como_anuncia(monkeypatch, tmp_path):
     cabecera, datos = filas[0], filas[1:]
     assert len(datos) == 6
     assert all(len(fila) == len(cabecera) for fila in datos)
-    for nombre in ("p_ant_R", "c_sup_R", "ext_R", "mapeo"):
+    for nombre in (
+        "p_ant_R", "c_sup_R", "ext_R", "mapeo",
+        "peso_mano_R", "reposo_R", "pb_ant_R", "cb_sup_R", "img_mano_x_R", "escorzo",
+    ):
         assert nombre in cabecera
     fila = dict(zip(cabecera, datos[-1]))
     # Con el frame espejado y el espejo en izq->izq, la etiqueta L de BlazePose

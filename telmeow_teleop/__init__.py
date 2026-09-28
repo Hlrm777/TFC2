@@ -15,6 +15,8 @@ Módulos:
     arm_tracker   -- pose de los brazos por BlazePose (abducción y flexión)
     retarget      -- de la dirección del brazo del operador a los ángulos del
                      cardán del robot, sin la costura del frente (P5.3)
+    escorzo       -- corrección de la profundidad del brazo con la imagen y el
+                     largo de los huesos (P5.5)
 
 ``config``, ``limits`` y ``filters`` usan solo biblioteca estándar, así que toda
 su lógica se puede validar sin instalar TensorFlow ni MediaPipe.
@@ -63,4 +65,5 @@ __all__ = [
     "head_tracker",
     "arm_tracker",
     "retarget",
+    "escorzo",
 ]

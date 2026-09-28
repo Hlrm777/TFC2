@@ -98,10 +98,12 @@ ALCANCE_HUMANO: float = 90.0
 #: ``direccion_por_posicion`` pasa de abrir el brazo (muñeca en el borde del
 #: tronco) a llevarlo a su tope interno (muñeca en la MITAD DEL CUERPO).
 #:
-#: 0.3 es esa mitad: media espalda son unos 18 cm y el brazo, hasta el centro de
-#: la mano, unos 60. Más estrecha, el robot llega antes a su tope y el paso por
-#: el borde se vuelve brusco; más ancha, tarda más en cerrarse.
-BANDA_TRONCO: float = 0.3
+#: 0.3 sería esa mitad: media espalda son unos 18 cm y el brazo, hasta el
+#: centro de la mano, unos 60. El operador eligió 0.1 (unos 6 cm) probándolo en
+#: el dibujo interactivo el 2026-09-27: prefiere que el brazo se cierre enseguida
+#: al cruzar el borde. Más estrecha, el paso por el borde es más brusco; más
+#: ancha, tarda más en cerrarse.
+BANDA_TRONCO: float = 0.1
 
 
 # --------------------------------------------------------------------------
@@ -180,7 +182,7 @@ def direccion_por_posicion(
     - La mano a medio camino del costado ya da la cruz: la cámara no deja
       estirar los brazos en cruz, y no hace falta.
     - Cruzar hacia dentro cierra el brazo poco a poco hasta su tope interno,
-      que alcanza con la muñeca en la mitad del cuerpo (ver el pliegue).
+      que alcanza cuando la muñeca ha cruzado ``banda`` (ver el pliegue).
 
 ``w`` ES LA SEGUNDA CORRECCION DEL OPERADOR: el giro solo actúa con la
     muñeca POR FUERA del borde del tronco (``L ≥ 0``, lateral del hombro). Si la
@@ -198,8 +200,7 @@ def direccion_por_posicion(
     golpe: sin pliegue, con la mano recogida, llegaba a su tope con la muñeca
     apenas 7 cm por dentro y ahí se quedaba. Con el pliegue la dirección nunca
     pasa del frente, y el brazo se va cerrando poco a poco a lo largo de la
-    franja hasta su tope, que alcanza con la muñeca en la mitad del cuerpo. El
-    operador lo pidió así: «una función con factor de conversión, para que
+    franja hasta su tope. El operador lo pidió así: «una función con factor de conversión, para que
     llegue lenta al máximo del robot», sin esperar a que lo pare el visor.
 
     POR QUE UN GIRO Y NO UNA SUMA. La primera versión sumaba el largo escondido

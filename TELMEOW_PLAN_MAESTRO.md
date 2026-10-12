@@ -101,7 +101,7 @@ cambia respecto al plan original.
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
-| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo) y P5.6 (validación: confianza en la mano, focal, alcance) hechos** · falta verlo en el visor con el operador y medir `model_complexity` | |
+| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo) y P5.6 (validación: confianza en la mano, focal, alcance) hechos y verificados el 2026-10-11** · falta decidir el saludo (H42) y medir `model_complexity` | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -711,7 +711,7 @@ Commit: "refactor: head tracker con Face Mesh y solvePnP"
 
 ---
 
-## PROMPT 5 — Arm tracker 🟡 **código hecho** · P5.1, P5.3, P5.4, P5.5 y P5.6 hechos · falta verlo en el visor con el operador
+## PROMPT 5 — Arm tracker 🟡 **código hecho** · P5.1, P5.3, P5.4, P5.5 y P5.6 hechos y verificados · falta decidir el saludo (H42)
 
 ### Lo hecho el 2026-09-06
 
@@ -1347,7 +1347,7 @@ zona de reposo. La tecla `t` recorre hibrido → mano → codo.
 **Lo que faltaba** —la grabación de validación, ajustar `PESO_PLANO` y la focal,
 calibrar `ARM_ALCANCE_HUMANO`— se hizo en el P5.6.
 
-### P5.6 — La validación, y lo que enseñó ✅ **hecho el 2026-09-28** · falta verlo en el visor
+### P5.6 — La validación, y lo que enseñó ✅ **hecho el 2026-09-28 y verificado el 2026-10-11** · falta decidir el saludo (H42)
 
 **La grabación**: `validacion_2026-09-27.csv`, 270 s con protocolo —0 brazos
 colgando · 1 manos junto a la cara, codos abajo y atrás · 2 saludo con el
@@ -1498,28 +1498,74 @@ fió de la mano. **13 pruebas nuevas**, 12 de ellas en
 reposo —sin la rampa, 9° en cada frame, el paso máximo del limitador—, y la
 misma mano, sostenida, sí mueve el brazo.
 
-**Lo que falta, con el operador delante:**
+**La verificación, el 2026-10-11** (`verificacion_2026-10-11.csv`, 241 s, con
+el protocolo de abajo; y un intento cortado, `verificacion_2026-10-11_intento.csv`,
+con las etiquetas 0 y 1). Es la primera grabación hecha CON los parámetros del
+P5.6, así que no se usó para elegirlos: las cifras salen de los comandos que se
+publicaron de verdad.
 
-1. **La grabación de verificación**, con `--publish` para verlo a la vez en el
-   visor, y este protocolo (ESPACIO al cambiar de postura; cada postura
-   separada, para que las cifras no mezclen dos):
+| Etiqueta | Qué hizo el robot | |
+|---|---|---|
+| 0 · brazos colgando | en reposo el 96 y el 100 % del tiempo | ✅ |
+| 1 · «yo no fui», manos por fuera de los hombros | **brazos en cruz**: a 10-11° de ella, casi horizontales. La mano, a 5 cm del plano; BlazePose decía 30 | ✅ |
+| 1 del intento, manos por dentro de los hombros | al frente y arriba (55°, +11/+21°): es el pliegue del P5.4 | ✅ por diseño |
+| 2 · «el grito», manos en las mejillas | al frente y arriba, a +25-30° sobre la horizontal, su tope. La mano, a 5-15 cm | ✅ |
+| 3 y 4 · saluda un brazo, el otro cuelga | **el que cuelga, en reposo el 100 % del tiempo** en las dos | ✅ |
+| 3 y 4 · el brazo que saluda | se queda en cruz y se mueve ±5°: **el saludo no pasa** (H42) | ❌ |
+| 5 · estirar hacia la cámara y recoger | al frente y arriba al estirar (55-58°, +28°), a la cruz al recoger | ✅ |
 
-   | Etiqueta | Postura | Tiempo | Qué debe hacer el robot |
-   |---|---|---|---|
-   | 0 | Brazos colgando, quietos, manos sobre el asiento | 20 s | quieto en reposo |
-   | 1 | «Yo no fui»: manos abiertas a los lados de la cabeza, palmas a la cámara, codos abajo al aire | 15 s | brazos hacia la cruz |
-   | 2 | «El grito»: manos en las mejillas, codos abajo al aire | 15 s | brazos al frente y arriba |
-   | 3 | Saludo con el derecho: brazo horizontal hacia el costado, subir y bajar; el izquierdo colgando | 20 s | el derecho sigue; el izquierdo, quieto |
-   | 4 | Lo mismo con el izquierdo; el derecho colgando | 20 s | al revés |
-   | 5 | Brazos estirados hacia la cámara, acercar y alejar despacio | 20 s | brazos al frente, cerca de su tope |
-   | 6 | Narración libre, como contando un cuento | 45 s | sigue los gestos |
+**El saludo no pasa al robot (H42).** El operador saludó como se saluda: el codo
+abajo y afuera, 15-20 cm por debajo del hombro; la mano por encima del hombro,
+con el antebrazo hacia arriba; y la mano yendo de lado a lado (6-25 cm del
+hombro en lateral, solo 8 cm en vertical). Con la mano recogida y por fuera
+del tronco, el mapeo `posicion` lleva el brazo del robot a la cruz —es lo que
+hace bien el «yo no fui»—, y ahí el vaivén de la mano solo cambia la dirección
+efectiva entre 15° y 19° de la cruz: el robot se mueve ±5°. Un saludo así es un
+giro del antebrazo, y el robot no tiene antebrazo.
 
-   Con la cámara integrada en el índice que diga `tools/list_cameras.py` (el
-   0 sin la externa conectada) y con buena luz (H27).
-2. ~~Medir la focal~~ — hecho con el teléfono, 0.68-0.76 (arriba).
-3. ~~Las dos dudas sobre lo grabado~~ — respondidas: etiqueta 1 con dos posturas
-   y codos al aire; en la 2, la mano izquierda colgaba (apoyada en el asiento).
-4. Medir el coste de `model_complexity` y cerrar el P5.
+**A 15 fps fijos** en toda la sesión, con poca luz (H27); en septiembre, con
+luz, 18-20.
+
+**El §3.3.1 en cuatro grabaciones.** En posturas quietas con las manos a la
+vista, la profundidad de BlazePose tiembla **1.5-3.0 veces** más que el plano
+de la imagen (0.8-1.8 cm frente a 0.4-0.9). La razón más baja, 1.5-1.6, es la
+de «el grito»: con las manos apoyadas en la cara el movimiento real es nulo, y
+lo que queda es el ruido del estimador.
+
+**Lo que falta:**
+
+1. **Decidir el saludo**, con tres caminos: (a) saludar con el brazo entero,
+   estirado al costado y subiendo y bajando, que el robot ya sigue —si la mano
+   sale del cuadro por el lado, el híbrido sigue al codo—; (b) que el robot
+   salude solo: detectar el saludo natural —antebrazo arriba y la mano de lado
+   a lado— y reproducir una animación en ese brazo (P7; el visor ya tiene una);
+   (c) amplificar el vaivén del antebrazo cuando apunta arriba (P5.x), con el
+   riesgo de amplificar también el ruido al narrar.
+2. **Rehacer en `tools/` la reproducción offline**, que se perdió con los
+   temporales: pasar una grabación por el `ArmTracker` real con otros
+   parámetros. Las grabaciones del P5.6 traen el ancla de los hombros, así que
+   la reconstrucción ya será exacta. Es lo que hace reproducibles las cifras de
+   esta sección.
+3. Medir el coste de `model_complexity` y cerrar el P5.
+
+**El protocolo de la verificación**, con `--publish` para verlo a la vez en el
+visor (ESPACIO al cambiar de postura; cada postura separada, para que las
+cifras no mezclen dos):
+
+| Etiqueta | Postura | Tiempo | Qué debe hacer el robot |
+|---|---|---|---|
+| 0 | Brazos colgando, quietos, manos sobre el asiento | 20 s | quieto en reposo |
+| 1 | «Yo no fui»: manos abiertas a los lados de la cabeza, palmas a la cámara, codos abajo al aire | 15 s | brazos hacia la cruz |
+| 2 | «El grito»: manos en las mejillas, codos abajo al aire | 15 s | brazos al frente y arriba |
+| 3 | Saludo con el derecho: brazo horizontal hacia el costado, subir y bajar; el izquierdo colgando | 20 s | el derecho sigue; el izquierdo, quieto |
+| 4 | Lo mismo con el izquierdo; el derecho colgando | 20 s | al revés |
+| 5 | Brazos estirados hacia la cámara, acercar y alejar despacio | 20 s | brazos al frente, cerca de su tope |
+| 6 | Narración libre, como contando un cuento | 45 s | sigue los gestos |
+
+Con la cámara integrada en el índice que diga `tools/list_cameras.py` (el 0
+sin la externa conectada) y con buena luz (H27). En las etiquetas 3 y 4 el
+operador hizo el saludo natural, con el antebrazo arriba, en vez del brazo
+horizontal: de ahí sale el H42.
 
 ### Lo que hereda del P4 — leer antes de escribir código
 
@@ -2166,11 +2212,13 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    - **La flexión es menos fiable que la abducción, y ahora por una razón
      medible.** La abducción vive en el **plano de imagen**, donde MediaPipe es
      preciso; la flexión depende de la **coordenada de profundidad**, que es la
-     componente débil de BlazePose en monocular. **Medido el 2026-09-27**
-     (P5.6): en postura quieta con las manos a la vista, la posición de la mano
-     que da BlazePose tiembla **1.6-1.8 cm en profundidad** frente a **0.5-0.9
-     cm en el plano de la imagen**, entre **2.1 y 3.0 veces más**, en dos
-     grabaciones y con los dos brazos. Es la cifra limpia: la razón de temblor
+     componente débil de BlazePose en monocular. **Medido el 2026-09-27 y el
+     2026-10-11** (P5.6): en postura quieta con las manos a la vista, la
+     posición de la mano que da BlazePose tiembla **0.8-1.8 cm en
+     profundidad** frente a **0.4-0.9 cm en el plano de la imagen**, entre
+     **1.5 y 3.0 veces más**, en cuatro grabaciones y con los dos brazos. La
+     razón más baja (1.5-1.6) es con las manos apoyadas en la cara, donde el
+     movimiento real es nulo y todo lo que queda es ruido del estimador. Es la cifra limpia: la razón de temblor
      entre los dos canales del robot mezcla la profundidad con la geometría del
      cardán. La da `tools/analizar_registro_brazos.py`, etiqueta a etiqueta.
    - **La flexión de codo del operador tampoco se reproduce**, porque el brazo
@@ -2243,7 +2291,10 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
     hacia la cruz** (P5.4), no en un acortamiento; el movimiento lateral con el
     codo doblado llega atenuado; y los gestos de mano y muñeca —saludar moviendo
     solo la mano— no tienen contrapartida. Con las manos recogidas por fuera
-    del tronco el robot queda entre abierto y en cruz.
+    del tronco el robot queda entre abierto y en cruz. Medido en la
+    verificación del 2026-10-11 (H42): con el saludo natural —codo abajo,
+    antebrazo arriba, la mano de lado a lado— el robot se queda en cruz y se
+    mueve ±5°.
 
 13. **La profundidad del brazo es una reconstrucción con una ambigüedad
     resuelta por preferencia.** El escorzo (P5.5) hace la profundidad coherente
@@ -3533,6 +3584,7 @@ instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 | **H34** | **La exposición de la cámara sobrevive al proceso** (DirectShow la guarda en el driver) y dejó la imagen **negra a 30 fps sin ningún error**. Se pide explícitamente al abrir, y el HUD avisa del brillo | §4.0, P5, §7.16 |
 | **H35** | **El brazo «daba la vuelta» por una costura del mapeo articular, no por la profundidad**: con flexión ±90, «al frente» tiene dos soluciones y se elegía por el signo de una componente que al frente es ruido (303 saltos en 9 min). Retargeting por dirección y flexión extendida a −180 | P5.3, §0.5 |
 | **H36** | Las ganancias de abducción del H33 **no son ganancias**: son la envolvente del robot entre 90°. Se sustituyen por un escalado dependiente de la dirección que sale de la tabla | P5.3 |
+| **H42** | **El saludo natural no pasa al robot**: con el codo abajo y el antebrazo arriba, la mano queda recogida por fuera del tronco y el mapeo `posicion` lleva el brazo a la cruz; el vaivén de la mano solo mueve el robot ±5°. Es un giro del antebrazo, que el robot no tiene. Tres caminos: saludar con el brazo entero, que el robot salude solo (P7), o amplificar el vaivén | P5.6 |
 | **H41** | **La focal del head tracker dejaba el escorzo en una frontera**: con `focal = ancho`, las manos junto a la cara caían justo entre las dos soluciones del codo (27° de la cruz con `PESO_PLANO` 0.4, 3° con 0.6), y ningún peso acertaba a la vez ese gesto y el de los brazos estirados. Con 0.7 veces el ancho aciertan los dos en dos grabaciones, y cuadra con la geometría del puesto. Medida después con el teléfono del operador a una distancia igual a su largo: 0.68-0.76 | P5.6, §3.3.13 |
 | **H40** | **BlazePose inventa la mano que no ve, y con visibilidad alta**: con el brazo colgando, la mano bajo el cuadro saltaba cada frame a una doblada delante del pecho con visibilidad 0.7-0.96, y el híbrido la seguía; el brazo quieto estaba en reposo el 16 % del tiempo. La visibilidad no basta: la mano cuenta dentro del cuadro y tras medio segundo sostenida (71-100 %). Y el codo en el borde del cuadro no se corrige por escorzo sin mano fiable | P5.6, §3.3.14 |
 | **H39** | **BlazePose ponía las manos 35 cm por delante cuando estaban junto a la cara**: con los codos abajo y las manos levantadas, su profundidad las dejaba 32-37 cm delante de los hombros mientras la imagen mostraba brazo y antebrazo casi con todo su largo. Ningún mapeo podía dar el gesto. Corrección por escorzo (rayo-esfera, Taylor 2000) con una ambigüedad resuelta por preferencia | P5.5, §3.3.13 |

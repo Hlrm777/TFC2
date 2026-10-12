@@ -17,6 +17,8 @@ Módulos:
                      cardán del robot, sin la costura del frente (P5.3)
     escorzo       -- corrección de la profundidad del brazo con la imagen y el
                      largo de los huesos (P5.5)
+    saludo        -- reconocer el saludo del operador para que el robot salude
+                     solo, con el saludo del visor (P5.7)
 
 ``config``, ``limits`` y ``filters`` usan solo biblioteca estándar, así que toda
 su lógica se puede validar sin instalar TensorFlow ni MediaPipe.
@@ -66,4 +68,5 @@ __all__ = [
     "arm_tracker",
     "retarget",
     "escorzo",
+    "saludo",
 ]

@@ -101,7 +101,7 @@ cambia respecto al plan original.
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
-| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo) y P5.6 (validación: confianza en la mano, focal, alcance) hechos y verificados el 2026-10-11** · falta decidir el saludo (H42) y medir `model_complexity` | |
+| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo) y P5.6 (validación: confianza en la mano, focal, alcance) hechos y verificados el 2026-10-11** · **P5.7 (el robot saluda solo) hecho** · falta ver el saludo en el visor y medir `model_complexity` | |
 | P6 — Clasificador de emoción | ⬜ | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -109,7 +109,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**844 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**927 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 83 del P5.7). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -711,7 +711,7 @@ Commit: "refactor: head tracker con Face Mesh y solvePnP"
 
 ---
 
-## PROMPT 5 — Arm tracker 🟡 **código hecho** · P5.1, P5.3, P5.4, P5.5 y P5.6 hechos y verificados · falta decidir el saludo (H42)
+## PROMPT 5 — Arm tracker 🟡 **código hecho** · P5.1 y P5.3 a P5.7 hechos · falta ver el saludo en el visor
 
 ### Lo hecho el 2026-09-06
 
@@ -1347,7 +1347,7 @@ zona de reposo. La tecla `t` recorre hibrido → mano → codo.
 **Lo que faltaba** —la grabación de validación, ajustar `PESO_PLANO` y la focal,
 calibrar `ARM_ALCANCE_HUMANO`— se hizo en el P5.6.
 
-### P5.6 — La validación, y lo que enseñó ✅ **hecho el 2026-09-28 y verificado el 2026-10-11** · falta decidir el saludo (H42)
+### P5.6 — La validación, y lo que enseñó ✅ **hecho el 2026-09-28 y verificado el 2026-10-11** · el saludo (H42) se resolvió en el P5.7
 
 **La grabación**: `validacion_2026-09-27.csv`, 270 s con protocolo —0 brazos
 colgando · 1 manos junto a la cara, codos abajo y atrás · 2 saludo con el
@@ -1534,13 +1534,9 @@ lo que queda es el ruido del estimador.
 
 **Lo que falta:**
 
-1. **Decidir el saludo**, con tres caminos: (a) saludar con el brazo entero,
-   estirado al costado y subiendo y bajando, que el robot ya sigue —si la mano
-   sale del cuadro por el lado, el híbrido sigue al codo—; (b) que el robot
-   salude solo: detectar el saludo natural —antebrazo arriba y la mano de lado
-   a lado— y reproducir una animación en ese brazo (P7; el visor ya tiene una);
-   (c) amplificar el vaivén del antebrazo cuando apunta arriba (P5.x), con el
-   riesgo de amplificar también el ruido al narrar.
+1. ~~Decidir el saludo~~ — el operador eligió, de tres caminos, **que el robot
+   salude solo** (los otros: saludar con el brazo entero, o amplificar el
+   vaivén del antebrazo). Hecho en el P5.7.
 2. **Rehacer en `tools/` la reproducción offline**, que se perdió con los
    temporales: pasar una grabación por el `ArmTracker` real con otros
    parámetros. Las grabaciones del P5.6 traen el ancla de los hombros, así que
@@ -1566,6 +1562,74 @@ Con la cámara integrada en el índice que diga `tools/list_cameras.py` (el 0
 sin la externa conectada) y con buena luz (H27). En las etiquetas 3 y 4 el
 operador hizo el saludo natural, con el antebrazo arriba, en vez del brazo
 horizontal: de ahí sale el H42.
+
+### P5.7 — El robot saluda solo ✅ **hecho el 2026-10-11** · falta verlo en el visor
+
+**Por qué no se copia el saludo (H42).** Un saludo humano es un giro del
+antebrazo, y el robot no tiene antebrazo: copiado, el brazo se quedaba en cruz
+moviéndose ±5°. De tres caminos, el operador eligió que el robot **reconozca**
+el saludo y salude a su manera, con el saludo del visor (botón «Saludo demo»),
+que es el que ya conoce. `telmeow_teleop/saludo.py`.
+
+**El detector** mira la mano en la IMAGEN respecto a su hombro, en anchos de
+hombro, y pide cuatro cosas a la vez:
+
+1. la mano **de fiar**: dentro del cuadro y con su rampa completa (P5.6);
+2. **por encima del hombro** (≥ 0.1 anchos);
+3. **cerca del plano del hombro**: la mediana de la profundidad corregida por el
+   escorzo en el último 1.5 s, ≤ 15 cm. Es lo que separa el saludo de estirar
+   los brazos hacia la cámara y recogerlos, que en la imagen también lleva la
+   mano de lado a lado, y con el mismo ritmo. La mano que saluda queda a
+   −11..+12 cm del plano; la que se estira, a 10-40. La profundidad de BlazePose
+   sin corregir no sirve: pone las dos a ~30;
+4. **un vaivén con ritmo**: cinco cambios de sentido de al menos 0.15 anchos
+   (~5 cm), **encadenados**, cada uno a menos de 0.7 s del anterior. Contarlos
+   sin encadenar dejaba pasar un gesto de narración con dos barridos grandes y
+   separados; con cuatro en vez de cinco, otro de 0.2 s.
+
+Se ajustó con la grabación del 2026-10-11 y se contrastó con las del
+2026-09-27:
+
+| Grabación | Dónde reconoce un saludo |
+|---|---|
+| 2026-10-11 | etiqueta 3 (saluda el derecho), etiqueta 4 (el izquierdo) y **el saludo con que el operador abrió la narración** (186-189 s). En ningún otro sitio: brazos colgando, «yo no fui», «el grito», estirar los brazos, el resto de la narración |
+| 2026-10-11, intento | ninguno |
+| 2026-09-27 (sin la condición 3: su profundidad usa la focal vieja) | los dos saludos del protocolo, el saludo con que abrió también esa narración, y un estirar los brazos que la condición 3 quita |
+
+**El precio es la latencia**: cinco cambios de sentido son ~1.4 s de saludo
+antes de que el robot empiece. El robot sigue mientras el operador saluda y
+para 0.8 s después del último vaivén.
+
+**El saludo del robot** es el del visor —`armR` 30 ± 12 a 0.7 Hz y `armRtw`
+50 ± 8 a 2.3 Hz— llevado a la rama de la cinemática inversa del Python:
+`(a, f)` y `(−a, f − 180)` ponen el brazo en la misma dirección, girado 180°
+sobre su eje, que no se ve porque el brazo es simétrico. Así el robot pasa de
+seguir al operador a saludar sin dar la vuelta. Entra y sale con el paso suave
+de 0.9 s del visor, cabe en las tablas de colisión, y va a menos de 180°/s, así
+que el limitador no lo deforma. La cabeza no se toca: la lleva el head tracker.
+
+**Lo que cambia en el contrato: nada.** El saludo sale como ángulos de brazo,
+igual que todo lo demás, así que el visor no cambia y el robot físico lo
+reproducirá sin saber que es un saludo. `TELMEOW_ARM_SALUDO=0` lo apaga. El CSV
+gana `saludo_L`/`saludo_R` (cuánto manda el saludo, 0..1), el HUD escribe
+«SALUDO», y el analizador dice en qué etiquetas saludó el robot.
+
+**83 pruebas nuevas** (`tests/test_saludo.py`), cada grupo atado a algo
+externo: el patrón contra la fórmula del visor transcrita aparte; el detector
+con lo que es y lo que no es un saludo; **la grabación del 2026-10-11, que tiene
+que dar exactamente los tres saludos y nada más**; y el tracker entero con una
+escena que saluda. Comprobado que fallan al quitar cada pieza: sin el saludo en
+el tracker, sin la condición de profundidad, con cuatro vaivenes y sin
+encadenarlos.
+
+**Lo que falta:**
+
+1. Verlo en el visor: saludar como siempre al empezar a narrar, y narrar un rato
+   para comprobar que el robot no saluda solo.
+2. Actualizar la skill del visor, que dice que el saludo demo «no pasa por el
+   Python»: ahora el Python también lo produce.
+3. Rehacer en `tools/` la reproducción offline (P5.6) y medir el coste de
+   `model_complexity`; con eso se cierra el P5.
 
 ### Lo que hereda del P4 — leer antes de escribir código
 
@@ -2294,7 +2358,9 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
     del tronco el robot queda entre abierto y en cruz. Medido en la
     verificación del 2026-10-11 (H42): con el saludo natural —codo abajo,
     antebrazo arriba, la mano de lado a lado— el robot se queda en cruz y se
-    mueve ±5°.
+    mueve ±5°. El saludo se resuelve reconociéndolo, no copiándolo (P5.7): el
+    robot hace el suyo ~1.4 s después de que el narrador empiece, que es la
+    latencia que se declara.
 
 13. **La profundidad del brazo es una reconstrucción con una ambigüedad
     resuelta por preferencia.** El escorzo (P5.5) hace la profundidad coherente
@@ -2602,6 +2668,15 @@ equivalente en Python puro, sin privilegios de administrador.
   midió después con un objeto de tamaño conocido a distancia conocida: 0.7
   estimada, 0.68-0.76 medida (H41).
 
+- **«¿El robot imita el saludo del narrador?»** *(nueva, P5.7)*
+  No: lo reconoce. Un saludo es un giro del antebrazo y el robot no tiene
+  antebrazo; copiado, el brazo apenas se movía ±5° (H42, medido). Así que el
+  sistema reconoce el saludo —la mano por encima del hombro, cerca de su plano,
+  cinco vaivenes con ritmo— y el robot hace su propio saludo. Medido en la
+  verificación: reconoce los saludos del protocolo y el saludo espontáneo con
+  que el narrador abrió el cuento, y no salta ni una vez en el resto de la
+  narración. Cuesta ~1.4 s de latencia, y se declara.
+
 - **«¿Qué pasa cuando BlazePose se equivoca de mano?»** *(nueva, P5.6)*
   Pasa, y con visibilidad alta: con el brazo colgando bajo la mesa, BlazePose
   inventa la mano y la hace saltar de un frame al siguiente entre dos sitios, con
@@ -2854,7 +2929,8 @@ t = ArmTracker(mirror=True,            # brazo izq. FISICO del operador -> armL
                zona_reposo=35.0,       # P5.6 · grados desde la vertical; 0 la apaga
                escorzo=True,           # P5.5 · corregir la profundidad (H39)
                focal_relativa=0.7,     # P5.6 · focal / ancho, estimada (H41)
-               rampa_mano=0.5)         # P5.6 · s hasta fiarse de una mano (H40)
+               rampa_mano=0.5,         # P5.6 · s hasta fiarse de una mano (H40)
+               saludo=True)            # P5.7 · el robot saluda solo (H42)
 t.process(frame_rgb) -> ArmAngles | None      # ESTIMACION · None = sin pose
 t.comando(pose, timestamp=None) -> ArmAngles  # COMANDO · nunca tiene huecos
 t.map_posicion(canal, vector_m, largo_m, timestamp=None)   # P5.4 · sin camara
@@ -2869,6 +2945,8 @@ t.pesos_reposo      # {Side: 0..1} · cuánto se llevó al reposo
 t.vectores_bp ; t.vectores_codo_bp  # BlazePose ANTES del escorzo (CSV pb_*, cb_*)
 t.puntos_imagen     # {Side: {hombro, codo, mano: (u, v)}} · píxeles (CSV img_*)
 t.confianzas_mano   # {Side: 0..1} · P5.6 · 0 fuera de cuadro, 1 tras la rampa
+t.pesos_saludo      # {Side: 0..1} · P5.7 · cuánto manda el saludo del robot
+t.aplicar_saludo(canal, salida, timestamp)  # el saludo, sin cámara
 t.hombros_mundo     # (ancho, dz) de BlazePose en m · el ancla del escorzo (CSV hombros_*)
 t.aplicar_reposo(canal, direccion, salida)  # la zona de reposo, sin cámara
 t.last_clamp        # {Side: ArmClamp} · lower/upper/fraction/clamped para el HUD
@@ -2987,6 +3065,24 @@ reconstruir_brazo(cam, hombro_3d, img_codo, img_mano, largo_brazo,
 Sin estado, solo numpy, probado con una cámara sintética
 (`tests/test_escorzo.py`): el brazo verdadero se proyecta, se le da a BlazePose
 una profundidad equivocada y se exige recuperar el verdadero.
+
+## `saludo.py`
+
+```python
+from telmeow_teleop.saludo import (DetectorSaludo, senales_saludo, patron_saludo,
+                                   AMPLITUD, VAIVENES, MEDIO_PERIODO_MAX,
+                                   ALTURA_MIN, PROFUNDIDAD_MAX, FIN, RAMPA)
+
+senales_saludo(px_mano, px_hombro, px_hombro_contrario, profundidad_m)
+    -> (x, y, p) | None          # x, y en anchos de hombro; p corregida, en m
+d = DetectorSaludo()             # uno por brazo
+d.actualizar(t, muestra_o_None) -> bool   # None = mano no de fiar: se reinicia
+d.activo ; d.reiniciar()
+patron_saludo(t) -> (abduccion, flexion)  # el saludo del visor, rama del Python
+```
+
+Solo biblioteca estándar. El `ArmTracker` lo usa solo (`saludo=True`); el
+detector se prueba sobre la grabación del 2026-10-11 (`tests/test_saludo.py`).
 
 ## `publisher.py`
 
@@ -3584,7 +3680,7 @@ instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 | **H34** | **La exposición de la cámara sobrevive al proceso** (DirectShow la guarda en el driver) y dejó la imagen **negra a 30 fps sin ningún error**. Se pide explícitamente al abrir, y el HUD avisa del brillo | §4.0, P5, §7.16 |
 | **H35** | **El brazo «daba la vuelta» por una costura del mapeo articular, no por la profundidad**: con flexión ±90, «al frente» tiene dos soluciones y se elegía por el signo de una componente que al frente es ruido (303 saltos en 9 min). Retargeting por dirección y flexión extendida a −180 | P5.3, §0.5 |
 | **H36** | Las ganancias de abducción del H33 **no son ganancias**: son la envolvente del robot entre 90°. Se sustituyen por un escalado dependiente de la dirección que sale de la tabla | P5.3 |
-| **H42** | **El saludo natural no pasa al robot**: con el codo abajo y el antebrazo arriba, la mano queda recogida por fuera del tronco y el mapeo `posicion` lleva el brazo a la cruz; el vaivén de la mano solo mueve el robot ±5°. Es un giro del antebrazo, que el robot no tiene. Tres caminos: saludar con el brazo entero, que el robot salude solo (P7), o amplificar el vaivén | P5.6 |
+| **H42** | **El saludo natural no pasa al robot**: con el codo abajo y el antebrazo arriba, la mano queda recogida por fuera del tronco y el mapeo `posicion` lleva el brazo a la cruz; el vaivén de la mano solo mueve el robot ±5°. Es un giro del antebrazo, que el robot no tiene. De tres caminos, el operador eligió que el robot **salude solo**: reconoce el saludo (mano por encima del hombro, cerca de su plano, cinco vaivenes encadenados) y hace el del visor | P5.6, P5.7 |
 | **H41** | **La focal del head tracker dejaba el escorzo en una frontera**: con `focal = ancho`, las manos junto a la cara caían justo entre las dos soluciones del codo (27° de la cruz con `PESO_PLANO` 0.4, 3° con 0.6), y ningún peso acertaba a la vez ese gesto y el de los brazos estirados. Con 0.7 veces el ancho aciertan los dos en dos grabaciones, y cuadra con la geometría del puesto. Medida después con el teléfono del operador a una distancia igual a su largo: 0.68-0.76 | P5.6, §3.3.13 |
 | **H40** | **BlazePose inventa la mano que no ve, y con visibilidad alta**: con el brazo colgando, la mano bajo el cuadro saltaba cada frame a una doblada delante del pecho con visibilidad 0.7-0.96, y el híbrido la seguía; el brazo quieto estaba en reposo el 16 % del tiempo. La visibilidad no basta: la mano cuenta dentro del cuadro y tras medio segundo sostenida (71-100 %). Y el codo en el borde del cuadro no se corrige por escorzo sin mano fiable | P5.6, §3.3.14 |
 | **H39** | **BlazePose ponía las manos 35 cm por delante cuando estaban junto a la cara**: con los codos abajo y las manos levantadas, su profundidad las dejaba 32-37 cm delante de los hombros mientras la imagen mostraba brazo y antebrazo casi con todo su largo. Ningún mapeo podía dar el gesto. Corrección por escorzo (rayo-esfera, Taylor 2000) con una ambigüedad resuelta por preferencia | P5.5, §3.3.13 |

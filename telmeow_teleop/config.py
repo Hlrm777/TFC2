@@ -555,6 +555,11 @@ class ArmConfig:
     escorzo: bool = True
     focal_relativa: float = 0.7
     rampa_mano: float = 0.5
+    # -- P5.7 ------------------------------------------------------------------
+    # ``saludo``: cuando el operador saluda —antebrazo arriba, la mano de lado a
+    # lado—, el robot hace el saludo del visor con ese brazo (H42). El robot no
+    # tiene antebrazo, así que no lo copia: lo reconoce. Ver saludo.py.
+    saludo: bool = True
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "ArmConfig":
@@ -596,6 +601,7 @@ class ArmConfig:
                 env, "ARM_FOCAL_RELATIVA", cls.focal_relativa
             ),
             rampa_mano=_env_float(env, "ARM_RAMPA_MANO", cls.rampa_mano),
+            saludo=_env_bool(env, "ARM_SALUDO", cls.saludo),
         )
 
 

@@ -124,6 +124,8 @@ def cargar(ruta: Path) -> list[dict]:
         numericas += [f"peso_mano_{s}", f"reposo_{s}"]
         # P5.6: la confianza en la mano (la rampa desde que entra en cuadro).
         numericas.append(f"confianza_mano_{s}")
+        # P5.7: cuánto mandaba el saludo del robot.
+        numericas.append(f"saludo_{s}")
     numericas += ["hombros_ancho_m", "hombros_dz_m"]
 
     for fila in filas:
@@ -444,7 +446,7 @@ def resumen_p5_5(filas: list[dict]) -> None:
     # dejó en NaN en todas las filas.
     if all(math.isnan(f["peso_mano_L"]) and math.isnan(f["peso_mano_R"]) for f in filas):
         return
-    print(f"{'=' * 74}\nHIBRIDO, REPOSO Y ESCORZO (P5.5-P5.6)\n{'=' * 74}\n")
+    print(f"{'=' * 74}\nHIBRIDO, REPOSO, ESCORZO Y SALUDO (P5.5-P5.7)\n{'=' * 74}\n")
     for lado in ("L", "R"):
         medidos = [f for f in filas if f.get(f"estimado_{lado}", 1)]
         pesos = [f[f"peso_mano_{lado}"] for f in medidos if f[f"peso_mano_{lado}"] == f[f"peso_mano_{lado}"]]
@@ -471,6 +473,27 @@ def resumen_p5_5(filas: list[dict]) -> None:
                 f"         mano: fuera de cuadro o sin ver en el {fuera:.0f} % de los frames"
                 f" medidos, en su rampa de entrada en el {rampa:.0f} %"
             )
+        # P5.7: cuántas veces saludó el robot y por cuánto tiempo, etiqueta a
+        # etiqueta, para ver de un vistazo si saludó donde no tocaba.
+        saludos = [(f["etiqueta"], f[f"saludo_{lado}"]) for f in filas]
+        if any(p == p for _, p in saludos):
+            por_etiqueta: dict = {}
+            antes = 0.0
+            for etiqueta, peso in saludos:
+                peso = peso if peso == peso else 0.0
+                cuenta = por_etiqueta.setdefault(etiqueta, [0, 0, 0])
+                cuenta[1] += 1
+                if peso > 0.0:
+                    cuenta[0] += 1
+                if peso > 0.0 and antes <= 0.0:
+                    cuenta[2] += 1
+                antes = peso
+            texto = ", ".join(
+                f"etiqueta {e}: {n_saludos} vez/veces, {100 * activos / total:.0f} %"
+                for e, (activos, total, n_saludos) in sorted(por_etiqueta.items())
+                if n_saludos
+            )
+            print(f"         saludo del robot: {texto or 'ninguno'}")
         cambios = [
             100.0 * (f[f"p_ant_{lado}"] - f[f"pb_ant_{lado}"])
             for f in medidos

@@ -111,6 +111,8 @@ from .retarget import (
     Retargeting,
     direccion_por_posicion,
 )
+from .saludo import RAMPA as RAMPA_SALUDO
+from .saludo import DetectorSaludo, patron_saludo, senales_saludo
 
 __all__ = [
     "ArmTracker",
@@ -725,6 +727,8 @@ class ArmTracker:
         rampa_mano: segundos que tarda en contar entera una mano que acaba de
             entrar en cuadro. 0 la cuenta en cuanto entra; fuera de la imagen
             no cuenta nunca. Ver ``RAMPA_MANO_S``.
+        saludo: que el robot salude solo cuando el operador saluda (P5.7). Ver
+            ``saludo.py`` y ``aplicar_saludo``.
         banda_tronco: lo que tarda el brazo del robot en cerrarse hasta su
             tope interno cuando la muñeca cruza hacia dentro del tronco, en
             fracción del largo del brazo (0.3 = la mitad del cuerpo). Ver
@@ -763,6 +767,7 @@ class ArmTracker:
         escorzo: bool = True,
         focal_relativa: float = FOCAL_RELATIVA,
         rampa_mano: float = RAMPA_MANO_S,
+        saludo: bool = True,
         pose_estimator=None,
         clock=time.perf_counter,
     ) -> None:
@@ -899,6 +904,14 @@ class ArmTracker:
         self._mano_vista_desde: dict[Side, float] = {}
         self._confianzas_mano: dict[Side, float] = {}
         self._hombros_mundo: tuple[float, float] | None = None
+        # -- el saludo (P5.7) ------------------------------------------------------
+        self.saludo = bool(saludo)
+        self._detectores_saludo: dict[Side, DetectorSaludo] = {
+            lado: DetectorSaludo() for lado in (Side.L, Side.R)
+        }
+        self._pesos_saludo: dict[Side, float] = {Side.L: 0.0, Side.R: 0.0}
+        self._inicio_saludo: dict[Side, float] = {}
+        self._t_saludo: dict[Side, float] = {}
 
         # -- etapa de salida: de la estimación al comando ------------------
         # La pose de reposo pasa por clamp_arm igual que cualquier otra: así no
@@ -1056,6 +1069,13 @@ class ArmTracker:
         entra. Multiplica su visibilidad antes del híbrido. Ver
         ``RAMPA_MANO_S``."""
         return dict(self._confianzas_mano)
+
+    @property
+    def pesos_saludo(self) -> dict[Side, float]:
+        """Cuánto manda el saludo del robot en cada canal: 0 = el mapeo
+        normal, 1 = el saludo entero; entre medias, la entrada o la salida.
+        Ver ``aplicar_saludo``."""
+        return dict(self._pesos_saludo)
 
     @property
     def hombros_mundo(self) -> tuple[float, float] | None:
@@ -1533,10 +1553,13 @@ class ArmTracker:
             self._frames_sin_pose += 1
             self._landmarks_imagen = None
             self._tronco_fresco = False
-            # Sin pose no se ve ninguna mano: la confianza vuelve a empezar.
+            # Sin pose no se ve ninguna mano: la confianza vuelve a empezar, y
+            # ningún saludo sigue.
             self._mano_vista_desde.clear()
             self._confianzas_mano.clear()
             self._hombros_mundo = None
+            for canal in (Side.L, Side.R):
+                self._cortar_saludo(canal)
             return None
         mundo = mundo.landmark
         self._landmarks_imagen = resultado.pose_landmarks
@@ -1581,6 +1604,7 @@ class ArmTracker:
                 # La elección del escorzo del frame anterior ya no vale: tras un
                 # hueco, el brazo puede estar en cualquier sitio.
                 self._escorzo_previo.pop(canal, None)
+                self._cortar_saludo(canal)
                 continue
             campo_abd, campo_flex = CANALES[canal]
             setattr(salida, campo_abd, angulos[0])
@@ -1688,6 +1712,26 @@ class ArmTracker:
             if vector_corregido is not None:
                 destino_dict[canal] = vector_corregido
         self._extensiones[canal] = min(1.0, math.sqrt(sum(v * v for v in vector)) / largo)
+        # El saludo se reconoce con la mano en la imagen y su profundidad YA
+        # corregida, y solo con la mano de fiar: dentro del cuadro y con su
+        # rampa completa.
+        muestra = None
+        mano_corregida = self._vectores.get(canal)
+        if (
+            pixeles is not None
+            and mano_corregida is not None
+            and confianza >= 0.999
+            and vis_mano >= self.min_visibility
+        ):
+            imagen, ancho, alto = self._imagen
+            contrario = imagen[LANDMARKS[etiqueta.opposite]["hombro"]]
+            muestra = senales_saludo(
+                pixeles["mano"],
+                pixeles["hombro"],
+                (float(contrario.x) * ancho, float(contrario.y) * alto),
+                float(mano_corregida[2]),
+            )
+        self._detectores_saludo[canal].actualizar(timestamp, muestra)
 
         abduccion, flexion = crudo
         if flexion is None:
@@ -1716,7 +1760,48 @@ class ArmTracker:
             salida = self.map_to_robot(canal, abduccion, flexion, timestamp)
         if salida is None:
             return None
-        return self.aplicar_reposo(canal, direccion, salida)
+        salida = self.aplicar_reposo(canal, direccion, salida)
+        return self.aplicar_saludo(canal, salida, timestamp)
+
+    def aplicar_saludo(
+        self,
+        canal: Side | str,
+        salida: tuple[float, float],
+        timestamp: float,
+    ) -> tuple[float, float]:
+        """El saludo del robot (P5.7): mientras el detector del canal ve al
+        operador saludar, el brazo pasa del mapeo al saludo del visor
+        (``saludo.patron_saludo``) con un paso suave de ``saludo.RAMPA``, y
+        vuelve igual cuando termina.
+
+        Solo con los mapeos vectoriales: el patrón vive en la rama de flexión
+        extendida, que el mapeo ``articular`` no usa.
+        """
+        canal = Side.parse(canal)
+        ultimo = self._t_saludo.get(canal)
+        self._t_saludo[canal] = timestamp
+        if not self.saludo or self._mapeo == "articular":
+            self._pesos_saludo[canal] = 0.0
+            return salida
+        activo = self._detectores_saludo[canal].activo
+        peso = self._pesos_saludo[canal]
+        if activo and peso <= 0.0:
+            self._inicio_saludo[canal] = timestamp
+        paso = 0.0 if ultimo is None else max(0.0, timestamp - ultimo) / RAMPA_SALUDO
+        peso = min(1.0, peso + paso) if activo else max(0.0, peso - paso)
+        self._pesos_saludo[canal] = peso
+        if peso <= 0.0:
+            return salida
+        abd, flex = patron_saludo(timestamp - self._inicio_saludo.get(canal, timestamp))
+        e = _paso_suave(peso)
+        return (salida[0] + e * (abd - salida[0]), salida[1] + e * (flex - salida[1]))
+
+    def _cortar_saludo(self, canal: Side) -> None:
+        """El brazo dejó de verse: el saludo se acaba sin rampa. El comando lo
+        lleva entonces el limitador, como cualquier pérdida del brazo."""
+        self._detectores_saludo[canal].reiniciar()
+        self._pesos_saludo[canal] = 0.0
+        self._t_saludo.pop(canal, None)
 
     def aplicar_reposo(
         self,
@@ -2124,7 +2209,11 @@ def _demo(argv: list[str] | None = None) -> int:
         "  La profundidad de BlazePose se corrige con la imagen (escorzo):\n"
         "  si un hueso se ve con todo su largo, no apunta a la camara.\n"
         "  Una mano solo cuenta dentro del cuadro, y entera al cabo de medio\n"
-        "  segundo: la que BlazePose inventa bajo el cuadro no mueve el brazo.\n"
+        "  segundo: la que BlazePose inventa bajo el cuadro no mueve el brazo.\n\n"
+        "SALUDO (P5.7)\n"
+        "  Saluda como siempre: el codo abajo, la mano por encima del hombro y\n"
+        "  de lado a lado. Al cabo de ~1.5 s el robot saluda con ese brazo (el\n"
+        "  saludo del visor) y para cuando paras. El HUD muestra 'SALUDO'.\n"
         "  'k' recorre posicion -> direccion -> articular, solo para comparar\n"
         "  el mismo gesto; el programa final usa un unico mapeo. Fuera de\n"
         "  'articular', las ganancias y las teclas b/f no intervienen.\n\n"
@@ -2169,12 +2258,14 @@ def _demo(argv: list[str] | None = None) -> int:
         escorzo=cfg.arm.escorzo,
         focal_relativa=cfg.arm.focal_relativa,
         rampa_mano=cfg.arm.rampa_mano,
+        saludo=cfg.arm.saludo,
     )
     print(
         f"destino = {tracker.target}   escorzo = "
         f"{'si' if tracker.escorzo else 'no'} (focal {tracker.focal_relativa:g} x ancho)"
         f"   zona de reposo = {tracker.zona_reposo:g} grados"
         f"   rampa de la mano = {tracker.rampa_mano:g} s"
+        f"   saludo = {'si' if tracker.saludo else 'no'}"
     )
     print(
         f"mapeo = {tracker.mapeo}   flexion en "
@@ -2274,6 +2365,8 @@ def _demo(argv: list[str] | None = None) -> int:
                 # para rehacerlo offline sin reconstruirla.
                 "confianza_mano_L", "confianza_mano_R",
                 "hombros_ancho_m", "hombros_dz_m",
+                # P5.7. saludo_*: cuánto mandaba el saludo del robot (0..1).
+                "saludo_L", "saludo_R",
             ]
         )
         print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
@@ -2324,6 +2417,7 @@ def _demo(argv: list[str] | None = None) -> int:
             puntos_imagen = tracker.puntos_imagen
             confianzas_mano = tracker.confianzas_mano
             hombros = tracker.hombros_mundo
+            pesos_saludo = tracker.pesos_saludo
             for fila, canal in enumerate((Side.L, Side.R)):
                 campo_abd, campo_flex = CANALES[canal]
                 valor_abd = getattr(mando, campo_abd)
@@ -2375,6 +2469,8 @@ def _demo(argv: list[str] | None = None) -> int:
                         texto_mano = "" if peso is None else f"mano {peso:.1f} "
                         reposo = pesos_reposo.get(canal, 0.0)
                         texto_reposo = " REP" if reposo > 0.5 else ""
+                        if pesos_saludo.get(canal, 0.0) > 0.0:
+                            texto_reposo = " SALUDO"
                         partes.append(
                             f"{canal.value}: {texto_mano}{texto_ext}psi "
                             f"{paso.psi_humano:3.0f}->{paso.psi_robot:2.0f} "
@@ -2535,6 +2631,8 @@ def _demo(argv: list[str] | None = None) -> int:
                         _f(confianzas_mano.get(Side.L)),
                         _f(confianzas_mano.get(Side.R)),
                         *(("", "") if hombros is None else (f"{hombros[0]:.5f}", f"{hombros[1]:.5f}")),
+                        _f(pesos_saludo.get(Side.L)),
+                        _f(pesos_saludo.get(Side.R)),
                     ]
                 )
                 # Una línea por debajo de la de MQTT: con --publish y --record a

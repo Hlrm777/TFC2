@@ -547,8 +547,8 @@ class ArmConfig:
     # operador se mide a 20-37° de la vertical (grabación del 2026-09-27).
     # ``escorzo``: corregir la profundidad de BlazePose con la imagen y el largo
     # de los huesos (H39); ``focal_relativa`` es la focal de la cámara entre el
-    # ancho de la imagen, estimada con esa grabación (H41; igual que
-    # ``escorzo.FOCAL_RELATIVA``). ``rampa_mano``: segundos que tarda en contar
+    # ancho de la imagen, estimada con esa grabación y medida después con el
+    # teléfono del operador (H41; igual que ``escorzo.FOCAL_RELATIVA``). ``rampa_mano``: segundos que tarda en contar
     # entera una mano que entra en cuadro; la que BlazePose inventa por debajo
     # del cuadro no llega a contar (H40; igual que ``arm_tracker.RAMPA_MANO_S``).
     zona_reposo: float = 35.0

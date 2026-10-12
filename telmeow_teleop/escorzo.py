@@ -106,8 +106,14 @@ PESO_CONTINUIDAD: float = 0.3
 #: cámara siguen delante (el robot a 55-62°, su tope es 68°). Y es lo que sale
 #: de la geometría: 190 px entre hombros a 0.6-0.9 m de la cámara dan 0.5-0.85.
 #: Con 1.0, la convención del head tracker, el primer gesto quedaba en la
-#: frontera entre las dos soluciones. Se confirma midiendo la cámara (una hoja
-#: A4 a distancia conocida).
+#: frontera entre las dos soluciones.
+#:
+#: MEDIDA el 2026-10-11 con el teléfono del operador (POCO F5, 16.1 × 7.5 cm)
+#: en horizontal, paralelo a la cámara y a una distancia igual a su largo: así
+#: la focal en píxeles ES su largo aparente. Dos capturas dan 0.76 y 0.68 (el
+#: alto da 0.75 y 0.69, y la proporción sale 2.19 y 2.13 frente a 2.15 real: el
+#: teléfono estaba paralelo). La media, 0.72, confirma el 0.7; la diferencia
+#: entre las dos es la de poner la distancia a mano.
 FOCAL_RELATIVA: float = 0.7
 
 

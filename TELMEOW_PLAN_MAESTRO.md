@@ -1416,7 +1416,8 @@ Tres arreglos:
 Lo que queda en la etiqueta 2 son tramos en que la mano inventada se sostiene
 en cuadro más de medio segundo. En esa hipótesis BlazePose adelanta también el
 codo, el brazo se lee a 38-44° de la vertical, y la zona lo deja a medias: el
-robot se aparta 4-28° del reposo.
+robot se aparta 4-28° del reposo. Que es inventada lo confirmó el operador: esa
+mano estaba apoyada en el asiento, colgando.
 
 **2. El escorzo quedaba en una frontera, y la culpa era la focal (H41).** En la
 etiqueta 1 el escorzo acercó las manos al plano solo 4-8 cm (de 27 a 19-23 cm),
@@ -1437,7 +1438,22 @@ escorzo con `PESO_PLANO` de 0.4 a 1.0 y focales de 0.5 a 1.2 veces el ancho:
 
 `FOCAL_RELATIVA` = **0.7** (71° de campo horizontal). `PESO_PLANO` se queda en
 0.4: con la focal buena es el que mejor deja los brazos estirados delante.
-**Queda confirmarla midiendo la cámara.**
+
+**Medida después, el 2026-10-11, con el teléfono del operador** (POCO F5, 16.1
+× 7.5 cm): en horizontal, paralelo a la cámara y a una distancia igual a su
+largo, la focal en píxeles es su largo aparente. Dos capturas dan **0.76 y
+0.68** (el alto, 0.75 y 0.69; la proporción, 2.19 y 2.13 frente a 2.15 real,
+así que estaba paralelo). La media, 0.72, confirma el 0.7; la diferencia entre
+las dos capturas es la de poner la distancia a mano.
+
+**Una precisión sobre la etiqueta 1**, de boca del operador: hizo primero «el
+grito» —las manos en las mejillas— y luego «yo no fui» —las manos a los lados
+de la cabeza—, **con los codos al aire** en las dos. O sea que la verdad no es
+«en el plano» sino entre el plano y unos 10 cm delante (la cara), y la
+etiqueta mezcla dos posturas; eso explica parte de lo biestable del codo. Las
+cifras de la tabla siguen ordenando igual las focales —1.0 deja las manos a
+20-21 cm, BlazePose a 27—, pero la grabación de verificación las separa en dos
+etiquetas.
 
 | Robot desde la cruz (mediana) | etiqueta 1, izq. / der. | etiqueta 4, izq. / der. |
 |---|---|---|
@@ -1484,14 +1500,25 @@ misma mano, sostenida, sí mueve el brazo.
 
 **Lo que falta, con el operador delante:**
 
-1. Una sesión con `--publish` para ver en el visor lo que dicen los números: el
-   brazo quieto quieto, las manos junto a la cara llevando el robot hacia la
-   cruz, el saludo con el brazo en horizontal.
-2. **Medir la focal**: una hoja A4 en horizontal frente a la cámara, a 50 cm de
-   la lente medidos con cinta, y una captura. Con su ancho en píxeles,
-   `focal = píxeles × 0.50 / 0.297`.
-3. Dos dudas sobre lo grabado: en la etiqueta 1, ¿los codos quedaron atrás o
-   apoyados en la mesa?; en la 2, ¿la mano izquierda colgaba o estaba apoyada?
+1. **La grabación de verificación**, con `--publish` para verlo a la vez en el
+   visor, y este protocolo (ESPACIO al cambiar de postura; cada postura
+   separada, para que las cifras no mezclen dos):
+
+   | Etiqueta | Postura | Tiempo | Qué debe hacer el robot |
+   |---|---|---|---|
+   | 0 | Brazos colgando, quietos, manos sobre el asiento | 20 s | quieto en reposo |
+   | 1 | «Yo no fui»: manos abiertas a los lados de la cabeza, palmas a la cámara, codos abajo al aire | 15 s | brazos hacia la cruz |
+   | 2 | «El grito»: manos en las mejillas, codos abajo al aire | 15 s | brazos al frente y arriba |
+   | 3 | Saludo con el derecho: brazo horizontal hacia el costado, subir y bajar; el izquierdo colgando | 20 s | el derecho sigue; el izquierdo, quieto |
+   | 4 | Lo mismo con el izquierdo; el derecho colgando | 20 s | al revés |
+   | 5 | Brazos estirados hacia la cámara, acercar y alejar despacio | 20 s | brazos al frente, cerca de su tope |
+   | 6 | Narración libre, como contando un cuento | 45 s | sigue los gestos |
+
+   Con la cámara integrada en el índice que diga `tools/list_cameras.py` (el
+   0 sin la externa conectada) y con buena luz (H27).
+2. ~~Medir la focal~~ — hecho con el teléfono, 0.68-0.76 (arriba).
+3. ~~Las dos dudas sobre lo grabado~~ — respondidas: etiqueta 1 con dos posturas
+   y codos al aire; en la 2, la mano izquierda colgaba (apoyada en el asiento).
 4. Medir el coste de `model_complexity` y cerrar el P5.
 
 ### Lo que hereda del P4 — leer antes de escribir código
@@ -2228,7 +2255,8 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
     la convención del head tracker (`focal = ancho`), el gesto de las manos
     junto a la cara quedaba en la frontera entre las dos soluciones; con 0.7
     veces el ancho, él y el de los brazos estirados salen bien a la vez, en dos
-    grabaciones. Se confirma midiendo la cámara.
+    grabaciones. Y la medida independiente con un objeto de tamaño conocido —el
+    teléfono del operador a una distancia igual a su largo— da 0.68-0.76.
 
 14. **Una mano solo cuenta si se ve dentro del cuadro, y al cabo de medio
     segundo** (H40). BlazePose inventa la mano que queda fuera de la imagen, y
@@ -2519,8 +2547,9 @@ equivalente en Python puro, sin privilegios de administrador.
   de dos soluciones por hueso que se resuelve por preferencia, y se declara
   (§3.3.13). Si preguntan por la focal: se estimó con dos grabaciones de
   validación, como la única que acierta a la vez dos gestos de referencia
-  opuestos —manos junto a la cara, brazos estirados hacia la cámara—, y cuadra
-  con la geometría del puesto (H41).
+  opuestos —manos junto a la cara, brazos estirados hacia la cámara—, y se
+  midió después con un objeto de tamaño conocido a distancia conocida: 0.7
+  estimada, 0.68-0.76 medida (H41).
 
 - **«¿Qué pasa cuando BlazePose se equivoca de mano?»** *(nueva, P5.6)*
   Pasa, y con visibilidad alta: con el brazo colgando bajo la mesa, BlazePose
@@ -3504,7 +3533,7 @@ instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 | **H34** | **La exposición de la cámara sobrevive al proceso** (DirectShow la guarda en el driver) y dejó la imagen **negra a 30 fps sin ningún error**. Se pide explícitamente al abrir, y el HUD avisa del brillo | §4.0, P5, §7.16 |
 | **H35** | **El brazo «daba la vuelta» por una costura del mapeo articular, no por la profundidad**: con flexión ±90, «al frente» tiene dos soluciones y se elegía por el signo de una componente que al frente es ruido (303 saltos en 9 min). Retargeting por dirección y flexión extendida a −180 | P5.3, §0.5 |
 | **H36** | Las ganancias de abducción del H33 **no son ganancias**: son la envolvente del robot entre 90°. Se sustituyen por un escalado dependiente de la dirección que sale de la tabla | P5.3 |
-| **H41** | **La focal del head tracker dejaba el escorzo en una frontera**: con `focal = ancho`, las manos junto a la cara caían justo entre las dos soluciones del codo (27° de la cruz con `PESO_PLANO` 0.4, 3° con 0.6), y ningún peso acertaba a la vez ese gesto y el de los brazos estirados. Con 0.7 veces el ancho aciertan los dos en dos grabaciones, y cuadra con la geometría del puesto. Estimada, falta medirla | P5.6, §3.3.13 |
+| **H41** | **La focal del head tracker dejaba el escorzo en una frontera**: con `focal = ancho`, las manos junto a la cara caían justo entre las dos soluciones del codo (27° de la cruz con `PESO_PLANO` 0.4, 3° con 0.6), y ningún peso acertaba a la vez ese gesto y el de los brazos estirados. Con 0.7 veces el ancho aciertan los dos en dos grabaciones, y cuadra con la geometría del puesto. Medida después con el teléfono del operador a una distancia igual a su largo: 0.68-0.76 | P5.6, §3.3.13 |
 | **H40** | **BlazePose inventa la mano que no ve, y con visibilidad alta**: con el brazo colgando, la mano bajo el cuadro saltaba cada frame a una doblada delante del pecho con visibilidad 0.7-0.96, y el híbrido la seguía; el brazo quieto estaba en reposo el 16 % del tiempo. La visibilidad no basta: la mano cuenta dentro del cuadro y tras medio segundo sostenida (71-100 %). Y el codo en el borde del cuadro no se corrige por escorzo sin mano fiable | P5.6, §3.3.14 |
 | **H39** | **BlazePose ponía las manos 35 cm por delante cuando estaban junto a la cara**: con los codos abajo y las manos levantadas, su profundidad las dejaba 32-37 cm delante de los hombros mientras la imagen mostraba brazo y antebrazo casi con todo su largo. Ningún mapeo podía dar el gesto. Corrección por escorzo (rayo-esfera, Taylor 2000) con una ambigüedad resuelta por preferencia | P5.5, §3.3.13 |
 | **H38** | **La dirección hombro→mano no ve la retracción**: al normalizar se tira la distancia, y con el codo doblado la mano queda delante del pecho, así que el robot apunta adelante con el brazo recogido. 32 s acercando y alejando las manos sin que la componente anterior bajara de 0.78 el 95 % del tiempo. Mapeo `posicion`, propuesto por el operador | P5.4, §3.3.12 |

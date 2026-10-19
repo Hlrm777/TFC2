@@ -46,6 +46,7 @@ from test_confianza_mano import (
 RAIZ = Path(__file__).resolve().parent.parent
 VERIFICACION = RAIZ / "verificacion_2026-10-11.csv"
 INTENTO = RAIZ / "verificacion_2026-10-11_intento.csv"
+SESION_SALUDO = RAIZ / "saludo_2026-10-19.csv"
 
 
 # --------------------------------------------------------------------------
@@ -146,6 +147,23 @@ def test_lo_que_no_es_un_saludo(nombre, muestras):
     assert primer_activo(recorrer(DetectorSaludo(), muestras)) is None, nombre
 
 
+def test_las_manos_sobre_la_cabeza_no_son_un_saludo():
+    """El gesto de la narración del 2026-10-19: las dos manos juntándose y
+    separándose por encima de la cabeza, a 1.5-1.9 anchos de hombro."""
+    assert primer_activo(recorrer(DetectorSaludo(), vaiven(5.0, y=1.7))) is None
+
+
+def test_un_saludo_que_sube_un_momento_no_se_corta():
+    """El saludo que abrió la narración del 2026-10-19 tocó 1.26 anchos a ratos,
+    con la mediana en 0.55: la altura se mide en mediana, no frame a frame."""
+    muestras = vaiven(4.0)
+    for i in range(50, 56):                       # 0.3 s por encima de la cabeza
+        x, _, p = muestras[i]
+        muestras[i] = (x, 1.3, p)
+    estados = recorrer(DetectorSaludo(), muestras)
+    assert all(activo for t, activo in estados if t >= 1.8)
+
+
 def test_dos_barridos_sueltos_no_son_un_saludo():
     """El gesto de cierre de la narración del 2026-10-11: barridos grandes,
     separados por más de lo que dura un vaivén."""
@@ -193,25 +211,44 @@ def reconocer(ruta):
     tramos = {}
     for lado, otro in (("L", "R"), ("R", "L")):
         detector = DetectorSaludo()
-        antes = False
+        actual = None      # el tramo en curso, guardado con la etiqueta en que empezó
+        # Los hombros se ven siempre, pero las grabaciones anteriores al P5.6 no
+        # guardaban el píxel del brazo que no se medía: vale el último conocido,
+        # que es lo que el tracker tenía.
+        hombros = {}
         for fila in filas:
+            for s in (lado, otro):
+                pixel = (_f(fila[f"img_hombro_x_{s}"]), _f(fila[f"img_hombro_y_{s}"]))
+                if all(map(math.isfinite, pixel)):
+                    hombros[s] = pixel
             muestra = None
-            confianza = _f(fila[f"confianza_mano_{lado}"])
+            confianza = _f(fila.get(f"confianza_mano_{lado}"))
+            if not math.isfinite(confianza):
+                # Grabaciones anteriores al P5.6: sin rampa grabada; vale la
+                # visibilidad con la que el híbrido ya daba la mano por entera.
+                confianza = 1.0 if _f(fila[f"vis_destino_{lado}"]) >= 0.65 else 0.0
             visibilidad = _f(fila[f"vis_destino_{lado}"]) * confianza
-            if fila[f"estimado_{lado}"] == "1" and confianza >= 0.999 and visibilidad >= 0.5:
+            if (
+                fila[f"estimado_{lado}"] == "1"
+                and confianza >= 0.999
+                and visibilidad >= 0.5
+                and lado in hombros
+                and otro in hombros
+            ):
                 muestra = senales_saludo(
                     (_f(fila[f"img_mano_x_{lado}"]), _f(fila[f"img_mano_y_{lado}"])),
-                    (_f(fila[f"img_hombro_x_{lado}"]), _f(fila[f"img_hombro_y_{lado}"])),
-                    (_f(fila[f"img_hombro_x_{otro}"]), _f(fila[f"img_hombro_y_{otro}"])),
+                    hombros[lado],
+                    hombros[otro],
                     _f(fila[f"p_ant_{lado}"]),
                 )
             t = _f(fila["t"])
-            activo = detector.actualizar(t, muestra)
-            if activo and not antes:
-                tramos.setdefault((int(fila["etiqueta"]), lado), []).append([t, t])
-            if activo:
-                tramos[(int(fila["etiqueta"]), lado)][-1][1] = t
-            antes = activo
+            if detector.actualizar(t, muestra):
+                if actual is None:
+                    actual = [t, t]
+                    tramos.setdefault((int(fila["etiqueta"]), lado), []).append(actual)
+                actual[1] = t
+            else:
+                actual = None
     return tramos
 
 
@@ -232,6 +269,19 @@ def test_la_verificacion_reconoce_los_saludos_y_nada_mas():
 @pytest.mark.skipif(not INTENTO.exists(), reason="falta el intento del 2026-10-11")
 def test_en_el_intento_no_hay_saludos():
     assert reconocer(INTENTO) == {}
+
+
+@pytest.mark.skipif(not SESION_SALUDO.exists(), reason="falta la sesión del 2026-10-19")
+def test_la_sesion_del_saludo_reconoce_los_tres_y_nada_mas():
+    """La sesión hecha para probar el saludo: 0 brazos colgando, 1 saluda el
+    derecho, 2 el izquierdo, 3 narración que empieza saludando con la derecha.
+    A mitad de la narración el operador juntó y separó las dos manos sobre la
+    cabeza, y en vivo el robot saludó 1.6 s con el izquierdo: ese gesto es el
+    que quita ``ALTURA_MAX``."""
+    tramos = reconocer(SESION_SALUDO)
+    assert set(tramos) == {(1, "R"), (2, "L"), (3, "R")}
+    for a, b in tramos[(3, "R")]:
+        assert 42.0 <= a and b <= 47.0                 # el saludo del principio
 
 
 # --------------------------------------------------------------------------

@@ -1652,9 +1652,6 @@ class ArmTracker:
         self._confianzas_mano[canal] = confianza
         vis_mano = vis_mano * confianza
         peso_mano = self._peso_mano(vis_mano, vis_codo)
-        if vis_hombro < self.min_visibility or peso_mano is None:
-            return None
-        self._pesos_mano[canal] = peso_mano
 
         hombro = self._punto(mundo, etiqueta, "hombro")
         base = torso_basis(hombro, self._punto(mundo, etiqueta.opposite, "hombro"), u_sup)
@@ -1669,6 +1666,11 @@ class ArmTracker:
         if self.invert_abduccion:
             inclinacion = -inclinacion
 
+        # Lo que dijo BlazePose se registra SIEMPRE, se mida el brazo o no: con
+        # ello una reproducción offline puede volver a decidir qué se mide con
+        # otros criterios (tools/reproducir_brazos.py). Antes solo se grababa
+        # en los frames medidos, y una variante más permisiva que la grabación
+        # no tenía de dónde sacar los demás.
         codo_bp = self._punto(mundo, etiqueta, "codo")
         mano_bp = np.mean([self._punto(mundo, etiqueta, n) for n in nombres_mano], axis=0)
         for destino_dict, punto in (
@@ -1678,6 +1680,10 @@ class ArmTracker:
             vector_bp = vector_brazo(hombro, punto, base, inclinacion)
             if vector_bp is not None:
                 destino_dict[canal] = vector_bp
+
+        if vis_hombro < self.min_visibility or peso_mano is None:
+            return None
+        self._pesos_mano[canal] = peso_mano
 
         codo, mano = self._escorzo_brazo(
             mundo, etiqueta, canal, hombro, codo_bp, mano_bp,

@@ -308,7 +308,7 @@
     neckPan:   { piv:V(0.1,-8.4,262.0),  axis:V(0,0,-1) },          // eje del M_Cuello_Sup (motor en la cabeza)
     neckTilt:  { piv:V(0.1,-10.9,215.1), axis:V(1,0,0) },           // eje del M_Cuello_Base (fijo al cuerpo)
     armR_bal:  { piv:V(109.4,-0.1,142.3),axis:V(0,-1,0) }, // eje del M_HombroDer_Base (motor en el brazo) · +θ abduce (eleva lateralmente)
-    armR_twist:{ piv:V(63.1,-0.1,134.4), axis:V(-0.985,0,-0.170) }, // eje del M_HombroDer_Sup (fijo) · flexión/extensión · sentido en revisión (H29)
+    armR_twist:{ piv:V(63.1,-0.1,134.4), axis:V(-0.985,0,-0.170) }, // eje del M_HombroDer_Sup (fijo) · flexión/extensión · «adelante» depende de la abducción (H30, arriba)
     armL_bal:  { piv:V(-109.3,0.1,142.5),axis:V(0,1,0) }, // eje del M_HombroIzq_Base (motor en el brazo) · signo invertido para que +θ también abduzca
     armL_twist:{ piv:V(-63.0,0.1,134.3), axis:V(-0.985,0,0.174) },  // eje del M_HombroIzq_Sup (fijo al cuerpo) · flexión/extensión
   };

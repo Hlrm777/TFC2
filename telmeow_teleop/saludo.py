@@ -19,7 +19,9 @@ pide cuatro cosas a la vez:
 
 1. **La mano de fiar**: dentro del cuadro y con su rampa completa
    (``arm_tracker.RAMPA_MANO_S``). Lo decide quien llama: si no, no hay muestra.
-2. **Por encima del hombro** (``ALTURA_MIN``).
+2. **Por encima del hombro** (``ALTURA_MIN``), pero **no de la cabeza**
+   (``ALTURA_MAX``, en mediana): las dos manos juntándose y separándose sobre
+   la cabeza al narrar son otro gesto.
 3. **Cerca del plano del hombro** (``PROFUNDIDAD_MAX``, con la profundidad YA
    corregida por el escorzo): es lo que separa el saludo de estirar los brazos
    hacia la cámara y recogerlos, que en la imagen también mueve la mano de lado
@@ -63,8 +65,9 @@ __all__ = [
     "VAIVENES",
     "MEDIO_PERIODO_MAX",
     "ALTURA_MIN",
+    "ALTURA_MAX",
     "PROFUNDIDAD_MAX",
-    "VENTANA_PROFUNDIDAD",
+    "VENTANA",
     "FIN",
     "RAMPA",
 ]
@@ -84,12 +87,21 @@ MEDIO_PERIODO_MAX: float = 0.7
 #: saludos llevan la mano 0.2-0.65 anchos por encima.
 ALTURA_MIN: float = 0.1
 
+#: Altura máxima, en anchos de hombro: la mediana de la última ``VENTANA``.
+#: Las manos por encima de la cabeza son otro gesto. En la sesión del
+#: 2026-10-19 el operador, narrando, juntaba y separaba las dos manos sobre la
+#: cabeza (a 1.35-1.87 anchos), y una de ellas pasaba por saludo; los saludos de
+#: verdad van a 0.3-0.55 de mediana, y el que más sube, el que abre la
+#: narración, toca 1.36 a ratos con la mediana en 0.55. Por eso una mediana y
+#: no un tope por frame: un saludo que sube un momento no se corta.
+ALTURA_MAX: float = 1.2
+
 #: Profundidad máxima de la mano (corregida por escorzo) respecto al plano del
-#: hombro, en metros: la mediana de la última ``VENTANA_PROFUNDIDAD``.
+#: hombro, en metros: la mediana de la última ``VENTANA``.
 PROFUNDIDAD_MAX: float = 0.15
 
-#: Ventana de la mediana de la profundidad, en segundos.
-VENTANA_PROFUNDIDAD: float = 1.5
+#: Ventana de las medianas de altura y profundidad, en segundos.
+VENTANA: float = 1.5
 
 #: Segundos sin cambio de sentido para dar el saludo por terminado.
 FIN: float = 0.8
@@ -145,16 +157,21 @@ class DetectorSaludo:
         vaivenes: int = VAIVENES,
         medio_periodo: float = MEDIO_PERIODO_MAX,
         altura: float = ALTURA_MIN,
+        altura_max: float = ALTURA_MAX,
         profundidad: float = PROFUNDIDAD_MAX,
-        ventana: float = VENTANA_PROFUNDIDAD,
+        ventana: float = VENTANA,
         fin: float = FIN,
     ) -> None:
-        if not (amplitud > 0 and vaivenes >= 1 and medio_periodo > 0 and ventana > 0 and fin > 0):
+        if not (
+            amplitud > 0 and vaivenes >= 1 and medio_periodo > 0 and ventana > 0
+            and fin > 0 and altura_max > altura
+        ):
             raise ValueError("parámetros del detector de saludo no válidos")
         self.amplitud = float(amplitud)
         self.vaivenes = int(vaivenes)
         self.medio_periodo = float(medio_periodo)
         self.altura = float(altura)
+        self.altura_max = float(altura_max)
         self.profundidad = float(profundidad)
         self.ventana = float(ventana)
         self.fin = float(fin)
@@ -165,7 +182,8 @@ class DetectorSaludo:
         self._extremo: float | None = None
         self._cadena = 0
         self._ultimo_giro: float | None = None
-        self._profundidades: deque[tuple[float, float]] = deque()
+        # (t, altura, profundidad) de la última VENTANA, para las medianas.
+        self._recientes: deque[tuple[float, float, float]] = deque()
         self._activo = False
 
     @property
@@ -179,10 +197,10 @@ class DetectorSaludo:
         if muestra is None or muestra[1] < self.altura:
             self.reiniciar()
             return False
-        x, _, profundidad = muestra
-        self._profundidades.append((t, profundidad))
-        while self._profundidades and t - self._profundidades[0][0] > self.ventana:
-            self._profundidades.popleft()
+        x, y, profundidad = muestra
+        self._recientes.append((t, y, profundidad))
+        while self._recientes and t - self._recientes[0][0] > self.ventana:
+            self._recientes.popleft()
 
         giro = False
         if self._sentido is None:
@@ -210,19 +228,24 @@ class DetectorSaludo:
         elif self._ultimo_giro is not None and t - self._ultimo_giro > self.medio_periodo:
             self._cadena = 0
 
-        cerca_del_plano = self._mediana_profundidad() <= self.profundidad
-        if self._cadena >= self.vaivenes and cerca_del_plano:
+        # Cerca del plano del hombro y no por encima de la cabeza, medido como
+        # mediana: un momento fuera no corta un saludo.
+        en_su_sitio = (
+            self._mediana(2) <= self.profundidad
+            and self._mediana(1) <= self.altura_max
+        )
+        if self._cadena >= self.vaivenes and en_su_sitio:
             self._activo = True
         if self._activo and (
-            not cerca_del_plano
+            not en_su_sitio
             or self._ultimo_giro is None
             or t - self._ultimo_giro > self.fin
         ):
             self._activo = False
         return self._activo
 
-    def _mediana_profundidad(self) -> float:
-        valores = sorted(p for _, p in self._profundidades if math.isfinite(p))
+    def _mediana(self, columna: int) -> float:
+        valores = sorted(v[columna] for v in self._recientes if math.isfinite(v[columna]))
         if not valores:
             return 0.0
         return valores[len(valores) // 2]

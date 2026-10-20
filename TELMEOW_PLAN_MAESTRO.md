@@ -1909,7 +1909,7 @@ evidencia directa de memorización para §3.3.4 y §3.3.5.
    total (75 % → 72 %, dentro del ruido de 183 caras) **pero le cambia qué
    acierta**: sorprendido del 89 al 60 %, triste del 84 al 66 %, neutral del 21
    al 53 %. Como el P9 reporta por clase, la elección se notaría allí.
-   **Pendiente de confirmar por el operador** (P6.2).
+   **Confirmado por el operador el 2026-10-20** (P6.2).
 3. **El preprocesamiento del modelo propio, intacto** (puntos 4, 9 y 11): el
    cascade de OpenCV, `scaleFactor` 1.1 y `minNeighbors` 5, y el orden
    `resize` sobre BGR → gris → `/255`, que se fija **contra el código legacy
@@ -2097,9 +2097,13 @@ su confianza, latencia y brillo.
    la reproducción da **exactamente** la columna `emocion` (si no, la rejilla no
    vale), y da la rejilla `n_frames` 3-9 × `min_confidence` 0.5-0.8: cambios
    por minuto en la etiqueta 5 y latencia de entrada en las 1-4.
-2. **P6.2 — Confirmar la interfaz de los backends** (decisión 2).
-3. **P6.3 — ¿Dónde están las otras 400 imágenes de cada clase?** (H44). Es para
-   el P9, pero conviene saberlo antes de escribirlo.
+2. ~~**P6.2 — Confirmar la interfaz de los backends**~~ — **cerrado el
+   2026-10-20**: el operador la deja como está. Cada backend recibe el recorte y
+   lo prepara a su modo (decisión 2).
+3. ~~**P6.3 — ¿Dónde están las otras 400 imágenes de cada clase?**~~ —
+   **cerrado el 2026-10-20**: el operador no lo sabe. Se trabaja con las 1600
+   por clase que hay y se declara así (§3.3.4, H44). No afecta al P6, y al P9
+   tampoco le hacen falta: A y B se recalculan sobre lo que hay en disco.
 
 ### Enunciado original
 
@@ -2439,8 +2443,9 @@ Fija semillas en todo. No reentrenes nada aquí.
 
 11. EN DISCO HAY 1600 IMÁGENES POR CLASE, NO 2000 (H44). Faltan 400 de cada
     una, repartidas al azar por los índices 1-2000: parece un 20 % apartado
-    como prueba. Preguntar al operador ANTES de definir B, que hace bloques
-    por índice de frame, y los huecos están por todo el rango.
+    como prueba. El operador no sabe dónde están (2026-10-20): B se hace con
+    las 1600 que hay, en bloques por índice de frame, y los huecos —repartidos
+    por todo el rango— se declaran en la nota metodológica.
 
 12. E y F corren en el entorno de `requirements-benchmark.txt`, no en `.venv`
     (ver su cabecera y §4.0.8). Cada backend recibe el recorte del Haar y hace
@@ -4155,7 +4160,8 @@ a 2000 en las cinco clases, pero faltan 400 de cada una, repartidas por todo el
 rango —rachas de 1 a 5, entre 26 y 49 en cada bloque de 200—. No es el borrado
 de un tramo malo: parece un 20 % apartado al azar, quizá como conjunto de prueba
 en la otra máquina (la ruta del legacy apunta a `C:\Users\harol\...`). §3.3.4
-decía 2000. Afecta al P9, no al P6. **Pendiente de preguntar al operador.**
+decía 2000. Afecta al P9, no al P6. Preguntado el 2026-10-20: el operador no
+sabe dónde están. Se trabaja con las 1600 y se declara.
 
 Del mismo barrido: el Haar no encuentra cara en **541 de las 8000** (6.8 %;
 enojado 13 %, sorprendido 10 %), que el entrenamiento descartó sin decirlo, y en

@@ -19,6 +19,8 @@ Módulos:
                      largo de los huesos (P5.5)
     saludo        -- reconocer el saludo del operador para que el robot salude
                      solo, con el saludo del visor (P5.7)
+    emotion_classifier -- emoción del operador con backends intercambiables:
+                     el modelo propio, DeepFace o HSEmotion (P6)
 
 ``config``, ``limits`` y ``filters`` usan solo biblioteca estándar, así que toda
 su lógica se puede validar sin instalar TensorFlow ni MediaPipe.
@@ -69,4 +71,5 @@ __all__ = [
     "retarget",
     "escorzo",
     "saludo",
+    "emotion_classifier",
 ]

@@ -102,21 +102,25 @@ cambia respecto al plan original.
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
 | **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo) y P5.6 (validación: confianza en la mano, focal, alcance) hechos y verificados el 2026-10-11** · **P5.7 (el robot saluda solo) hecho y verificado el 2026-10-19** · falta medir `model_complexity` | |
-| P6 — Clasificador de emoción | ⬜ | |
+| **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · falta verlo con el operador en el visor (P6.1) | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**960 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida). Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1053 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
 código —el modo demo del head tracker no lo ejecuta ninguna prueba, y así se
 cazó un `deque` usado sin importar que reventaba al arrancar—, otra prohíbe
 **tildes en los identificadores** de funciones y variables, y la tercera
-comprueba que el cascade Haar configurado detecta un rostro de verdad.
+comprueba que pyflakes detecta de verdad ese fallo, para que la primera no pase
+por no mirar nada. *(Hasta el 2026-10-19 este párrafo decía que la tercera
+comprobaba el cascade Haar; esa prueba no existía. Las del cascade —que es el
+de OpenCV, que pesa lo que pesaba al entrenar y que detecta una cara de
+verdad— llegaron con el P6, en `tests/test_emotion_classifier.py`.)*
 
 ## 0.2 Bugs del código legacy
 
@@ -155,7 +159,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── publisher.py          ✅ MQTT, JSON único, QoS 0
 │   ├── head_tracker.py       ✅ Face Mesh + solvePnP
 │   ├── arm_tracker.py        🟡 BlazePose · signos verificados · falta medir
-│   ├── emotion_classifier.py ⬜ P6
+│   ├── emotion_classifier.py 🟡 Haar + CNN propia, DeepFace, HSEmotion · falta el visor
 │   ├── control_panel.py      ⬜ P10
 │   └── main.py               ⬜ P7
 ├── raspberry/
@@ -173,11 +177,14 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── analizar_registro.py  ✅ CSV del head tracker, por percentil
 │   ├── analizar_registro_brazos.py ✅ CSV del arm tracker: 4 canales,
 │   │                            mano/codo, visibilidad, ganancias
+│   ├── medir_emocion.py      ✅ las cifras del P6: red, Haar, espejo, cara
 │   ├── train_fer2013.py      ⬜ P8
 │   └── eval_emotion.py       ⬜ P9
 ├── tests/                    ✅ 403 pruebas
 ├── mosquitto.conf            ✅ los dos listeners
+├── emotion_model.meta.json   ✅ orden de clases del modelo propio (el .keras no va en git)
 ├── requirements.txt / requirements-dev.txt
+├── requirements-benchmark.txt ✅ DeepFace y HSEmotion, en un entorno APARTE (P6)
 └── README.md
 ```
 
@@ -348,7 +355,7 @@ tesis.
 | 3 | **P3** | Filtros temporales (One Euro, histéresis) | ✅ |
 | 4 | **P4** | Head tracker (Face Mesh + Kabsch/solvePnP, sin dlib) | ✅ **hecho y calibrado con el operador** |
 | 5 | **P5** | Arm tracker corregido (bugs 1–4) | 🟡 signos verificados · falta medir con cámara |
-| 6 | **P6** | Clasificador de emoción con backends intercambiables | ⬜ |
+| 6 | **P6** | Clasificador de emoción con backends intercambiables | 🟡 código hecho · falta el visor |
 | 7 | **P8** | Entrenamiento con FER-2013 | ⬜ ⚠️ revisar accuracy |
 | 8 | **P7** | Integración: captura única + HUD | ⬜ |
 | 9 | **P10** | Panel de control del operador | ⬜ |
@@ -1817,7 +1824,245 @@ Commit: "fix: calculo de angulos de brazo y mapeo a DOF del robot"
 
 ---
 
-## PROMPT 6 — Clasificador de emoción ⬜
+## PROMPT 6 — Clasificador de emoción 🟡 **código hecho el 2026-10-19** · falta verlo con el operador (P6.1)
+
+### Lo hecho el 2026-10-19
+
+`telmeow_teleop/emotion_classifier.py`, con los catorce puntos del enunciado,
+más `tools/medir_emocion.py` —de donde sale cada cifra de esta sección— y
+`requirements-benchmark.txt`. El punto de partida fue comprobar el entorno del
+punto 14, que se cumple tal cual: TensorFlow 2.16.1 carga el modelo (guardado el
+2024-06-21 con Keras 3.3.3), entrada `(None, 48, 48, 1)`, salida `(None, 5)` con
+softmax.
+
+**Lo medido**, sobre el modelo propio y las 8000 imágenes del dataset propio:
+
+| Qué | Medido |
+|---|---|
+| `model(x, training=False)` frente a `model.predict(x)` (bug 12) | **10 ms frente a 66** (mediana; p95 14 frente a 82), con probabilidades **idénticas** (diferencia 0.0) |
+| Primera llamada a la red | entre 74 y 640 ms según el proceso (la primera vez, TensorFlow aún carga sus bibliotecas): se paga al construir el backend, no en el primer frame |
+| Detector Haar a 640×480, con los parámetros del legacy | **42 ms**: **cuatro veces lo que cuesta la red** |
+| El mismo con `minSize` = 60 px | 20 ms. **No cambia el recorte de ninguna cara**: cambia 7 detecciones de 7459, y las 7 son falsos positivos de 57-83 px sobre una mejilla o la barbilla, en fotos con la cabeza girada cuya cara (~300 px) el Haar no encontró |
+| Imágenes en que el Haar no encuentra cara | 541 de 8000 (6.8 %): enojado 13 %, sorprendido 10 %, el resto 3-4 %. El entrenamiento las descartó sin decirlo |
+| Imágenes con más de una detección | 168; en **93-102**, según la ejecución, la primera —la que usó el entrenamiento— no es la mayor. Varía porque **el orden de las detecciones no es determinista** (H47) |
+| Lado del rostro en el dataset | mediana **302 px** (p5 235, p95 338): se grabó muy cerca de la cámara |
+| Preprocesamiento nuevo frente al legacy | **idéntico bit a bit** |
+| Modelo propio sobre su dataset, la cara como se grabó | **7454 de 7459 = 99.9 %** |
+| Lo mismo con la cara **volteada** | **4205 de 7129 = 59.0 %** (feliz 50 %, triste 32 %, sorprendido 37 %) — **H43** |
+
+Lo último **no es la accuracy del modelo**: es el dataset con el que se entrenó,
+con fuga de datos (bug 13), así que mide si el pipeline reproduce el
+entrenamiento, no si el modelo generaliza. Eso es el P9. Pero el 59 % sí dice
+algo citable: el modelo no reconoce **la cara de su propio operador** en espejo,
+que es la forma más pequeña de generalización que se le puede pedir. Es
+evidencia directa de memorización para §3.3.4 y §3.3.5.
+
+**Las decisiones, y por qué:**
+
+1. **Se deshace el espejo antes de detectar (H43).** El dataset se grabó con la
+   cámara tal cual y el pipeline voltea el frame para que el operador se vea
+   como en un espejo. Sin deshacerlo, el modelo vería caras que nunca vio y
+   acertaría el 59 % en vez del 99.9 %, **sin ningún error**. Es
+   `frame_espejado`, igual que en el arm tracker: un hecho de la captura, no una
+   preferencia. Una prueba exige, con el Haar y la red de verdad, que el frame
+   volteado dé **exactamente** la misma predicción que la imagen como se grabó.
+2. **Los backends reciben el recorte, no el 48×48 gris.** El enunciado escribía
+   `predict(face_gray_48x48)`. Pero HSEmotion se entrenó con caras en color a
+   224×224, y darle un 48×48 gris es medirlo con una entrada que no es la suya.
+   Lo común a los tres es el detector y el recorte —que es lo que hace que
+   clasifiquen las mismas caras—, y cada uno lleva el recorte a la entrada de
+   **su** red. Para el modelo propio no cambia nada: su `preprocesar_48` es el
+   del entrenamiento, línea a línea. **Medido** (tabla de abajo): a DeepFace le
+   da igual —él mismo reduce a 48×48 gris—, y a HSEmotion le cuesta poco en
+   total (75 % → 72 %, dentro del ruido de 183 caras) **pero le cambia qué
+   acierta**: sorprendido del 89 al 60 %, triste del 84 al 66 %, neutral del 21
+   al 53 %. Como el P9 reporta por clase, la elección se notaría allí.
+   **Pendiente de confirmar por el operador** (P6.2).
+3. **El preprocesamiento del modelo propio, intacto** (puntos 4, 9 y 11): el
+   cascade de OpenCV, `scaleFactor` 1.1 y `minNeighbors` 5, y el orden
+   `resize` sobre BGR → gris → `/255`, que se fija **contra el código legacy
+   copiado tal cual**. El orden habitual (gris primero) da ±1 nivel de gris en
+   uno de cada cuatro píxeles: poco, pero distinto, y la prueba lo distingue.
+4. **Se elige el rostro mayor, no el primero.** Con una sola cara dan lo mismo;
+   con un falso positivo, la cara del operador es la grande. Y es
+   **determinista**, que «la primera» no es: OpenCV reparte la detección en
+   varios hilos y devuelve el mismo conjunto de rectángulos en distinto orden
+   entre llamadas idénticas (H47). `criterio="primera"` se acerca a los
+   recortes del entrenamiento para el P9, pero no puede reproducirlos.
+5. **`minSize` = 60 px** (`TELMEOW_EMOTION_MIN_LADO_ROSTRO`; 0 lo apaga). Parte
+   el coste del Haar por la mitad, y la cara de operación le queda al doble: la
+   caja del Haar mide **2.0 veces** la distancia entre las comisuras externas
+   de los ojos (mediana de 74 imágenes del dataset, con Face Mesh), y esa
+   distancia es la `escala_cara` que registró el head tracker en la
+   calibración del 2026-09-06 —**61 px** de mediana (p5 56, p95 66) con la
+   cámara integrada a 640×480—. O sea, una caja de **~120 px** en operación,
+   frente a los ~300 del dataset: el operador grabó el dataset dos veces y media
+   más cerca de la cámara de lo que se sienta para narrar.
+6. **El orden de clases se lee de `emotion_model.meta.json`** (punto 1). El
+   modelo se guardó sin metadatos, así que el JSON se **reconstruyó** desde los
+   tres scripts legacy, lo dice dentro, y está en git aunque el `.keras` no. Su
+   orden lo fija una prueba contra **las etiquetas que el operador puso a sus
+   fotos al grabarlas**, que no salen de ningún código: con el orden del JSON
+   acierta lo de arriba; con las clases rotadas una posición, se hunde. Sin
+   JSON se supone el orden legacy y se avisa con `OrdenDeClasesSupuesto`
+   —**forzado a mostrarse**, porque DeepFace silencia todos los warnings del
+   proceso al importarse (H45)—; con un número de salidas distinto de 5, no se
+   supone nada. Una red que no acabe en softmax se rechaza: su «confianza» no
+   sería una probabilidad y el umbral de la histéresis no significaría nada.
+7. **Estabilización** (puntos 6 y 13): `ClassHysteresis` con `n_frames` = 5 y
+   `min_confidence` = 0.6. A 5 Hz es una ventana de 1 s, y cambiar de expresión
+   exige tres votos seguidos: 0.4-0.6 s desde que cambia la cara, más los
+   350 ms del fundido del visor. 0.6 está por encima de la duda entre dos
+   clases (~0.5), que es lo que frena la alternancia que la mayoría sola no
+   frena. **Ninguno de los dos está medido**: se calibran con `--record`.
+8. **La confianza que devuelve `process` vale `None` cuando no hay una medida
+   que la respalde ahora** —en manual, sin cara, o si ganó una clase sin
+   equivalente—, en vez de repetir la última. Un número congelado que parece
+   vivo es el H31.
+9. **Sin cara, la expresión se mantiene**: no vuelve a neutral, igual que la
+   cabeza del robot se queda donde estaba cuando el head tracker pierde el
+   rostro. Si el robot debe relajarse cuando el operador se levanta es una
+   decisión del P7, que ve los tres estimadores a la vez.
+10. **CONCENTRADO es manual** (punto 7): `toggle_manual(e)` acepta las seis
+    expresiones del visor, la misma otra vez la suelta, y `clear_manual()`
+    vuelve a automático. **La inferencia sigue corriendo en manual**, para que
+    al soltar la expresión sea la de la cara de ese momento. El orden de las
+    seis es el de los botones del visor (`config.VIEWER_EMOTIONS`, fijado
+    contra el HTML), que es el de las teclas 1..6 del P7 y el del panel del P10;
+    **no** es el orden de clases del modelo.
+11. **Qué hacer con asco, miedo y desprecio** (punto 2; HSEmotion añade
+    desprecio). `colapso="cercana"`, por defecto, suma su probabilidad a la
+    expresión más parecida —asco y desprecio a enojado, por la «tríada hostil»
+    de Izard (1977); miedo a sorprendido, porque comparten las unidades de
+    acción 1, 2, 5 y 26 y es la confusión clásica de los estudios de Ekman—.
+    `"ninguna"` las deja fuera: si gana una de ellas no hay voto. Se mapea
+    **por nombre**, nunca por posición, y una clase desconocida se rechaza en
+    vez de adivinarla. ⚠️ Verificar las dos referencias antes de citarlas.
+
+**Las dos librerías, probadas de verdad** en un entorno aparte (§4.0.8, H45),
+con `tools/medir_emocion.py --backend B --paso 40`: 183 caras del dataset
+propio, cada una con cuatro entradas. **No es la accuracy de nadie** —una sola
+persona, expresiones posadas—: es para ver qué convenios respeta cada backend.
+
+| Entrada | Modelo propio | DeepFace 0.0.102 | HSEmotion 0.3.0 |
+|---|---|---|---|
+| El recorte tal cual (cada uno lo prepara a su modo) | 100 % | 27.9 % | **74.9 %** |
+| La foto volteada | **57.5 %** (H43) | **47.1 %** (H46) | 74.1 % |
+| Colores al revés (RGB por BGR) | 100 % | 27.9 % | 72.7 % |
+| 48×48 gris, la entrada literal del enunciado | 100 % | 28.4 % | 71.6 % |
+| Coste por cara, en CPU | 11 ms | 18 ms | **119 ms** |
+
+Lo que esto verifica y lo que no:
+
+- **El mapeo por nombre funciona con las clases reales** de las dos librerías
+  —ninguna etiqueta desconocida, y las probabilidades colapsadas suman 1—, y
+  con DeepFace importado el modelo propio sigue acertando 183 de 183 y el aviso
+  de orden supuesto **sale** (H45). Dos pruebas nuevas lo atan con las
+  librerías de verdad; se saltan en `.venv` y corren en el entorno de
+  benchmark.
+- **El convenio de color no se puede verificar con aciertos**: al modelo propio
+  y a DeepFace les da igual —los dos pasan a gris, y el gris de un RGB tomado
+  por BGR es otro, pero no tanto como para cambiar una predicción— y a
+  HSEmotion le cambia 4 caras de 183. Se fija por el código fuente de cada
+  uno: el entrenamiento legacy lee con `cv2.imread` (BGR), DeepFace documenta
+  BGR, y HSEmotion hace `PIL.Image.fromarray` y normaliza con las medias de
+  ImageNet en orden RGB. Por eso el punto 14 del P7 lo trata como convenio y
+  no como riesgo: yo esperaba que pasarle el RGB de MediaPipe degradara el
+  modelo propio, y medido no le cuesta nada. **Lo que sí lo degrada es el
+  espejo.**
+- **HSEmotion es demasiado lento para el bucle en vivo** (119 ms por cara, más
+  el Haar, cada 200 ms). Sirve para el P9, que no corre en vivo; en el demo se
+  puede elegir, pero se notará.
+- **Adelanto del P9, con cautela**: DeepFace queda cerca del azar con este
+  operador (20 % con cinco clases), y HSEmotion lee su cara neutra como triste
+  (27 de 38).
+
+Pesos con que se midió, para poder decirlo en la tesis:
+
+| Archivo | Bytes | SHA-256 |
+|---|---|---|
+| `facial_expression_model_weights.h5` (DeepFace) | 5 977 392 | `e8e8851d3fa05c001b1c27fd8841dfe08d7f82bb786a53ad8776725b7a1e824c` |
+| `enet_b0_8_best_afew.pt` (HSEmotion) | 16 419 305 | `47c1423f3e6f50e3750bf7b0eda7db947c9ce0c2637e1766bf2187eddc652b17` |
+
+El `.pt` de HSEmotion es **una red serializada entera con pickle**, y
+`torch.load` la ejecuta al cargarla —PyTorch avisa de ello—: por eso
+`torch < 2.6`, y por eso la huella, que permite comprobar que el archivo
+descargado es el mismo antes de cargarlo.
+
+**Para el P7, tres cosas que este prompt deja dichas:**
+
+- **`process` recibe el frame en BGR**, no el RGB que el P7 comparte con
+  MediaPipe (punto 1 del P7). `BGR2GRAY` sobre un RGB pesa el rojo como azul y
+  da otra cara gris, sin error. Medido, al modelo propio no le cambia ningún
+  acierto, pero es el convenio del entrenamiento y no cuesta nada respetarlo:
+  el BGR ya lo tiene, es lo que entrega la cámara.
+- **La inferencia cuesta ~30 ms** (20 de Haar + 10 de red) **cada 200 ms**. En un
+  bucle único a 30 fps (33 ms por frame) eso es un frame tardío de cada seis,
+  sumado a Face Mesh y BlazePose. Si se nota, el bloque de emoción va en un
+  hilo aparte, que es para lo que existe el desacople de tasas.
+- `EmotionClassifier.desde_config(cfg)` lo construye con todo lo de la
+  configuración, incluido `frame_espejado = cfg.camera.flip`.
+
+**95 pruebas nuevas** (`tests/test_emotion_classifier.py` y
+`tests/test_medir_emocion.py`), cada convenio atado a algo de fuera: el orden de
+clases a las etiquetas del operador, el preprocesamiento al código legacy
+copiado, las expresiones al HTML del visor, `model(x)` a `model.predict`, y el
+espejo de punta a punta con el Haar y la red de verdad. Cada una de las que
+fijan un convenio va con otra que comprueba que **detecta** el fallo —el orden
+rotado hunde los aciertos, el orden habitual de gris y `resize` da otro tensor,
+DeepFace silenciando los warnings de verdad los silencia—. Dos usan DeepFace y
+HSEmotion reales: pasan en el entorno de benchmark y se saltan en `.venv`. Y
+una corre **el modo demo entero** con cámara, teclas y backends simulados y sin
+ventana: es la primera prueba del proyecto que ejecuta un demo, que hasta ahora
+solo vigilaba pyflakes.
+
+**El demo** (`python -m telmeow_teleop.emotion_classifier`): caja de rostro con
+la clase nativa del backend encima, la expresión que se manda al robot con su
+confianza, al lado **la predicción cruda** —la lección del H31—, barras de las
+cinco probabilidades, la ventana de votos, Hz de inferencia, latencia, y aviso
+de cámara negra. Teclas: `1..6` forzar expresión, `0` automático, `b` siguiente
+backend —se salta los no instalados—, ESPACIO etiqueta, `q` salir. Con
+`--publish` manda `emo` al visor, y con `--record` escribe una fila por
+inferencia: predicción cruda, las cinco probabilidades, la expresión enviada,
+su confianza, latencia y brillo.
+
+### Lo que falta
+
+1. **P6.1 — Verlo con el operador en el visor.** Es lo único que verifica el
+   orden de clases **de punta a punta**, hasta los ojos del robot. Con el broker
+   y el visor levantados (§4.2):
+
+   ```
+   python -m telmeow_teleop.emotion_classifier --publish --record emocion_2026-10-XX.csv
+   ```
+
+   | Etiqueta | Qué hacer | Tiempo | Qué debe hacer el robot |
+   |---|---|---|---|
+   | 0 | Cara relajada, mirando la pantalla | 10 s | Ojos NEUTRAL |
+   | 1 | Sonrisa amplia, como al ver a un amigo | 10 s | FELIZ |
+   | 2 | Comisuras abajo, como al oír una mala noticia | 10 s | TRISTE |
+   | 3 | Cejas arriba y boca abierta, como en una sorpresa | 10 s | SORPRENDIDO |
+   | 4 | Ceño fruncido, como al regañar | 10 s | ENOJADO |
+   | 5 | Leer en voz alta un párrafo cualquiera, natural | 60 s | Sin parpadear entre expresiones |
+   | 6 | Pulsar `6` (CONCENTRADO), luego `6` otra vez | 10 s | CONCENTRADO, y luego la de la cara |
+
+   No hace falta mirar el visor mientras se sostiene la cara: el CSV guarda la
+   expresión enviada en cada inferencia (`emocion`) junto a la predicción cruda
+   (`prediccion`), y se comprueba después etiqueta a etiqueta. Basta un vistazo
+   a los ojos del robot al final de cada etiqueta. Es la cara del operador
+   **a la distancia de narrar**, no tan cerca como en el dataset (caras de
+   ~120 px frente a ~300): si el modelo propio falla aquí y no en el dataset,
+   eso también es un resultado.
+
+   La etiqueta 5 es la que calibra `n_frames` y `min_confidence`: cuántos
+   cambios de expresión hay narrando con naturalidad, y cuántos sobran.
+   Calibrarlos es repasar las predicciones crudas grabadas por la
+   `ClassHysteresis` con otros valores, sin volver a grabar.
+2. **P6.2 — Confirmar la interfaz de los backends** (decisión 2).
+3. **P6.3 — ¿Dónde están las otras 400 imágenes de cada clase?** (H44). Es para
+   el P9, pero conviene saberlo antes de escribirlo.
+
+### Enunciado original
 
 ```
 Crea `telmeow_teleop/emotion_classifier.py`, reemplazando
@@ -1976,6 +2221,35 @@ captura y UN solo bucle que alimente a los tres estimadores.
 
 13. Mide los fps y los Hz con `perf_counter`, no con `monotonic` (§0.7).
 
+--- AÑADIDO EN EL P6 ---
+
+14. EL CLASIFICADOR DE EMOCIÓN RECIBE BGR, NO EL RGB COMPARTIDO. El punto 1
+    convierte a RGB una vez para MediaPipe, pero `EmotionClassifier.process`
+    espera el BGR de la cámara (ya volteado), que es el convenio del
+    entrenamiento: BGR2GRAY sobre un RGB da otra cara gris, sin error (medido,
+    al modelo propio no le cambia ningún acierto; a HSEmotion, algo). Lo que SÍ
+    importa es el espejo. Constrúyelo con `EmotionClassifier.desde_config(cfg)`,
+    que fija `frame_espejado = cfg.camera.flip`: el modelo propio se entrenó
+    con caras SIN voltear, y con la cara volteada acierta el 59 % en vez del
+    99.9 % (H43).
+
+15. LAS TECLAS 1..6 SON `config.VIEWER_EMOTIONS`, EN ORDEN: neutral, feliz,
+    triste, sorprendido, enojado, concentrado —el de los botones del visor—.
+    La misma tecla otra vez suelta la expresión (`toggle_manual`), y `0` es
+    `clear_manual()`. Es lo que ya hace el demo del P6.
+
+16. EL BLOQUE DE EMOCIÓN CUESTA ~30 ms CADA 200 ms (20 de Haar, con minSize,
+    y 10 de red). En el bucle único es un frame tardío de cada seis, sumado a
+    Face Mesh y BlazePose; si se nota, va en un hilo aparte. Con `--no-emotion`
+    no se construye el backend y nada carga el modelo.
+
+17. EL HUD pone al lado de la expresión enviada la predicción cruda
+    (`clasificador.ultima`), y la confianza vale `None` sin cara: no la
+    rellenes con la última (H31). Sin cara la expresión se mantiene; si el
+    robot debe volver a neutral cuando el operador se levanta, se decide aquí,
+    junto con lo que hacen la cabeza (se queda) y los brazos (vuelven al
+    reposo en 0.5 s).
+
 Actualiza el README con: instalación, configuración de Mosquitto, cómo lanzar el
 visor (servidor HTTP local — NUNCA con file://), cómo lanzar el pipeline, y un
 diagrama ASCII del flujo de datos.
@@ -2039,6 +2313,27 @@ sospecha de un error en la partición y avísame; no lo reportes como éxito.
 8. El JSON de metadatos es el que leerá `KerasBackend` (P6, punto 1). Que el
    orden de clases coincida con `config.EMOTION_LABELS` o documenta por qué no.
 
+--- AÑADIDO EN EL P6 ---
+
+9. EL FORMATO DEL JSON ya está fijado: `"clases"` es lo único obligatorio
+   —las etiquetas en el orden de las salidas, todas de `EMOTION_LABELS`, sin
+   repetir—; el resto se conserva como documentación. `KerasBackend` rechaza
+   un JSON que no cuadre con la red. Ejemplo: `emotion_model.meta.json`.
+
+10. LA RED TIENE QUE ACABAR EN SOFTMAX. `KerasBackend` rechaza una salida que
+    no sume 1: su «confianza» no sería una probabilidad y el umbral de la
+    histéresis no significaría nada.
+
+11. El volteo horizontal de la aumentación (punto 4) hace al modelo nuevo
+    insensible al espejo, que el legacy no es (H43). El clasificador deshace el
+    espejo igualmente, así que los dos ven la cara en la orientación de la
+    cámara y la comparación es justa.
+
+12. FER-2013 son caras ya recortadas, a 48×48 y en gris: `preprocesar_48` las
+    acepta tal cual. En operación las caras salen del Haar, con su encuadre y
+    a ~120 px antes de reducir (P6, decisión 5): esa diferencia es parte del
+    domain gap que mide la configuración D del P9.
+
 Commit: "feat: entrenamiento con FER-2013 y particion oficial"
 ```
 
@@ -2089,6 +2384,45 @@ Fija semillas en todo. No reentrenes nada aquí.
    número original (ver P6 punto 9).
 
 9. Toda medida de tiempo con `perf_counter` (§0.7).
+
+--- AÑADIDO EN EL P6 ---
+
+10. PARA REPRODUCIR LOS RECORTES DEL ENTRENAMIENTO (A y B):
+    `detectar_rostro(img, cascade, criterio="primera", min_lado=None)`. El
+    legacy tomaba la primera detección y sin minSize; el clasificador de
+    operación toma la mayor y usa minSize 60, y eso cambia ~100 y 6 recortes de
+    7459 respectivamente. Y la «primera» no es reproducible del todo: con
+    varios hilos OpenCV devuelve las detecciones en distinto orden (H47);
+    `cv2.setNumThreads(1)` la hace fija, pero no tiene por qué ser la que vio
+    el entrenamiento. Son ~100 imágenes de 7459: declararlo y seguir. El entrenamiento DESCARTÓ sin decirlo las 541
+    imágenes sin cara (6.8 %; 13 % de enojado): el denominador de A y B tiene
+    que decirlo.
+
+11. EN DISCO HAY 1600 IMÁGENES POR CLASE, NO 2000 (H44). Faltan 400 de cada
+    una, repartidas al azar por los índices 1-2000: parece un 20 % apartado
+    como prueba. Preguntar al operador ANTES de definir B, que hace bloques
+    por índice de frame, y los huecos están por todo el rango.
+
+12. E y F corren en el entorno de `requirements-benchmark.txt`, no en `.venv`
+    (ver su cabecera y §4.0.8). Cada backend recibe el recorte del Haar y hace
+    su propio preprocesamiento (P6, decisión 2). Para comparar también con la
+    entrada literal del enunciado del P6 —48×48 gris para todos— basta pasar
+    `cv2.cvtColor(cv2.resize(r, (48, 48)), cv2.COLOR_BGR2GRAY)`; lo que le
+    cuesta a cada librería está medido en el P6.
+
+13. `colapso` ("cercana" o "ninguna") cambia E y F: reportar con cuál se midió,
+    o las dos.
+
+14. DeepFace silencia TODOS los warnings del proceso al importarse (H45). El
+    aviso de orden de clases supuesto está forzado y sale igual, pero
+    cualquier otro aviso del P9 se perderá si DeepFace ya se importó.
+    Importarlo lo más tarde posible.
+
+15. LA ORIENTACIÓN DE LA CARA CAMBIA EL RESULTADO (H43, H46): el modelo propio
+    pasa del 99.9 % al 59 % con la foto volteada, y DeepFace del 28 % al 47 %.
+    Evaluar todo con la cara como la ve la cámara —la del entrenamiento propio
+    y la del clasificador en operación— y decirlo en la nota metodológica.
+    `tools/medir_emocion.py --backend B` ya da las cuatro variantes de entrada.
 
 Commit: "test: evaluacion comparativa de reconocimiento de emociones"
 ```
@@ -2334,8 +2668,12 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    arXiv:2502.02618 (2025).
 
 4. **Dataset propio de un solo sujeto.** 2000 imágenes por emoción de una sola
-   persona en sesiones controladas. Validación en condiciones de operación, no
-   evidencia de generalización.
+   persona en sesiones controladas —en disco quedan **1600 por emoción**, ver
+   H44—. Validación en condiciones de operación, no evidencia de
+   generalización. Y el modelo entrenado con él **no generaliza ni a esa misma
+   persona en espejo**: acierta el 99.9 % de las 7459 caras con la cara como
+   se grabó y el 59 % con la cara volteada (P6, H43). Es la prueba más barata de
+   que memorizó, y complementa la cifra de la fuga del P9.
 
 5. **Fuga de datos en el entrenamiento original.** La diferencia entre A y B del
    P9 cuantifica cuánto de la accuracy original era memorización.
@@ -2581,6 +2919,30 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    | `XNNPACK delegate for CPU` | MediaPipe usando la ruta rápida de CPU | ninguna, es buena señal |
    | `Feedback manager requires…` | Interno del grafo de MediaPipe | no es corregible desde fuera |
    | `SymbolDatabase.GetPrototype() is deprecated` | Código generado de MediaPipe contra protobuf | **no tocar**: subir a protobuf 5.x rompería MediaPipe, y el pin `protobuf==4.25.3` ya protege |
+
+8. **DeepFace y HSEmotion van en un entorno APARTE** (P6, H45). Solo hacen
+   falta para el P9. Instalados con sus dependencias declaradas, meterían en
+   `.venv` otra distribución de `cv2` —la headless, sin `imshow`— y un
+   onnxruntime que exige un protobuf que rompe MediaPipe. La receta, verificada
+   en un entorno limpio el 2026-10-19, está en la cabecera de
+   `requirements-benchmark.txt`: los dos paquetes **sin dependencias**, y
+   después las que de verdad usan, con versión.
+
+   ```
+   py -V:3.12 -m venv .venv-benchmark
+   .venv-benchmark\Scripts\activate
+   pip install -r requirements.txt
+   pip install --no-deps deepface==0.0.102 hsemotion==0.3.0
+   pip install -r requirements-benchmark.txt
+   ```
+
+   Dos avisos para cuando se use:
+
+   - **Con la salida redirigida a un archivo, DeepFace revienta en Windows** la
+     primera vez: imprime emojis al descargar sus pesos, y una tubería en
+     Windows codifica en cp1252. `$env:PYTHONUTF8="1"` antes de lanzarlo.
+   - Cada librería descarga sus pesos de GitHub la primera vez, a `~/.deepface`
+     y `~/.hsemotion`. Las huellas SHA-256 con que se verificó están en el P6.
 
 ## 4.1 La trampa del doble broker
 
@@ -3114,6 +3476,55 @@ patron_saludo(t) -> (abduccion, flexion)  # el saludo del visor, rama del Python
 
 Solo biblioteca estándar. El `ArmTracker` lo usa solo (`saludo=True`); el
 detector se prueba sobre la grabación del 2026-10-11 (`tests/test_saludo.py`).
+
+## `emotion_classifier.py`
+
+```python
+from telmeow_teleop.emotion_classifier import (EmotionClassifier, KerasBackend,
+                                               DeepFaceBackend, HSEmotionBackend,
+                                               crear_backend, BackendNoDisponible,
+                                               Emocion, Distribucion, BACKENDS)
+from telmeow_teleop.config import VIEWER_EMOTIONS   # las 6 del visor, orden de sus botones
+
+c = EmotionClassifier.desde_config(cfg)     # backend, tasa, histéresis, cascade, espejo
+c.process(frame_bgr) -> Emocion(etiqueta, confianza)   # BGR, NO el RGB de MediaPipe
+c.toggle_manual("concentrado") ; c.clear_manual() ; c.manual
+c.cambiar_backend(crear_backend("hsemotion", cfg))     # conserva la expresión
+c.ultima        # Distribucion CRUDA de la última inferencia (antes de la histéresis)
+c.rostro        # (x, y, w, h) en el frame recibido, el volteado · None sin cara
+c.ventana ; c.inferencias ; c.inferencias_sin_rostro ; c.latencia_ms ; c.t_ultima
+
+b = KerasBackend(ruta)                      # orden de clases de <ruta>.meta.json
+b.predict(rostro_bgr) -> Prediccion(etiqueta, confianza)   # la interfaz del P6
+b.distribucion(rostro_bgr) -> Distribucion(etiqueta, confianza, probabilidades, nativa)
+b.clases ; b.metadatos ; b.modelo
+
+# Funciones puras, para el P9:
+detectar_rostro(frame_bgr, cascade, criterio="mayor" | "primera", min_lado=None)
+preprocesar_48(rostro) -> (1, 48, 48, 1) float32     # el del entrenamiento, bit a bit
+colapsar(puntuaciones_por_nombre, "cercana" | "ninguna") -> Distribucion
+resolver_clases(ruta_modelo, n_salidas) ; leer_metadatos(ruta)
+```
+
+`Emocion.etiqueta` nunca es `None` —es siempre una de las seis del visor— y
+`Emocion.confianza` vale `None` cuando no hay una medida que la respalde ahora
+(manual, sin cara, clase sin equivalente). `process` infiere a `emotion_hz` por
+fecha límite y entre medias devuelve lo último decidido, así que se puede
+llamar en cada frame.
+
+Los backends reciben el **recorte del rostro** en BGR y lo llevan cada uno a la
+entrada de su red; los opcionales lanzan `BackendNoDisponible` (una
+`ImportError`) si su librería no está, con la instrucción de instalación.
+
+El JSON de metadatos de un modelo propio (`<modelo>.meta.json`) solo exige
+`"clases"`: las etiquetas en el orden de las salidas de la red, todas de
+`EMOTION_LABELS` y sin repetir. Lo demás —fecha, accuracy, hash del dataset—
+es documentación y se conserva en `KerasBackend.metadatos`. El P8 lo escribe
+con ese formato.
+
+Modo demo: `python -m telmeow_teleop.emotion_classifier [--backend B]
+[--publish] [--record CSV]`. Las cifras del P6: `python tools/medir_emocion.py
+[--paso 20] [--registro-cabeza calibracion_20260906_integrada.csv]`.
 
 ## `publisher.py`
 
@@ -3671,6 +4082,87 @@ métrica tiene que medirse igual en las dos**. Un agregador distinto a cada lado
 mundo y es del instrumento. Es el pariente estadístico del H31: allí el
 instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 
+## 7.17 El P6: el espejo, el dataset, DeepFace y el Haar (H43 a H47)
+
+**H43 — El modelo propio solo reconoce la cara sin voltear.** El dataset se
+grabó con `cap.read()` tal cual —`Creation_of_dataset.py` no voltea— y el
+pipeline voltea cada frame para que el operador se vea como en un espejo
+(`cfg.camera.flip`). Medido con `tools/medir_emocion.py` sobre las 8000
+imágenes del propio dataset (las que tienen cara; volteadas, el Haar encuentra
+algunas menos):
+
+| Clase | La cara como se grabó | Volteada |
+|---|---|---|
+| feliz | 1545/1546 | 764/1531 = 50 % |
+| triste | 1537/1538 | 467/1437 = 32 % |
+| sorprendido | 1444/1444 | 527/1432 = 37 % |
+| neutral | 1543/1544 | 1316/1444 = 91 % |
+| enojado | 1385/1387 | 1131/1285 = 88 % |
+| **total** | **7454/7459 = 99.9 %** | **4205/7129 = 59.0 %** |
+
+No es un fallo del código sino del modelo: una red que hubiera aprendido
+expresiones, y no fotos, sería casi simétrica. Y habría pasado en silencio: con
+el frame del P7 tal cual, el clasificador habría funcionado —daría expresiones,
+con confianzas altas— y acertaría la mitad. Consecuencias: el clasificador
+deshace el espejo antes de detectar (`frame_espejado`, con una prueba de punta a
+punta con el Haar y la red de verdad); §3.3.4 gana una evidencia de
+memorización; y el P8 lo evita por construcción con la aumentación por volteo.
+
+**H44 — En disco hay 1600 imágenes por emoción, no 2000.** Los nombres van de 1
+a 2000 en las cinco clases, pero faltan 400 de cada una, repartidas por todo el
+rango —rachas de 1 a 5, entre 26 y 49 en cada bloque de 200—. No es el borrado
+de un tramo malo: parece un 20 % apartado al azar, quizá como conjunto de prueba
+en la otra máquina (la ruta del legacy apunta a `C:\Users\harol\...`). §3.3.4
+decía 2000. Afecta al P9, no al P6. **Pendiente de preguntar al operador.**
+
+Del mismo barrido: el Haar no encuentra cara en **541 de las 8000** (6.8 %;
+enojado 13 %, sorprendido 10 %), que el entrenamiento descartó sin decirlo, y en
+unas cien la primera detección —la que usó el entrenamiento— no es la mayor
+(H47). Las 7
+detecciones que cambia `minSize` = 60 son falsos positivos de 57-83 px sobre
+una mejilla o la barbilla, en fotos con la cabeza girada cuya cara el Haar no
+encontró (se miraron tres; las otras cuatro son fotos consecutivas de una de
+ellas, con la misma caja): el modelo se entrenó también con esos recortes,
+etiquetados con la emoción de la foto.
+
+**H47 — El orden de las detecciones del Haar no es determinista.** Dos barridos
+idénticos del dataset dieron 102 y 93 imágenes en que «la primera detección no
+es la mayor». Con 8 hilos, 15 llamadas idénticas sobre cada una de 40 imágenes
+con varias detecciones devolvieron el mismo **conjunto** de rectángulos siempre,
+pero en **distinto orden** en 16 de las 40; con `cv2.setNumThreads(1)`, en
+ninguna. Consecuencias: la regla del legacy —«la primera»— eligió al azar en
+esas fotos, y nadie puede reproducir exactamente sus recortes; el clasificador
+usa «la mayor», que solo depende del conjunto y desempata por posición (con una
+prueba que lo exige para todas las permutaciones); y cualquier cifra que dependa
+de «la primera» varía entre ejecuciones, cosa que la herramienta ya avisa.
+
+**H45 — DeepFace no cabe en el entorno de operación, y al importarse cambia el
+proceso entero.** Sus dependencias declaradas (0.0.102) traen
+`opencv-contrib-python-headless` —una tercera distribución del módulo `cv2`, sin
+`imshow`, que pisa los archivos de la que haya— y `onnxruntime`, cuya versión
+actual exige `protobuf>=4.25.8`, cuando el pin 4.25.3 es el que mantiene viva a
+MediaPipe. Y al importarse hace dos cosas globales, las dos en `DeepFace.py`:
+fija `TF_USE_LEGACY_KERAS=1`, con lo que `tf.keras` pasa a ser Keras 2 y deja de
+leer el modelo propio, y hace `warnings.filterwarnings("ignore")`, que silencia
+**todos** los warnings del proceso —incluido el que avisa de un orden de clases
+supuesto, que existe precisamente porque ese fallo no da error—. Soluciones,
+las tres con prueba: un entorno aparte con DeepFace instalado sin sus
+dependencias (`requirements-benchmark.txt`, §4.0.8), el backend propio con
+`keras` directo en vez de `tf.keras`, y el aviso forzado a mostrarse. Y una
+cuarta trampa, del mismo entorno: la primera vez imprime emojis al descargar
+sus pesos, y con la salida redirigida en Windows (cp1252) eso es un
+`UnicodeEncodeError` que aborta la descarga. `PYTHONUTF8=1`.
+
+**H46 — DeepFace tampoco es simétrico, y al revés que el modelo propio.** Con
+las mismas 183 caras, acierta el **27.9 %** con la cara como la ve la cámara y
+el **47.1 %** con la foto volteada (feliz 35 → 57 %, triste 8 → 37 %,
+sorprendido 37 → 65 %); HSEmotion, en cambio, da lo mismo (74.9 / 74.1 %). Con
+una sola persona y una sola luz —la ventana queda a un lado de la imagen— no se
+puede saber si es el modelo o la iluminación, y no le toca al P6 averiguarlo.
+Lo que sí deja: **la orientación cambia el resultado de dos de los tres
+backends**, así que el P9 tiene que fijarla y declararla. La del clasificador
+es la de la cámara, que es la del entrenamiento del modelo propio.
+
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
@@ -3716,6 +4208,11 @@ instrumento mentía sobre el origen de un dato, aquí sobre su comparabilidad.
 | **H40** | **BlazePose inventa la mano que no ve, y con visibilidad alta**: con el brazo colgando, la mano bajo el cuadro saltaba cada frame a una doblada delante del pecho con visibilidad 0.7-0.96, y el híbrido la seguía; el brazo quieto estaba en reposo el 16 % del tiempo. La visibilidad no basta: la mano cuenta dentro del cuadro y tras medio segundo sostenida (71-100 %). Y el codo en el borde del cuadro no se corrige por escorzo sin mano fiable | P5.6, §3.3.14 |
 | **H39** | **BlazePose ponía las manos 35 cm por delante cuando estaban junto a la cara**: con los codos abajo y las manos levantadas, su profundidad las dejaba 32-37 cm delante de los hombros mientras la imagen mostraba brazo y antebrazo casi con todo su largo. Ningún mapeo podía dar el gesto. Corrección por escorzo (rayo-esfera, Taylor 2000) con una ambigüedad resuelta por preferencia | P5.5, §3.3.13 |
 | **H38** | **La dirección hombro→mano no ve la retracción**: al normalizar se tira la distancia, y con el codo doblado la mano queda delante del pecho, así que el robot apunta adelante con el brazo recogido. 32 s acercando y alejando las manos sin que la componente anterior bajara de 0.78 el 95 % del tiempo. Mapeo `posicion`, propuesto por el operador | P5.4, §3.3.12 |
+| **H43** | **El modelo propio solo reconoce la cara sin voltear**: 99.9 % con la cara como se grabó y 59 % volteada, y el pipeline voltea cada frame. El clasificador deshace el espejo antes de detectar. Evidencia de memorización | P6, §3.3.4, §7.17 |
+| **H44** | **En disco hay 1600 imágenes por emoción, no 2000**: faltan 400 de cada una, al azar por todo el rango. Y el Haar no ve cara en el 6.8 %, que el entrenamiento descartó sin decirlo | P6, P9, §3.3.4, §7.17 |
+| **H45** | **DeepFace no cabe en el entorno de operación** (otra `cv2`, protobuf) y al importarse fija `TF_USE_LEGACY_KERAS=1` y **silencia todos los warnings**. Entorno aparte, `keras` directo y el aviso forzado | P6, P9, §4.0.8, §7.17 |
+| **H47** | **El orden de las detecciones del Haar no es determinista** con varios hilos (mismo conjunto, otro orden, en 16 de 40 imágenes con varias caras): la «primera» del legacy eligió al azar. El clasificador usa la mayor, determinista | P6, P9, §7.17 |
+| **H46** | **DeepFace tampoco es simétrico, y al revés que el modelo propio**: 28 % con la cara como la ve la cámara y 47 % volteada; HSEmotion da lo mismo. La orientación cambia el resultado de dos de tres backends: el P9 la fija y la declara | P6, P9, §7.17 |
 | **H37** | **La simetría aproximaba la zona extendida, pero no la medía**: el reflejo `(a, f) ≡ (−a, f ± 180)` falló por un paso de 5° en 6-9 de 18 filas, y en el límite usado prometía 5° de más. Barrida con los detectores del visor (tras reproducir 37/37 filas de agosto); manda lo medido. Unión y motor: 0 choques. El cable, sin CAD, pasa a supuesto declarado | P5.3, §0.5, §3.3.11 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la

@@ -11,6 +11,7 @@ emotions_dataset/
 __pycache__/
 *.pyc
 .venv/
+.venv-*/
 venv/
 
 # Pytest

@@ -32,12 +32,14 @@ __all__ = [
     "ConfigError",
     "PROJECT_ROOT",
     "EMOTION_LABELS",
+    "VIEWER_EMOTIONS",
     "MQTTConfig",
     "RateConfig",
     "CameraConfig",
     "PathConfig",
     "HeadConfig",
     "ArmConfig",
+    "EmotionConfig",
     "AppConfig",
     "add_cli_args",
     "load",
@@ -59,6 +61,23 @@ EMOTION_LABELS: tuple[str, ...] = (
     "sorprendido",
     "neutral",
     "enojado",
+)
+
+#: Las seis expresiones que el visor sabe pintar, en el orden de sus botones
+#: (fila ``emo-row`` de telmeow_viewer.html). Es el orden de las teclas 1..6 del
+#: PROMPT 7 y de los botones del panel del PROMPT 10.
+#:
+#: NO es el orden de clases del modelo: ese es ``EMOTION_LABELS``. Son dos
+#: convenios distintos con las mismas palabras, y mezclarlos no daría ningún
+#: error, solo la cara equivocada. ``concentrado`` es la sexta porque el modelo
+#: no la emite: es un estado MANUAL del operador (P6, punto 7).
+VIEWER_EMOTIONS: tuple[str, ...] = (
+    "neutral",
+    "feliz",
+    "triste",
+    "sorprendido",
+    "enojado",
+    "concentrado",
 )
 
 ENV_PREFIX = "TELMEOW_"
@@ -605,6 +624,81 @@ class ArmConfig:
         )
 
 
+#: Backends del clasificador de emoción. Se repiten aquí como cadenas para que
+#: este módulo siga sin importar cv2 ni TensorFlow; una prueba comprueba que
+#: coinciden con ``emotion_classifier.BACKENDS``.
+EMOTION_BACKENDS: tuple[str, ...] = ("keras", "deepface", "hsemotion")
+
+
+@dataclass(frozen=True)
+class EmotionConfig:
+    """Clasificador de la emoción del operador (PROMPT 6).
+
+    ``backend`` elige el modelo: ``"keras"`` es el propio, el de operación;
+    ``"deepface"`` y ``"hsemotion"`` son librerías de referencia para el
+    capítulo de resultados (P9). Esos dos son OPCIONALES: viven en
+    ``requirements-benchmark.txt`` y, si no están instalados, el programa sigue
+    con Keras.
+
+    LA ESTABILIZACIÓN CUENTA INFERENCIAS, NO FRAMES. La emoción se infiere a
+    ``RateConfig.emotion_hz`` (5 Hz), así que ``n_frames = 5`` es una ventana
+    de **1 s**, y cambiar de expresión exige 3 votos seguidos: entre 0.4 y
+    0.6 s desde que cambia la cara, más los 350 ms del fundido del visor. Es el
+    precio de no parpadear: a un niño que escucha un cuento le molesta más una
+    cara que salta entre dos expresiones que una que llega medio segundo tarde.
+
+    ``min_confidence`` es la segunda condición del cambio: la confianza media de
+    los votos de la clase candidata. Hace falta porque la mayoría sola no frena
+    una alternancia perfecta entre dos clases (la ventana queda 3-2 y cambia de
+    bando cada dos pasos). Lo que la frena es que un clasificador que alterna
+    está dudando, y sus confianzas rondan 0.5; por eso 0.6, por encima de la
+    duda entre dos clases. Ver ``filters.ClassHysteresis``.
+
+    **Ninguno de los dos valores está medido todavía**: son el punto de partida
+    razonado. Se calibran con la grabación del modo demo (``--record``).
+
+    ``colapso`` decide qué hacer con las clases que las librerías tienen y el
+    robot no —asco y miedo; HSEmotion añade desprecio—: ``"cercana"`` suma su
+    probabilidad a la expresión más parecida, y ``"ninguna"`` las descarta: si
+    gana una de ellas no hay voto y el robot conserva la cara que tenía. Ver
+    ``emotion_classifier.SIN_EQUIVALENTE``. No afecta al backend Keras, cuyas
+    clases ya son las del robot.
+
+    ``min_lado_rostro`` es el ``minSize`` del detector Haar, en píxeles: deja
+    de buscar caras más pequeñas, que es donde se le va casi todo el tiempo. Con
+    60 cuesta **20 ms en vez de 42** por frame, y sobre las 8000 imágenes del
+    dataset propio **no cambia el recorte de ninguna cara**: solo cambia 7
+    detecciones, y las 7 son falsos positivos de 57-83 px sobre una mejilla o la
+    barbilla, en fotos cuya cara (~300 px) el Haar no encontró. En operación la
+    cara llega al detector con ~120 px, el doble del mínimo. El legacy no lo
+    usaba; 0 lo desactiva y reproduce el detector original.
+    """
+
+    backend: str = "keras"
+    n_frames: int = 5
+    min_confidence: float = 0.6
+    colapso: str = "cercana"
+    hsemotion_model: str = "enet_b0_8_best_afew"
+    min_lado_rostro: int = 60
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str]) -> "EmotionConfig":
+        return cls(
+            backend=_env_str(env, "EMOTION_BACKEND", cls.backend),
+            n_frames=_env_int(env, "EMOTION_N_FRAMES", cls.n_frames),
+            min_confidence=_env_float(
+                env, "EMOTION_MIN_CONFIDENCE", cls.min_confidence
+            ),
+            colapso=_env_str(env, "EMOTION_COLAPSO", cls.colapso),
+            hsemotion_model=_env_str(
+                env, "EMOTION_HSEMOTION_MODEL", cls.hsemotion_model
+            ),
+            min_lado_rostro=_env_int(
+                env, "EMOTION_MIN_LADO_ROSTRO", cls.min_lado_rostro
+            ),
+        )
+
+
 @dataclass(frozen=True)
 class PathConfig:
     """Rutas de modelos y recursos. Las relativas se resuelven contra
@@ -666,6 +760,7 @@ class AppConfig:
     paths: PathConfig = field(default_factory=PathConfig)
     head: HeadConfig = field(default_factory=HeadConfig)
     arm: ArmConfig = field(default_factory=ArmConfig)
+    emotion: EmotionConfig = field(default_factory=EmotionConfig)
     log_level: str = "INFO"
     abduccion_policy: str = "table"
 
@@ -684,6 +779,7 @@ class AppConfig:
             paths=PathConfig.from_env(env),
             head=HeadConfig.from_env(env),
             arm=ArmConfig.from_env(env),
+            emotion=EmotionConfig.from_env(env),
             log_level=_env_str(env, "LOG_LEVEL", cls.log_level),
             abduccion_policy=_env_str(env, "ABDUCCION_POLICY", cls.abduccion_policy),
         )
@@ -714,6 +810,7 @@ _CLI_MAP: dict[str, tuple[str | None, str]] = {
     "camera_backend": ("camera", "backend"),
     "emotion_model": ("paths", "emotion_model"),
     "face_cascade": ("paths", "face_cascade"),
+    "emotion_backend": ("emotion", "backend"),
     "log_level": (None, "log_level"),
     "abduccion_policy": (None, "abduccion_policy"),
 }
@@ -766,6 +863,14 @@ def add_cli_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     grp = parser.add_argument_group("Rutas")
     grp.add_argument("--model", dest="emotion_model", type=Path, default=sup)
     grp.add_argument("--cascade", dest="face_cascade", type=Path, default=sup)
+
+    grp = parser.add_argument_group("Emoción")
+    grp.add_argument(
+        "--emotion-backend",
+        dest="emotion_backend",
+        choices=EMOTION_BACKENDS,
+        default=sup,
+    )
 
     grp = parser.add_argument_group("General")
     grp.add_argument(
@@ -834,6 +939,7 @@ if __name__ == "__main__":
                 "paths": {k: str(v) for k, v in cfg.paths.__dict__.items()},
                 "head": cfg.head.__dict__,
                 "arm": cfg.arm.__dict__,
+                "emotion": cfg.emotion.__dict__,
                 "log_level": cfg.log_level,
                 "abduccion_policy": cfg.abduccion_policy,
             },

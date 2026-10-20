@@ -1,0 +1,8 @@
+{
+  "clases": ["feliz", "triste", "sorprendido", "neutral", "enojado"],
+  "entrada": [48, 48, 1],
+  "preprocesamiento": "Haar de OpenCV (cv2.data.haarcascades, scaleFactor 1.1, minNeighbors 5), recorte, resize 48x48 sobre BGR, BGR2GRAY, /255",
+  "origen": "Reconstruido el 2026-10-19 (P6): el modelo se guardo sin metadatos. El orden es el de los tres scripts legacy (Creation_of_dataset.py, Training Emotion Recognition.py, Emotion Recognition.py), identico en los tres, y lo fija una prueba sobre el dataset propio etiquetado.",
+  "guardado": "2024-06-21, Keras 3.3.3 (metadata.json dentro del propio .keras)",
+  "advertencia": "Entrenado con fuga de datos (bug 13 del plan maestro): su accuracy original no es citable. La cifra honesta es la configuracion B del P9."
+}

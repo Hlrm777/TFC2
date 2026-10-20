@@ -91,6 +91,39 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+### Backends opcionales del clasificador de emoción
+
+El clasificador de emoción funciona con el modelo propio (`emotion_model.keras`,
+fuera de git). DeepFace y HSEmotion solo hacen falta para la evaluación
+comparativa (P9), y **van en un entorno aparte**: las dependencias que declara
+DeepFace instalarían otra copia de OpenCV y un protobuf que rompe MediaPipe. La
+cabecera de [`requirements-benchmark.txt`](requirements-benchmark.txt) explica
+por qué, y estos son los pasos:
+
+```bash
+py -V:3.12 -m venv .venv-benchmark
+```
+
+```bash
+.venv-benchmark\Scripts\activate
+```
+
+```bash
+pip install -r requirements.txt
+```
+
+```bash
+pip install --no-deps deepface==0.0.102 hsemotion==0.3.0
+```
+
+```bash
+pip install -r requirements-benchmark.txt
+```
+
+Sin ellos, el modo demo del clasificador (`python -m
+telmeow_teleop.emotion_classifier`) sigue funcionando y la tecla `b` se salta
+los backends que no están.
+
 ---
 
 ## Configuración del broker
@@ -283,15 +316,23 @@ por segundo cuando solo le interesa uno cada varios segundos.
 │   ├── config.py       # broker, topics, tasas, rutas · defaults < entorno < CLI
 │   ├── limits.py       # límites articulares + recorte 2D (solo stdlib)
 │   ├── filters.py      # One Euro, EMA, histéresis de clase (solo stdlib)
-│   └── publisher.py    # MQTT, JSON único, QoS 0, limitación por descarte
+│   ├── camera.py       # apertura de la cámara: backend, formato, exposición
+│   ├── publisher.py    # MQTT, JSON único, QoS 0, limitación por descarte
+│   ├── head_tracker.py # Face Mesh → pan, tilt (P4)
+│   ├── arm_tracker.py  # BlazePose → abducción y flexión de los brazos (P5)
+│   ├── retarget.py, escorzo.py, saludo.py   # piezas del arm tracker
+│   └── emotion_classifier.py  # Haar + CNN propia, DeepFace, HSEmotion (P6)
 ├── tools/
 │   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/#
 │   ├── dev_broker.py   # broker MQTT sin privilegios de administrador
-│   └── list_cameras.py # qué cámaras hay y qué resoluciones admiten
+│   ├── list_cameras.py # qué cámaras hay y qué resoluciones admiten
+│   └── medir_emocion.py, analizar_registro*.py, ...  # las cifras del plan
 ├── tests/              # pytest, sin broker ni cámara
 ├── legacy/             # los scripts originales, intactos
+├── telmeow_viewer/     # el visor 3D y sus STL
+├── emotion_model.meta.json   # orden de clases del modelo propio
 ├── mosquitto.conf
-└── requirements.txt / requirements-dev.txt
+└── requirements.txt / requirements-dev.txt / requirements-benchmark.txt
 ```
 
 El plan de implementación completo está en

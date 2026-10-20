@@ -1,0 +1,59 @@
+# Dependencias OPCIONALES del clasificador de emoción: los backends DeepFace y
+# HSEmotion, que solo hacen falta para el capítulo de resultados (PROMPT 9). El
+# pipeline de operación funciona sin ellos, con el modelo propio (Keras).
+#
+# VAN EN UN ENTORNO APARTE, NO EN .venv
+# -------------------------------------
+# Instalar deepface con las dependencias que declara rompe el entorno de
+# operación, y de las dos maneras sin ningún error:
+#
+#   - declara opencv-contrib-python-HEADLESS, una tercera distribución del
+#     módulo cv2. Se pisa los archivos con la que ya está y cuál gana depende del
+#     orden de instalación; la headless no tiene cv2.imshow, así que los modos
+#     demo dejarían de abrir ventana (ver la nota de requirements.txt).
+#   - declara onnxruntime, cuya versión actual exige protobuf>=4.25.8, y el pin
+#     protobuf==4.25.3 de requirements.txt es el que mantiene viva a MediaPipe.
+#
+# Además arrastra Flask, gunicorn, retina-face y pandas, que el análisis de
+# emociones no usa. Por eso deepface y hsemotion se instalan SIN dependencias, y
+# las que sí necesitan para clasificar emociones están abajo, con versión.
+# Verificado el 2026-10-19 en un entorno limpio con CPython 3.12.1 (H45 del plan
+# maestro):
+#
+#     py -V:3.12 -m venv .venv-benchmark
+#     .venv-benchmark\Scripts\activate
+#     pip install -r requirements.txt
+#     pip install --no-deps deepface==0.0.102 hsemotion==0.3.0
+#     pip install -r requirements-benchmark.txt
+#
+# pip avisará de que a deepface le faltan Flask, retina-face, onnxruntime,
+# pandas, etc. Es lo esperado: son de sus otras funciones. numpy y protobuf
+# quedan en las versiones de requirements.txt.
+#
+# CON LA SALIDA REDIRIGIDA A UN ARCHIVO, DeepFace revienta en Windows la primera
+# vez: imprime emojis al descargar sus pesos y una tubería codifica en cp1252
+# (UnicodeEncodeError). Antes de lanzarlo:  $env:PYTHONUTF8="1"
+#
+# La primera vez, cada librería descarga sus pesos de GitHub:
+#   DeepFace  -> ~/.deepface/weights/facial_expression_model_weights.h5
+#   HSEmotion -> ~/.hsemotion/enet_b0_8_best_afew.pt
+# Sus SHA-256 verificados están en el plan maestro (P6), para poder decir con
+# qué pesos exactos se midió el P9.
+
+# --- DeepFace ---------------------------------------------------------------
+# tf-keras: con TensorFlow >= 2.16 DeepFace construye sus redes con Keras 2, y
+# para eso fija TF_USE_LEGACY_KERAS=1 al importarse. El modelo propio usa Keras
+# 3 directamente y no le afecta (ver emotion_classifier.py).
+tf-keras==2.16.0
+gdown==6.4.2
+tqdm==4.70.1
+Pillow==13.0.0
+Werkzeug==3.1.9
+
+# --- HSEmotion --------------------------------------------------------------
+# torch < 2.6: hsemotion 0.3.0 carga la red serializada entera con torch.load()
+# sin weights_only, y desde la 2.6 eso falla por defecto. En Windows, la rueda
+# de PyPI es la de CPU, que es la que pide el P6.
+torch==2.5.1
+torchvision==0.20.1
+timm==0.9.16

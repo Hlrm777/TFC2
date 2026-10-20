@@ -101,7 +101,7 @@ cambia respecto al plan original.
 | **P2** — Capa MQTT | ✅ **hecho** · punto de control **superado** | `7481a96`, `83224b5`, `9e626d9` |
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
-| **P5** — Arm tracker | 🟡 **código hecho y verificado en el visor** · **P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo) y P5.6 (validación: confianza en la mano, focal, alcance) hechos y verificados el 2026-10-11** · **P5.7 (el robot saluda solo) hecho y verificado el 2026-10-19** · falta medir `model_complexity` | |
+| **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · falta verlo con el operador en el visor (P6.1) | |
 | P8 — Entrenamiento FER-2013 | ⬜ | |
 | P7 — Integración | ⬜ | |
@@ -718,7 +718,7 @@ Commit: "refactor: head tracker con Face Mesh y solvePnP"
 
 ---
 
-## PROMPT 5 — Arm tracker 🟡 **código hecho** · P5.1 y P5.3 a P5.7 hechos y verificados · falta medir `model_complexity`
+## PROMPT 5 — Arm tracker ✅ **cerrado el 2026-10-19** · P5.1 y P5.3 a P5.7 hechos y verificados · `model_complexity` 1 medido y elegido
 
 ### Lo hecho el 2026-09-06
 
@@ -989,7 +989,37 @@ esqueleto del brazo no está pintado, el tracker tampoco lo está usando.
    (`pose_landmark_lite.tflite`, `pose_landmark_heavy.tflite`, dentro del
    `.venv`). Con `model_complexity=1` no se nota porque el `full` ya viene en el
    paquete. Dos consecuencias: la primera ejecución con un nivel distinto
-   **necesita red**, y para la Raspberry Pi del P11 hay que preverlo.
+   **necesita red**, y para la Raspberry Pi del P11 hay que preverlo. En este
+   `.venv` ya están los tres (comprobado el 2026-10-19).
+
+   **La medida completa, el 2026-10-19** (`tools/medir_blazepose.py`: 8 s de
+   cámara con el operador en postura de narración, y los mismos 120 frames por
+   los tres modelos, en modo vídeo como el tracker):
+
+   | `model_complexity` | ms por frame, mediana | p95 | frames con persona | visibilidad de muñecas |
+   |---|---|---|---|---|
+   | 0 (lite) | **15.3** | 16.7 | 100 % | 0.94 |
+   | **1 (full, el que se usa)** | **22.0** | 24.4 | 100 % | 0.98 |
+   | 2 (heavy) | **76.4** | 90.7 | 100 % | 0.97 |
+
+   Junto a lo demás que correrá en el bucle del P7 —Face Mesh 5-7 ms (P4) y el
+   bloque de emoción, ~30 ms cada 200 ms (P6)—:
+
+   | | Frame normal | Frame con emoción (1 de cada 6 a 30 fps) | Media |
+   |---|---|---|---|
+   | con el nivel 1 | 27-29 ms | 57-59 ms | ~32-34 ms |
+   | con el nivel 0 | 20-22 ms | 50-52 ms | ~25-27 ms |
+
+   **Decisión: se queda el nivel 1.** El 2 queda descartado: sus 76 ms solos ya
+   pasan del presupuesto entero (33 ms a 30 fps, 50 ms a 20 Hz de publicación).
+   El 1 cabe en los 20 Hz de media, y es con el que se midió, se ajustó y se
+   verificó todo el P5: cambiarlo obligaría a rehacer esa validación. El 0
+   ahorra 7 ms por frame con una visibilidad de muñecas apenas menor (0.94
+   frente a 0.98; la precisión de las posiciones no se midió) y queda como
+   **plan de reserva para el P7**: si el bucle único no sostiene su tasa,
+   `TELMEOW_ARM_MODEL_COMPLEXITY=0`, sin tocar código, y revalidar con
+   `tools/reproducir_brazos.py` sobre una grabación nueva. A 15 fps —la cámara
+   con poca luz, como en esta medida— hay 66 ms por frame y cabe todo.
 
 #### Lo que salió de la sesión del 2026-09-26
 
@@ -1661,8 +1691,10 @@ la tercera grabación que fijan las pruebas.
    demo «no pasa por el Python», y tenía dos pendientes ya cumplidos).
 3. ~~Rehacer en `tools/` la reproducción offline~~ — hecho:
    `tools/reproducir_brazos.py` (ver P5.6).
-4. **Medir el coste de `model_complexity`** con el operador delante
-   (`tools/medir_blazepose.py`, ~1 min). Con eso se cierra el P5.
+4. ~~Medir el coste de `model_complexity`~~ — hecho el 2026-10-19: 15 / 22 /
+   76 ms por frame con los niveles 0 / 1 / 2; se queda el 1, con el 0 de
+   reserva para el P7 (ver «Lo que falta» del P5.1, punto 4). **El P5 queda
+   cerrado.**
 
 ### Lo que hereda del P4 — leer antes de escribir código
 
@@ -2692,9 +2724,12 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    en el visor — ver §5, que lo convierte en un resultado en vez de un problema.
 
 9. **La tasa de captura depende de la ILUMINACIÓN del puesto, no del
-   algoritmo.** El cuello de botella no es el método —MediaPipe cuesta 5-7 ms
+   algoritmo.** El cuello de botella no es el método —Face Mesh cuesta 5-7 ms
    por frame, el 7 % del presupuesto— ni resultó ser el sensor: es la
-   exposición. La misma cámara, con el mismo código, mide **30 fps con buena luz
+   exposición. (Con los brazos el cómputo ya no es despreciable: BlazePose
+   suma 22 ms por frame, y con la emoción el bucle del P7 queda en ~32-34 ms de
+   media; ver P5.1, punto 4. Cabe en los 20 Hz de publicación, pero el margen
+   se declara.) La misma cámara, con el mismo código, mide **30 fps con buena luz
    y 10 con poca** (**H27**, §4.0.4). Con la iluminación de la sesión de
    calibración la captura sostuvo 30 fps durante 142 s, de sobra para los 20 Hz
    de publicación. **Lo que se declara no es un techo, es una condición de

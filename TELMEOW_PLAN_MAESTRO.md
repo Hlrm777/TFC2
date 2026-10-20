@@ -2090,6 +2090,13 @@ su confianza, latencia y brillo.
    cambios de expresión hay narrando con naturalidad, y cuántos sobran.
    Calibrarlos es repasar las predicciones crudas grabadas por la
    `ClassHysteresis` con otros valores, sin volver a grabar.
+
+   `python tools/analizar_registro_emocion.py emocion_2026-10-XX.csv` lo hace:
+   por etiqueta, la expresión enviada frente a la esperada, caras perdidas,
+   brillo y cambios por minuto; luego comprueba que con los parámetros grabados
+   la reproducción da **exactamente** la columna `emocion` (si no, la rejilla no
+   vale), y da la rejilla `n_frames` 3-9 × `min_confidence` 0.5-0.8: cambios
+   por minuto en la etiqueta 5 y latencia de entrada en las 1-4.
 2. **P6.2 — Confirmar la interfaz de los backends** (decisión 2).
 3. **P6.3 — ¿Dónde están las otras 400 imágenes de cada clase?** (H44). Es para
    el P9, pero conviene saberlo antes de escribirlo.

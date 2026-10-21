@@ -862,6 +862,19 @@ def test_el_modelo_carga_con_el_orden_de_sus_metadatos(backend):
 
 
 @requiere_modelo
+def test_el_registro_dice_con_que_modelo_se_grabo(backend):
+    """Desde el P8 hay dos modelos propios, y 'keras' ya no basta para saber
+    con cuál se grabó una sesión."""
+    from telmeow_teleop.emotion_classifier import _COLUMNAS_CSV, _modelo_de
+
+    assert _COLUMNAS_CSV[_COLUMNAS_CSV.index("backend") + 1] == "modelo"
+    assert _modelo_de(backend) == "emotion_model.keras"
+    hse = types.SimpleNamespace(modelo="enet_b0_8_best_afew")
+    assert _modelo_de(hse) == "enet_b0_8_best_afew"
+    assert _modelo_de(_BackendFalso([("feliz", 0.9)])) == ""
+
+
+@requiere_modelo
 def test_sin_metadatos_el_modelo_propio_avisa(tmp_path):
     pytest.importorskip("keras")
     with pytest.warns(OrdenDeClasesSupuesto):

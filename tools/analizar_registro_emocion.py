@@ -69,17 +69,27 @@ from telmeow_teleop.emotion_classifier import NEUTRAL  # noqa: E402
 from telmeow_teleop.filters import ClassHysteresis  # noqa: E402
 
 #: Lo que tiene que enseñar el robot en cada etiqueta del protocolo del P6.1
-#: (la tabla del plan maestro). En la 5, leyendo en voz alta, no hay una
-#: expresión correcta: lo que se mide es que no parpadee.
+#: (la tabla del plan maestro). En la 5 el operador lee en voz alta un texto sin
+#: emoción y sin actuar: el robot tiene que quedarse en neutral, y cada cambio es
+#: una falsa alarma provocada por mover la boca al hablar. (Hasta el 2026-10-21
+#: la 5 era «lectura natural», sin expresión esperada; el operador preguntó si
+#: tenía que mantenerse neutral, y la ambigüedad se quitó así.)
 ESPERADAS: dict[int, str | None] = {
     0: "neutral",
     1: "feliz",
     2: "triste",
     3: "sorprendido",
     4: "enojado",
-    5: None,
+    5: "neutral",
     6: "concentrado",
 }
+
+#: Lo que tiene que poner el robot al soltar la tecla 6 en la etiqueta 6. El
+#: operador sonríe durante toda la etiqueta: en manual el robot tiene que seguir
+#: en concentrado aunque sonría, y al soltar pasar a feliz. Sonrisa y no cara
+#: relajada porque así el cambio al soltar se ve, y porque feliz es la clase que
+#: el modelo propio acierta a la distancia de narrar.
+AL_SOLTAR = "feliz"
 
 #: La etiqueta de lectura natural, la que mide el parpadeo.
 LECTURA = 5
@@ -377,7 +387,7 @@ def resumir_etiqueta(etiqueta: int, filas: list[dict]) -> ResumenEtiqueta:
     reparto_enviadas = reparto(enviadas)
     if etiqueta == MANUAL:
         concentrado = any(f["manual"] == esperada and f["emocion"] == esperada for f in filas)
-        ok = concentrado and al_soltar is not None
+        ok = concentrado and al_soltar == AL_SOLTAR
     elif esperada is None:
         ok = None
     else:
@@ -479,9 +489,9 @@ def _num(valor: float | None, ancho: int, decimales: int = 2) -> str:
 
 def imprimir_etiqueta(r: ResumenEtiqueta) -> None:
     if r.etiqueta == LECTURA:
-        esperada = "-- (lectura natural: lo que cuenta es que no parpadee)"
+        esperada = "neutral (leyendo sin actuar: cada cambio es una falsa alarma)"
     elif r.etiqueta == MANUAL:
-        esperada = "concentrado (manual), y al soltar la de la cara"
+        esperada = f"concentrado en manual aunque sonria, y al soltar {AL_SOLTAR}"
     elif r.esperada is None:
         esperada = "-- (fuera del protocolo)"
     else:
@@ -493,7 +503,8 @@ def imprimir_etiqueta(r: ResumenEtiqueta) -> None:
     if r.ok:
         veredicto = "   OK"
     elif r.ok is False and r.etiqueta == MANUAL:
-        veredicto = "   <-- NO: falta concentrado en manual, o soltarlo despues"
+        veredicto = (f"   <-- NO: falta concentrado en manual, o al soltarlo no puso "
+                     f"{AL_SOLTAR}")
     elif r.ok is False:
         veredicto = f"   <-- NO: el robot puso sobre todo {r.enviadas[0][0]}"
     print(f"    robot:  {_texto_reparto(r.enviadas)}{veredicto}")
@@ -600,11 +611,13 @@ def main(argv: list[str] | None = None) -> int:
     duracion = filas[-1]["t"] - filas[0]["t"]
     hz = (len(filas) - 1) / duracion if duracion > 0 else 0.0
     backends = list(dict.fromkeys(f["backend"] for f in filas))
+    # 'modelo' llegó al CSV el 2026-10-21; las grabaciones anteriores no lo dicen.
+    modelos = list(dict.fromkeys(f.get("modelo") or "(no registrado)" for f in filas))
     costes = [f["latencia_ms"] for f in filas if f["latencia_ms"] is not None]
     print(f"\n{'=' * 74}\n{args.csv.name}: {len(filas)} inferencias en {duracion:.1f} s "
           f"({hz:.1f} Hz)")
-    print(f"backend {' -> '.join(backends)}; histeresis grabada n_frames={grabado[0]}, "
-          f"min_confidence={grabado[1]:g}")
+    print(f"backend {' -> '.join(backends)} (modelo {' -> '.join(modelos)}); "
+          f"histeresis grabada n_frames={grabado[0]}, min_confidence={grabado[1]:g}")
     if costes:
         print(f"coste de cada inferencia: mediana {statistics.median(costes):.0f} ms, "
               f"maximo {max(costes):.0f} ms")

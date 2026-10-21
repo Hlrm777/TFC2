@@ -159,12 +159,14 @@ def test_lee_columnas_que_escribe_el_clasificador():
 
 
 def test_el_protocolo_pide_expresiones_que_el_robot_tiene():
-    """0-4 las emite el modelo; la 6, concentrado, solo existe en manual."""
-    for etiqueta in (0, *are.ENTRADAS):
+    """0-5 las emite el modelo (la 5, leyendo sin actuar, es neutral); la 6,
+    concentrado, solo existe en manual, y al soltarla manda la cara: feliz."""
+    for etiqueta in (0, *are.ENTRADAS, are.LECTURA):
         assert are.ESPERADAS[etiqueta] in EMOTION_LABELS
-    assert are.ESPERADAS[are.LECTURA] is None
+    assert are.ESPERADAS[are.LECTURA] == "neutral"
     assert are.ESPERADAS[are.MANUAL] in VIEWER_EMOTIONS
     assert are.ESPERADAS[are.MANUAL] not in EMOTION_LABELS
+    assert are.AL_SOLTAR in EMOTION_LABELS
 
 
 @pytest.mark.parametrize(
@@ -348,25 +350,30 @@ def test_una_etiqueta_con_la_expresion_equivocada_no_pasa(tmp_path):
     assert r.enviadas[0][0] == "feliz"
 
 
-def test_la_lectura_no_se_juzga_por_la_expresion(tmp_path):
-    filas = [{"t": f"{0.2 * i:.4f}", "etiqueta": 5, "rostro": 1, "prediccion": "feliz",
-              "confianza_pred": "0.9", "emocion": "feliz"} for i in range(5)]
-    assert are.resumir_etiqueta(5, are.cargar(_escribir(tmp_path / "r.csv", filas))).ok is None
+@pytest.mark.parametrize("emocion, ok", [("neutral", True), ("feliz", False)])
+def test_la_lectura_sin_actuar_espera_neutral(tmp_path, emocion, ok):
+    """Leyendo un texto sin emoción y sin actuar, todo lo que no sea neutral es
+    una falsa alarma de la boca al hablar."""
+    filas = [{"t": f"{0.2 * i:.4f}", "etiqueta": 5, "rostro": 1, "prediccion": emocion,
+              "confianza_pred": "0.9", "emocion": emocion} for i in range(5)]
+    assert are.resumir_etiqueta(5, are.cargar(_escribir(tmp_path / "r.csv", filas))).ok is ok
 
 
-@pytest.mark.parametrize("suelta, ok", [(True, True), (False, False)])
-def test_la_etiqueta_manual_pide_concentrado_y_soltarlo(tmp_path, suelta, ok):
-    """3 inferencias en automático, 5 en concentrado y, si se suelta, 4 con la
-    cara: triste."""
-    emociones = ["feliz"] * 3 + ["concentrado"] * 5 + (["triste"] * 4 if suelta else [])
-    filas = [{"t": f"{0.2 * i:.4f}", "etiqueta": 6, "rostro": 1, "prediccion": "triste",
+@pytest.mark.parametrize(
+    "al_soltar, ok", [(["feliz"] * 4, True), (["triste"] * 4, False), ([], False)]
+)
+def test_la_etiqueta_manual_pide_concentrado_y_al_soltar_feliz(tmp_path, al_soltar, ok):
+    """3 inferencias en automático, 5 en concentrado aunque el operador sonría y,
+    al soltar, las de la cara: feliz si el protocolo se cumplió."""
+    emociones = ["feliz"] * 3 + ["concentrado"] * 5 + al_soltar
+    filas = [{"t": f"{0.2 * i:.4f}", "etiqueta": 6, "rostro": 1, "prediccion": "feliz",
               "confianza_pred": "0.9", "emocion": e,
               "manual": "concentrado" if e == "concentrado" else ""}
              for i, e in enumerate(emociones)]
     r = are.resumir_etiqueta(6, are.cargar(_escribir(tmp_path / "r.csv", filas)))
     assert r.ok is ok
     assert r.manual == pytest.approx(5 / len(emociones))
-    assert r.al_soltar == ("triste" if suelta else None)
+    assert r.al_soltar == (al_soltar[0] if al_soltar else None)
 
 
 # --------------------------------------------------------------------------

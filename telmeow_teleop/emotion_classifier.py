@@ -988,12 +988,25 @@ class EmotionClassifier:
 TECLAS_MANUAL = {ord(str(i + 1)): e for i, e in enumerate(VIEWER_EMOTIONS)}
 
 _COLUMNAS_CSV = (
-    ["t", "etiqueta", "backend", "rostro", "x", "y", "w", "h",
+    ["t", "etiqueta", "backend", "modelo", "rostro", "x", "y", "w", "h",
      "prediccion", "nativa", "confianza_pred"]
     + [f"p_{e}" for e in EMOTION_LABELS]
     + ["emocion", "confianza", "manual", "latencia_ms", "brillo",
        "n_frames", "min_confidence", "colapso"]
 )
+
+
+def _modelo_de(backend: EmotionBackend) -> str:
+    """Qué red clasificó: el archivo del modelo propio o el de la librería.
+
+    Existe desde el 2026-10-21: las tres primeras grabaciones del P6.1 decían
+    ``keras`` y nada más, y desde que el P8 dejó un segundo modelo propio eso ya
+    no basta para saber con cuál se grabó.
+    """
+    if isinstance(backend, KerasBackend):
+        return backend.ruta.name
+    modelo = getattr(backend, "modelo", "")
+    return modelo if isinstance(modelo, str) else ""
 
 
 def _fila_csv(t, etiqueta, clasificador: EmotionClassifier, brillo: float) -> list:
@@ -1002,6 +1015,7 @@ def _fila_csv(t, etiqueta, clasificador: EmotionClassifier, brillo: float) -> li
     emocion = clasificador.emocion
     return (
         [f"{t:.4f}", etiqueta, clasificador.backend.nombre,
+         _modelo_de(clasificador.backend),
          int(clasificador.rostro is not None), *rect,
          (d.etiqueta or "") if d else "", d.nativa if d else "",
          f"{d.confianza:.4f}" if d else ""]
@@ -1080,11 +1094,12 @@ def _demo(argv: list[str] | None = None) -> int:
         f"{clasificador.min_confidence:g}.\n"
     )
     print(
-        "VERIFICACION (P6.1)\n"
-        "  Con --publish y el visor abierto, pon cada expresion y SOSTENLA 3 s:\n"
-        "  feliz, triste, sorprendido, neutral, enojado. Los ojos del robot\n"
-        "  tienen que poner LA MISMA. Si salen cambiadas, el orden de clases\n"
-        "  esta mal aunque todo lo demas parezca funcionar.\n\n"
+        "VERIFICACION (P6.1): la tabla del plan maestro, etiquetas 0 a 6.\n"
+        "  Arranca en la 0 y ESPACIO pasa a la siguiente. 0-4: neutral, feliz,\n"
+        "  triste, sorprendido, enojado, 10 s cada una. 5: leer en voz alta,\n"
+        "  sin actuar, un texto sin emocion, 60 s (el robot debe quedarse en\n"
+        "  neutral). 6: pulsa 6 y sonrie 5 s (el robot, CONCENTRADO); sin dejar\n"
+        "  de sonreir pulsa 6 otra vez y sigue 5 s (el robot, FELIZ). q al final.\n\n"
         "TECLAS\n"
         "  1..6 = forzar neutral, feliz, triste, sorprendido, enojado,\n"
         "         concentrado (la misma otra vez la suelta)\n"

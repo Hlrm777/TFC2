@@ -2097,8 +2097,29 @@ su confianza, latencia y brillo.
    | 2 | Comisuras abajo, como al oír una mala noticia | 10 s | TRISTE |
    | 3 | Cejas arriba y boca abierta, como en una sorpresa | 10 s | SORPRENDIDO |
    | 4 | Ceño fruncido, como al regañar | 10 s | ENOJADO |
-   | 5 | Leer en voz alta un párrafo cualquiera, natural | 60 s | Sin parpadear entre expresiones |
-   | 6 | Pulsar `6` (CONCENTRADO), luego `6` otra vez | 10 s | CONCENTRADO, y luego la de la cara |
+   | 5 | Leer en voz alta, **sin actuar**, un texto sin emoción —las instrucciones de un electrodoméstico, el parte del tiempo—, en voz normal | 60 s | NEUTRAL todo el rato: cada cambio es una falsa alarma |
+   | 6 | Pulsar `6` y **sonreír** como en la 1; a los 5 s, **sin dejar de sonreír**, pulsar `6` otra vez y seguir sonriendo 5 s | 10 s | CONCENTRADO mientras está pulsado aunque sonrías; al soltar, FELIZ enseguida |
+
+   **Aclarado el 2026-10-21**, a pregunta del operador, que no veía clara la 5
+   ni la 6:
+
+   - **En la 5 la voz no se procesa**: no se graba audio. Se lee en voz alta
+     porque hablar mueve la boca, y una boca abierta se parece a «sorprendido»:
+     es lo que pasa al narrar, y lo que la estabilización tiene que aguantar.
+     Por eso **sin actuar** y con un texto sin emoción: así lo correcto es
+     NEUTRAL, y cada cambio del robot es una falsa alarma que se puede contar.
+     Antes decía «párrafo cualquiera, natural», que dejaba sin saber si había
+     que expresar o no.
+   - **En la 6 la cara no decide CONCENTRADO**: el modelo no lo detecta, lo
+     pone la tecla. Lo que se comprueba es que **la tecla manda sobre la cara**
+     (sonriendo, el robot sigue en CONCENTRADO) y que al soltarla **vuelve a lo
+     que ve el modelo, sin esperar**, porque la inferencia siguió corriendo en
+     manual (decisión 10). Se sonríe, y no se relaja la cara, porque el cambio
+     de CONCENTRADO a FELIZ se ve, y feliz es la expresión que el modelo propio
+     acierta con más seguridad.
+   - Las tres grabaciones del 2026-10-21 por la mañana
+     (`emocion_2026-10-20*.csv`) **no cuentan**: quedaron incompletas, y en la
+     6 no llegó a activarse el manual. Se repite entera con este protocolo.
 
    No hace falta mirar el visor mientras se sostiene la cara: el CSV guarda la
    expresión enviada en cada inferencia (`emocion`) junto a la predicción cruda
@@ -2108,10 +2129,12 @@ su confianza, latencia y brillo.
    ~120 px frente a ~300): si el modelo propio falla aquí y no en el dataset,
    eso también es un resultado.
 
-   La etiqueta 5 es la que calibra `n_frames` y `min_confidence`: cuántos
-   cambios de expresión hay narrando con naturalidad, y cuántos sobran.
-   Calibrarlos es repasar las predicciones crudas grabadas por la
-   `ClassHysteresis` con otros valores, sin volver a grabar.
+   La etiqueta 5 es la que calibra `n_frames` y `min_confidence`: cuántas
+   falsas alarmas da hablar, frente a lo que tarda el robot en cambiar de cara
+   en las 1-4. Calibrarlos es repasar las predicciones crudas grabadas por la
+   `ClassHysteresis` con otros valores, sin volver a grabar. Desde el
+   2026-10-21 el CSV tiene una columna `modelo` con el archivo de la red: desde
+   el P8 hay dos modelos propios, y `keras` solo ya no dice con cuál se grabó.
 
    `python tools/analizar_registro_emocion.py emocion_2026-10-XX.csv` lo hace:
    por etiqueta, la expresión enviada frente a la esperada, caras perdidas,

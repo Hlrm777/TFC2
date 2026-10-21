@@ -78,6 +78,21 @@ detectaron antes de grabar nada citable. Se añade además una decisión de dise
 que pidió el operador: **separar la estimación del comando**, para que perder un
 brazo de cuadro no lo deje clavado a mitad de gesto. Ver el P5.
 
+**La sesión del 2026-10-20 hace el PROMPT 8** —el modelo de emoción entrenado
+con FER-2013— y deja tres hallazgos:
+
+- **H48** — **la prueba oficial de FER-2013 también tiene fuga**: el 7.2 % de
+  sus imágenes (cinco clases) está repetido píxel a píxel en Training.
+- **H49** — **entrenar con volteo no hace simétrica a la red**: acierta lo
+  mismo con las caras volteadas, pero cambia de predicción en una de cada
+  cinco. Corrige lo que el P8 y el P9 daban por hecho.
+- **H50** — **las etiquetas del operador no bastan para verificar el orden de
+  clases** de un modelo que confunde sus caras.
+
+Y un resultado por debajo de lo esperado, medido y explicado: **58.0 %** en la
+prueba oficial, porque la red del legacy se queda corta para FER-2013. Se
+conservó a propósito (P8.1).
+
 Cómo leerlo:
 
 - **Partes 0 a 5** — el plan propiamente dicho, con los hallazgos ya integrados
@@ -103,13 +118,13 @@ cambia respecto al plan original.
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
 | **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · falta verlo con el operador en el visor (P6.1) | |
-| P8 — Entrenamiento FER-2013 | ⬜ | |
+| **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · ¿probar una red mayor? (P8.1) | |
 | P7 — Integración | ⬜ | |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1053 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1112 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -178,11 +193,15 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── analizar_registro_brazos.py ✅ CSV del arm tracker: 4 canales,
 │   │                            mano/codo, visibilidad, ganancias
 │   ├── medir_emocion.py      ✅ las cifras del P6: red, Haar, espejo, cara
-│   ├── train_fer2013.py      ⬜ P8
+│   ├── train_fer2013.py      ✅ P8: FER-2013 verificado, partición oficial,
+│   │                            entrenamiento determinista, --evaluar
 │   └── eval_emotion.py       ⬜ P9
-├── tests/                    ✅ 403 pruebas
+├── tests/                    ✅ 1112 pruebas
 ├── mosquitto.conf            ✅ los dos listeners
 ├── emotion_model.meta.json   ✅ orden de clases del modelo propio (el .keras no va en git)
+├── emotion_model_fer2013.meta.json, .historial.csv   ✅ el de FER-2013 (P8), y el
+│                                descartado, _paciencia4 · los .keras, fuera de git
+├── fer2013/                  el fer2013.tar.gz que descarga el P8 · fuera de git
 ├── requirements.txt / requirements-dev.txt
 ├── requirements-benchmark.txt ✅ DeepFace y HSEmotion, en un entorno APARTE (P6)
 └── README.md
@@ -354,9 +373,9 @@ tesis.
 | 2 | **P2** | Capa MQTT compatible con el viewer | ✅ · punto de control superado |
 | 3 | **P3** | Filtros temporales (One Euro, histéresis) | ✅ |
 | 4 | **P4** | Head tracker (Face Mesh + Kabsch/solvePnP, sin dlib) | ✅ **hecho y calibrado con el operador** |
-| 5 | **P5** | Arm tracker corregido (bugs 1–4) | 🟡 signos verificados · falta medir con cámara |
-| 6 | **P6** | Clasificador de emoción con backends intercambiables | 🟡 código hecho · falta el visor |
-| 7 | **P8** | Entrenamiento con FER-2013 | ⬜ ⚠️ revisar accuracy |
+| 5 | **P5** | Arm tracker corregido (bugs 1–4) | ✅ cerrado el 2026-10-19 |
+| 6 | **P6** | Clasificador de emoción con backends intercambiables | 🟡 código hecho · falta el visor (P6.1) |
+| 7 | **P8** | Entrenamiento con FER-2013 | ✅ 58.0 % · falta decidir P8.1 |
 | 8 | **P7** | Integración: captura única + HUD | ⬜ |
 | 9 | **P10** | Panel de control del operador | ⬜ |
 | 10 | **P11** | Servicio de pantalla externa en la Raspberry | ⬜ |
@@ -365,6 +384,9 @@ tesis.
 **Punto de verificación restante:** después de P8, si la accuracy sobre FER-2013
 sale entre 60–70 %, es correcto. Si sale > 90 %, hay un error de partición —
 detenerse y revisar.
+**Pasado el 2026-10-20, por abajo:** 58.0 %. Ni rastro de error de partición
+(la red acierta el 61 % de su propio entrenamiento, y la validación se apartó
+por imagen idéntica); lo que hay es infraajuste de la red del legacy. Ver P8.
 
 *(El punto de control de P2 ya se superó: el brazo oscila en el visor.
 `armR` 18→42, `armRtw` 42→58, 21 Hz, sin recorte por colisión. Verificado con
@@ -2302,7 +2324,189 @@ Commit: "feat: pipeline de teleoperacion integrado"
 
 ---
 
-## PROMPT 8 — Entrenamiento con FER-2013 ⬜
+## PROMPT 8 — Entrenamiento con FER-2013 ✅ **hecho el 2026-10-20**
+
+### Lo hecho el 2026-10-20
+
+`tools/train_fer2013.py`, con los doce puntos del enunciado, y
+`tests/test_train_fer2013.py`. Cada cifra de esta sección sale de su salida o
+de `emotion_model_fer2013.meta.json`, que la guarda entera.
+
+**Los datos: el `fer2013.tar.gz` original, de HuggingFace.** Es el archivo que
+distribuyó la competición de ICML 2013: dentro va `fer2013/fer2013.csv`
+(301 MB) firmado por el usuario `goodfellow` el 2013-07-10, con un README y un
+`.bib` que piden citar **Goodfellow et al. (2013), «Challenges in
+Representation Learning: A report on three machine learning contests»,
+arXiv:1307.0414**. Se baja de una copia en el Hub
+(`DerrickUnleashed/FER-2013`) fijada por **revisión** (`5b1d92d2…`, un commit:
+el archivo no puede cambiar bajo ese enlace) y por **SHA-256**
+(`bdc255c1…3527a44`, el que publica el propio Hub), y se lee sin extraerlo.
+
+| Qué | Medido |
+|---|---|
+| Imágenes | **35 887**: Training 28 709, PublicTest 3 589, PrivateTest 3 589 |
+| Training por clase | Angry 3 995, Disgust 436, Fear 4 097, Happy 7 215, Sad 4 830, Surprise 3 171, Neutral 4 965 |
+| SHA-256 del CSV | `3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b`, el mismo por dos caminos: el del script, al vuelo, y `tar -xzO … \| sha256sum` |
+| Lectura y comprobación | 14 s |
+
+Las diez cifras de las dos primeras filas son las documentadas de FER-2013, y
+el script las exige (`CANONICO`): una copia que no las dé se rechaza. Una
+prueba comprueba además que **rotar una posición los nombres de las clases**
+las descuadra todas, que es lo que ata el orden 0=Angry … 6=Neutral a los datos
+y no a la memoria de quien lo escribió.
+
+**Por qué este archivo y no la biblioteca `datasets`**, que es lo que el
+enunciado parecía pedir: `datasets` y las copias en parquet del Hub traen
+pyarrow y pandas al entorno de operación, que es la trampa del H45 —numpy y
+protobuf están fijados por TensorFlow y MediaPipe—; este CSV se lee con la
+biblioteca estándar y numpy. Y son **los píxeles originales**: las copias en
+carpetas (`train/angry/*.jpg`) los recomprimen en JPEG. Con `--archivo` vale
+cualquier otra copia (la de Kaggle, `icml_face_data.csv`), y pasa por la misma
+comprobación.
+
+**La descarga se reintenta.** El 2026-10-20 el CDN del Hub
+(`us.aws.cdn.hf.co`) rechazó varias conexiones seguidas tras más de 20 s de
+espera, y minutos después bajó los 96 MB en 5.5 s. Se descarga a un `.parcial` que solo se renombra si tamaño y huella
+cuadran, y un archivo con otra huella no se pisa.
+
+**La partición: la oficial, sin rehacerla** (punto 1), con asco y miedo fuera:
+
+| Clase | Entrenamiento | Validación | Prueba (Public + Private) | Peso de clase |
+|---|---|---|---|---|
+| feliz | 6 493 | 722 | 1 774 | 0.670 |
+| triste | 4 347 | 483 | 1 247 | 1.001 |
+| sorprendido | 2 853 | 318 | 831 | 1.525 |
+| neutral | 4 468 | 497 | 1 233 | 0.974 |
+| enojado | 3 596 | 399 | 958 | 1.210 |
+| **total** | **21 757** | **2 419** | **6 043** | |
+
+- **Prueba = PublicTest + PrivateTest**, los 7 178 del enunciado (6 043 con las
+  cinco clases), que no se miran hasta el final. Se dan además por separado.
+- **Validación = el 10 % de Training**, por clase, con la semilla, y **agrupada
+  por imagen idéntica**: FER-2013 tiene fotos repetidas píxel a píxel (H48), y
+  dos copias de la misma a los dos lados serían la fuga del bug 13 en pequeño.
+  Comprobado: 0 huellas compartidas entre entrenamiento y validación.
+- **Pesos de clase** (punto 3): `n / (k · n_c)`, el «balanced» de
+  scikit-learn, sobre el conjunto de entrenamiento. Sin sobremuestreo. La
+  validación se evalúa **sin** pesos: su pérdida es la de la distribución de
+  clases tal como viene, la de la prueba.
+
+**La red** (punto 4): la del legacy entera —tres bloques Conv 3×3 + MaxPool de
+32, 64 y 128 filtros, Dense 128, Dropout 0.5, softmax— con una
+BatchNormalization entre cada convolución y su ReLU, y la convolución sin sesgo
+porque la normalización lo resta. **356 261 parámetros.** Una prueba ata las
+formas de sus núcleos a las del `emotion_model.keras` de 2024. La aumentación
+—volteo horizontal, rotación ±10°, zoom ±10 %, relleno por reflejo— va en una
+envoltura que se usa solo para entrenar: el modelo que se guarda no lleva capas
+aleatorias. Adam 1e-3, lote 64, hasta 150 épocas; EarlyStopping sobre
+`val_loss` con paciencia 20 y restaurando la mejor; ReduceLROnPlateau ×0.5 con
+paciencia 8, hasta 1e-5. **Se fijaron antes de entrenar, y solo se tocó una
+cosa una vez**: las dos paciencias, que empezaron en 4 y 10, por lo que mostró
+la curva de entrenamiento del primer modelo (ver el resultado). Elegir
+hiperparámetros mirando la prueba sería otra fuga.
+
+**Reproducible bit a bit** (punto 5). `keras.utils.set_random_seed(2013)` fija
+Python, numpy y TensorFlow, y `enable_op_determinism` hace deterministas las
+operaciones. Comprobado con dos ensayos idénticos (3 000 imágenes, 3 épocas):
+**los mismos pesos bit a bit** y el mismo historial, salvo la columna de los
+segundos.
+
+**El resultado: 58.0 % en la prueba oficial, por debajo del 60-70 %
+esperado.** Dos entrenamientos, idénticos salvo la paciencia de la tasa de
+aprendizaje, y elegido **por validación**:
+
+| | Paciencia 4 / 10 (descartado) | **Paciencia 8 / 20 (elegido)** |
+|---|---|---|
+| Épocas · la mejor | 67 · 57 | 53 · 33 |
+| `val_loss` de la mejor (**el criterio**) | 1.0551 | **1.0456** |
+| Validación (2 419) | 55.3 % · macro-F1 0.519 | 57.0 % · macro-F1 0.561 |
+| **Prueba oficial (6 043)** | 55.8 % · macro-F1 0.521 | **58.0 % · macro-F1 0.571** |
+| PublicTest / PrivateTest | 56.1 / 55.5 % | 58.4 / 57.6 % |
+| Prueba sin las 438 repetidas en Training (H48) | 54.4 % | 56.5 % |
+| Entrenamiento, sin aumentación (21 757) | 59.8 % | 61.0 % |
+| Prueba volteada · misma predicción (H49) | 56.3 % · 81.7 % | 58.5 % · 77.6 % |
+| Dataset propio, 1 de cada 10 fotos (adelanto de D) | 46.4 % · volteada 54.5 % | 46.2 % · volteada 45.1 % |
+
+Los dos están en el repositorio (`emotion_model_fer2013.*` y
+`emotion_model_fer2013_paciencia4.*`; los `.keras`, fuera de git), con la
+selección escrita en sus metadatos, y los valores por defecto del script son los
+del elegido. `--evaluar MODELO` rehace la partición, exige que la prueba dé
+**exactamente** las métricas guardadas —las dos lo hacen— y añade lo que falte.
+
+*Por qué hubo un segundo entrenamiento, y por qué es legítimo.* El historial
+del primero muestra la pérdida de entrenamiento **aún bajando** (1.27 → 1.20
+entre las épocas 20 y 30) cuando ReduceLROnPlateau empezó a recortar la tasa: con
+BatchNormalization, `val_loss` oscila ±0.1 de una época a otra, y cuatro épocas
+sin un mínimo nuevo pasan por azar. La causa se vio en la curva de
+**entrenamiento**, el cambio se decidió con ella, y la elección se hizo con la
+**validación**. Las cifras de prueba de los dos se reportan: se miraron las
+del primero antes de lanzar el segundo, y se declara.
+
+Por clase, el elegido en la prueba oficial:
+
+| Clase | Precisión | Recall | F1 | Caras | Se confunde sobre todo con |
+|---|---|---|---|---|---|
+| feliz | 0.818 | **0.791** | 0.804 | 1 774 | neutral 7.8 %, triste 6.5 % |
+| triste | 0.367 | 0.551 | 0.441 | 1 247 | enojado 20.0 %, neutral 17.3 % |
+| sorprendido | 0.851 | **0.747** | 0.796 | 831 | enojado 8.4 %, feliz 7.8 % |
+| neutral | 0.433 | **0.269** | 0.332 | 1 233 | **triste 53.1 %** |
+| enojado | 0.481 | 0.481 | 0.481 | 958 | triste 37.4 % |
+
+**Por qué se queda corto, medido:** la red acierta el 61.0 % de sus propias
+imágenes de entrenamiento y el 58.0 % de la prueba. Esa distancia pequeña es
+**infraajuste**: no memoriza, le falta capacidad. Tres capas convolucionales y
+356 261 parámetros son poco para FER-2013; los trabajos que pasan del 65 %
+usan redes de varias veces esa profundidad. Y la confusión que lo domina,
+**neutral → triste**, ya está en el entrenamiento (recall de neutral 0.28
+ahí): es lo que la red aprendió, no un efecto de la prueba.
+
+**No se cambió la arquitectura, a propósito.** El enunciado pide partir de la
+CNN del legacy, y hay una razón de método para respetarlo: el P9 compara el
+modelo propio (A, B) con el de FER-2013 (C, D), y con la **misma red** la
+diferencia se debe solo a los datos. Una red mayor daría mejor C, pero
+mezclaría dos causas. Probarla es decisión del operador (P8.1).
+
+**La verificación, de punta a punta:**
+
+- `keras.saving.load_model` y `model(x, training=False)` sobre `(1, 48, 48, 1)`
+  dan `(1, 5)` (punto 7), y el `KerasBackend` del P6 —con el JSON,
+  `preprocesar_48` sobre los píxeles crudos y su comprobación de softmax—
+  reproduce las probabilidades del entrenamiento en 200 caras de la prueba
+  (diferencia máxima 4.8·10⁻⁷).
+- El orden de clases (punto 8) lo atan tres cosas de fuera: las cifras
+  canónicas **por nombre** de clase (rotar los nombres las descuadra); el patrón
+  por clase —alegría y sorpresa son las dos mejor reconocidas, como en las
+  matrices de confusión publicadas de FER-2013 (⚠️ citar una antes de
+  afirmarlo)—; y las etiquetas del operador, que fijan `feliz` (88 % de sus
+  fotos felices) y descartan las rotaciones (44 % frente a 2-25 %). **Más no
+  pueden fijar** (H50).
+- **Reproducible bit a bit**, comprobado con el conjunto entero:
+  `python tools/train_fer2013.py`, sin opciones y en un proceso nuevo, dio el
+  modelo elegido con **los mismos pesos bit a bit**, las mismas 53 épocas y el
+  mismo historial salvo la columna de segundos. Y las **12 primeras épocas**
+  de los dos entrenamientos coinciden hasta el último decimal; en la 13.ª el
+  primero ya entrena con la tasa a la mitad y el segundo no.
+
+**Para el P7:** cuál de los dos modelos usa el robot es una decisión abierta
+(§3.2, punto 4); se cambia con `TELMEOW_MODEL_PATH`. **Para el P9:** puntos 16
+a 20 de su enunciado.
+
+### Lo que falta
+
+1. **P8.1 — ¿Probar una red mayor?** Es decisión del operador, y se puede
+   tomar con el P9 delante. Lo que hay que saber para decidir:
+   - Con la red del legacy, C = 58.0 % y D ≈ 46 %. Por debajo de lo esperado,
+     pero medido limpio y explicado, y **la comparación del P9 queda pura**:
+     misma red, distintos datos.
+   - Con una red mayor (p. ej. dos convoluciones por bloque, al estilo VGG) lo
+     esperable es 65-70 % en C. D no tiene por qué subir igual: lo que lo frena
+     es la diferencia entre FER-2013 y la cara del operador en su puesto.
+     Costaría otra media hora de CPU por entrenamiento, y la inferencia seguiría
+     cabiendo de sobra a 5 Hz.
+   - Si se prueba, va como **configuración aparte** (otra salida, otros
+     metadatos), sin tocar la elegida, y se elige otra vez por validación.
+
+### Enunciado original
 
 ```
 Necesito reentrenar el clasificador con un dataset público, porque el actual
@@ -2371,6 +2575,10 @@ sospecha de un error en la partición y avísame; no lo reportes como éxito.
     insensible al espejo, que el legacy no es (H43). El clasificador deshace el
     espejo igualmente, así que los dos ven la cara en la orientación de la
     cámara y la comparación es justa.
+    ⚠️ *Corregido al ejecutarlo (H49): el volteo hace que el entrenamiento no
+    favorezca ninguna orientación, pero la red aprendida no es simétrica. Lo
+    que sí se sostiene es lo segundo: el clasificador deshace el espejo y los
+    dos modelos ven la cara como la ve la cámara.*
 
 12. FER-2013 son caras ya recortadas, a 48×48 y en gris: `preprocesar_48` las
     acepta tal cual. En operación las caras salen del Haar, con su encuadre y
@@ -2467,6 +2675,37 @@ Fija semillas en todo. No reentrenes nada aquí.
     Evaluar todo con la cara como la ve la cámara —la del entrenamiento propio
     y la del clasificador en operación— y decirlo en la nota metodológica.
     `tools/medir_emocion.py --backend B` ya da las cuatro variantes de entrada.
+
+--- AÑADIDO EN EL P8 ---
+
+16. C SON CINCO CLASES, NO SIETE. Las cifras de la literatura —65±5 % humano,
+    ~75 % el estado del arte— son con las siete de FER-2013. Quitar asco y
+    miedo quita las dos más difíciles, así que C no se compara con ellas tal
+    cual: decirlo junto a la cifra.
+
+17. LA PRUEBA OFICIAL DE FER-2013 TIENE FUGA (H48): 438 de sus 6 043 imágenes
+    (cinco clases) están repetidas píxel a píxel en Training, y 431 con la
+    misma etiqueta. Reportar C de las dos maneras: sobre la prueba oficial
+    entera, que es la comparable con la literatura, y sin las repetidas
+    (`Particion.repetida`). La diferencia es pequeña pero tiene el mismo signo
+    que la de A y B, y es un buen ejemplo para la nota metodológica: ni la
+    partición oficial de un dataset público está libre de fuga.
+
+18. PublicTest y PrivateTest se reportan también por separado: la literatura
+    suele citar PrivateTest, porque PublicTest se usó como validación en la
+    competición. Aquí ninguna de las dos participó en el entrenamiento —la
+    validación sale de Training—, así que la oficial completa es válida.
+
+19. LOS METADATOS DEL MODELO YA TRAEN C (`emotion_model_fer2013.meta.json`,
+    `"metricas"`), calculada por `train_fer2013.metricas`. El P9 tiene que
+    reproducirla con su propio código a partir del `.keras`: si no da lo
+    mismo, uno de los dos está mal.
+
+20. D se mide con `TELMEOW_MODEL_PATH=emotion_model_fer2013.keras`. **El
+    modelo de FER-2013 NO es insensible al espejo**, aunque se entrenó con
+    volteo (H49): sobre el dataset propio acierta distinto con la cara
+    volteada. D se mide con la cara como la ve la cámara, igual que todo lo
+    demás (punto 15), y la variante volteada se reporta al lado.
 
 Commit: "test: evaluacion comparativa de reconocimiento de emociones"
 ```
@@ -2616,7 +2855,8 @@ especializada en rostros de adultos mayores**. Debe declararse (§3.3).
 
 ## 3.2 Decisiones abiertas
 
-Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
+Quedan **tres**: dos de la v1 —las otras dos se cerraron (§0.6)—, y la del
+modelo de emoción en operación, que abrió el P8.
 
 1. **Ganancia de mapeo operador → robot.** Implementada y configurable
    (`HeadConfig`), con dos valores para el tilt porque las asimetrías del robot
@@ -2664,6 +2904,23 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    Implementado un handoff (`liveTiltPanBuffer`: el gesto toma control temporal
    de pan/tilt y devuelve suavemente a la última posición en vivo, no a home),
    pero **no validado con una persona real**.
+
+4. **Qué modelo de emoción usa el robot en operación** *(abierta por el P8,
+   2026-10-20)*. Hay dos, y cada uno gana en una cosa:
+   - el **propio** (`emotion_model.keras`) conoce la cara de Harold —acierta el
+     99.9 % de su dataset—, pero eso es memorización: no generaliza ni a esa
+     misma cara en espejo (H43), y con otro narrador no hay motivo para que
+     funcione;
+   - el de **FER-2013** (`emotion_model_fer2013.keras`) se entrenó con miles de
+     caras, pero ninguna es la del puesto: otra luz, otro encuadre, y pocas de
+     adultos mayores (§3.3.3).
+
+   Hoy la configuración sigue apuntando al propio, y cambiar es una variable de
+   entorno (`TELMEOW_MODEL_PATH`), no código. **El criterio son las cifras B y
+   D del P9**: B es lo que el propio acierta sin fuga, D lo que el de FER-2013
+   acierta con la cara de Harold en el puesto. Si el narrador de la tesis va a
+   ser siempre Harold, B frente a D decide; si van a ser otros, el propio no
+   tiene con qué defenderse.
 
 ## 3.3 Limitaciones a declarar en el documento
 
@@ -2793,6 +3050,16 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
     brazo lo lleva el codo—, y los gestos en el mismo borde del cuadro los
     sigue el codo. Y el de la zona de reposo, ahora de 35°: los movimientos
     pequeños con el brazo colgando no se transmiten.
+
+15. **El modelo de FER-2013 es la red del legacy, y se queda en el 58 %**
+    (P8). Con cinco clases, en la prueba oficial, y por **infraajuste**: acierta
+    el 61 % de su propio entrenamiento. La cifra no se compara tal cual con la
+    literatura de FER-2013 —65±5 % humano, ~75 % el estado del arte—, que es
+    con siete clases y redes mucho mayores. Se conservó la red para que el P9
+    compare datos y no arquitecturas. Su punto débil es **neutral, que acaba
+    como triste** (recall 0.27), y en la cara del operador reconoce bien
+    alegría y tristeza y mal el resto. Y la prueba oficial tiene un 7.2 % de
+    imágenes repetidas en Training (H48): sin ellas, 56.5 %.
 
 ---
 
@@ -2991,6 +3258,13 @@ Quedan **dos**. Las otras dos de la v1 se cerraron (§0.6).
    - Cada librería descarga sus pesos de GitHub la primera vez, a `~/.deepface`
      y `~/.hsemotion`. Las huellas SHA-256 con que se verificó están en el P6.
 
+9. **FER-2013 se descarga solo, a `fer2013/`** (P8), y no hace falta nada nuevo
+   en `.venv`: es el CSV original y se lee con la biblioteca estándar. El CDN
+   del Hub de HuggingFace a veces tarda más de 20 s en aceptar la conexión; el
+   script reintenta, y si no hay manera se baja a mano y se pasa con
+   `--archivo`. Entrenar cuesta ~30 min de CPU (~28 s por época sin otra
+   carga); con la misma semilla sale el mismo modelo bit a bit.
+
 ## 4.1 La trampa del doble broker
 
 El instalador registra un **servicio con arranque automático** que escucha solo
@@ -3145,9 +3419,36 @@ equivalente en Python puro, sin privilegios de administrador.
   que en el diseño que ya se daba por bueno.
 
 - **«¿Su accuracy de emoción generaliza a otras personas?»**
-  El modelo se entrena con FER-2013 (multi-sujeto), no con el dataset propio.
-  Pero FER-2013 subrepresenta adultos mayores, que son el operador destacado.
-  Declararlo.
+  El modelo propio no: memorizó la cara de su operador (H43). El de FER-2013
+  (P8) se entrenó con miles de caras y se mide sobre una partición oficial,
+  pero FER-2013 subrepresenta adultos mayores, que son el operador destacado.
+  Declararlo. Cuál de los dos usa el robot se decide con el P9 (§3.2, punto 4).
+
+- **«Su modelo de FER-2013 acierta el 58 %. La literatura pasa del 70.»**
+  *(nueva, P8)*
+  Son dos cosas distintas. La literatura usa las siete clases y redes de
+  varios millones de parámetros; aquí son cinco clases y la red de 356 000 del
+  modelo original, a propósito: el capítulo de resultados compara el modelo
+  entrenado con datos propios frente al entrenado con FER-2013, y con la misma
+  red la diferencia se debe solo a los datos. Y está medido por qué se queda
+  ahí: acierta el 61 % de su propio entrenamiento, o sea que no memoriza; le
+  falta capacidad.
+
+- **«¿Cómo sabe que FER-2013 no tiene la misma fuga que su dataset?»**
+  *(nueva, P8)*
+  Porque se midió, y la tiene, aunque menor: el 7.2 % de la prueba oficial
+  está repetida píxel a píxel en el entrenamiento (H48). Se reporta la accuracy
+  con y sin esas imágenes (58.0 frente a 56.5 %), y la validación propia se
+  apartó agrupando las imágenes idénticas.
+
+- **«Entrenó dos modelos. ¿No se quedó con el que mejor daba en la prueba?»**
+  *(nueva, P8)*
+  No: con el de mejor validación, que es el criterio que se fijó antes. El
+  segundo entrenamiento se lanzó porque la curva de **entrenamiento** del
+  primero mostraba que la tasa de aprendizaje se recortaba demasiado pronto, y
+  se declaran las cifras de prueba de los dos. Además el entrenamiento es
+  determinista: con la misma semilla da los mismos pesos bit a bit, así que
+  cualquiera puede reproducirlo.
 
 - **«¿Por qué 6 expresiones si el clasificador emite 5?»**
   CONCENTRADO es un estado manual del operador. El estado por defecto es
@@ -3572,6 +3873,28 @@ con ese formato.
 Modo demo: `python -m telmeow_teleop.emotion_classifier [--backend B]
 [--publish] [--record CSV]`. Las cifras del P6: `python tools/medir_emocion.py
 [--paso 20] [--registro-cabeza calibracion_20260906_integrada.csv]`.
+
+## `tools/train_fer2013.py` (P8)
+
+```python
+import train_fer2013 as tr          # sys.path += tools/, como en las pruebas
+
+datos = tr.leer_fer2013(tr.descargar(PROJECT_ROOT / "fer2013"))  # .tar.gz o .csv
+tr.comprobar_canonico(datos)        # 35 887 · 28 709/3 589/3 589 · las 7 clases de Training
+datos.pixeles (N,48,48) uint8 ; datos.clases (índice FER) ; datos.usos ; datos.sha256_csv
+p = tr.preparar(datos)              # 5 clases; validación 10 % de Training, agrupada por imagen
+p.entrenamiento / p.validacion / p.prueba    # índices sobre datos
+p.etiquetas                         # índice en EMOTION_LABELS por imagen; −1 = asco o miedo
+p.repetida                          # por imagen de la prueba: está idéntica en Training
+tr.a_indices_robot(clases_fer) ; tr.huellas(pixeles) ; tr.a_tensor(pixeles)
+tr.metricas(verdad, prediccion) -> accuracy, macro_f1, accuracy_balanceada, por_clase, confusion
+tr.verificar_guardado(ruta, imagenes, probabilidades)   # Keras y KerasBackend dan lo mismo
+```
+
+`python tools/train_fer2013.py [--archivo CSV] [--semilla N] [--sin-pesos]
+[--limite N --salida X.keras]`. Escribe `emotion_model_fer2013.keras` (fuera de
+git), `.meta.json` y `.historial.csv` (en git). Termina con código 2 si la
+accuracy pasa del 90 %.
 
 ## `publisher.py`
 
@@ -4211,6 +4534,77 @@ Lo que sí deja: **la orientación cambia el resultado de dos de los tres
 backends**, así que el P9 tiene que fijarla y declararla. La del clasificador
 es la de la cámara, que es la del entrenamiento del modelo propio.
 
+## 7.18 El P8: FER-2013 tiene fuga, el volteo no da simetría, y el ancla del operador no alcanza (H48 a H50)
+
+**H48 — La partición oficial de FER-2013 no está libre de fuga.** Medido el
+2026-10-20 sobre el `fer2013.csv` original, comparando las imágenes píxel a
+píxel (huella de sus 2304 bytes, `train_fer2013.huellas`):
+
+| Qué | Medido |
+|---|---|
+| Imágenes / distintas | 35 887 / **34 034** |
+| Grupos de imágenes idénticas | 1 516, con 3 369 imágenes |
+| Grupos que cruzan particiones (Training, PublicTest, PrivateTest) | 557 |
+| Grupos con etiquetas distintas entre sus copias | 57 |
+| Imágenes de un solo color (negras, valor 0) | 12 |
+| **Prueba (cinco clases) repetida en Training (cinco clases)** | **438 de 6 043 = 7.2 %** (PublicTest 217, PrivateTest 221) |
+| … de ellas, con la misma etiqueta | 431 |
+| Training (cinco clases) con otra copia idéntica en Training | 968 |
+
+Es la fuga del bug 13 en pequeño y por otra vía: no son frames vecinos sino,
+probablemente, la misma foto encontrada dos veces por las búsquedas de imágenes
+con que se construyó el dataset (⚠️ comprobar en Goodfellow et al., 2013, cómo
+lo describen antes de afirmarlo). Solo cuenta las copias **exactas**; las casi
+idénticas (otro recorte, otra compresión) no las ve, así que es una cota
+inferior. Consecuencias: la validación del P8 se aparta **por grupos de
+imágenes idénticas** —0 huellas compartidas entre entrenamiento y validación,
+comprobado—, el P8 da la accuracy de la prueba también sin las 438, y el P9
+reporta C de las dos maneras (punto 17). La partición oficial no se rehace:
+es la que permite comparar con la literatura.
+
+**H49 — Entrenar con volteo no hace simétrica a la red.** El enunciado del P8
+(punto 11) daba por hecho que el modelo de FER-2013 sería insensible al
+espejo, y yo lo escribí también en el P9. Medido (`--evaluar`, clave
+`simetria`), sobre la prueba oficial:
+
+| Modelo | Tal cual | Volteada | Misma predicción |
+|---|---|---|---|
+| Paciencia 4 | 55.8 % | 56.3 % | **81.7 %** |
+| Paciencia 8 (elegido) | 58.0 % | 58.5 % | **77.6 %** |
+
+En conjunto, simétrico: la accuracy apenas cambia. Cara a cara, no: **una de
+cada cinco cambia de predicción al voltearla**. La aumentación hace que el
+entrenamiento no favorezca ninguna orientación, pero no obliga a la función
+aprendida a ser par. Con miles de personas los cambios se compensan; con una
+sola, no: sobre el dataset propio el primer modelo pasó del 46.4 al 54.5 % con
+la cara volteada (enojado del 3 al 21 %), y el elegido, del 46.2 al 45.1 % con
+clases que suben y bajan (feliz 87 → 80 %, sorprendido 24 → 34 %). Corregido
+donde se afirmaba (P8 punto 11, P9 punto 20, el docstring de
+`train_fer2013.py`). No cambia nada del pipeline: el clasificador ya clasifica
+la cara como la ve la cámara, que es lo que el P9 fija (punto 15).
+
+**H50 — Las etiquetas del operador no bastan para verificar el orden de clases
+de un modelo que confunde sus caras.** En el P6, el ancla del orden fue el
+nombre de archivo que puso el operador a cada foto: con el modelo propio
+acertaba el 99.9 %, y cualquier permutación lo hundía. Con el de FER-2013
+—46 % sobre esas mismas fotos— se probaron **las 120 permutaciones** del orden:
+
+| Caras | Orden del JSON | Mejor alternativa | Rotaciones |
+|---|---|---|---|
+| 183 (1 de cada 40) | 42.1 % | **44.8 %** (triste ↔ neutral cambiadas) | 1-28 % |
+| 746 (1 de cada 10) | **46.1 %** | 44.9 % | 3-24 % |
+
+Con la muestra pequeña, un orden equivocado cuadra **mejor** que el bueno; con
+la grande, el bueno gana por 1.2 puntos. El modelo confunde en la cara del
+operador triste, neutral y enojado, así que intercambiarlas apenas cambia los
+aciertos. Lo que sí fijan las etiquetas, con margen, es `feliz` (88 %) y que el
+orden no está rotado, y es lo único que la prueba les pide
+(`test_las_etiquetas_del_operador_fijan_feliz_y_descartan_las_rotaciones`). El
+resto del orden lo atan las cifras canónicas por nombre y la verificación por
+el `KerasBackend`. **Es una advertencia para el P6.1 y el P9**: una
+comprobación «de punta a punta» con la cara del operador solo verifica lo que
+el modelo reconoce bien en esa cara.
+
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
@@ -4261,6 +4655,9 @@ es la de la cámara, que es la del entrenamiento del modelo propio.
 | **H45** | **DeepFace no cabe en el entorno de operación** (otra `cv2`, protobuf) y al importarse fija `TF_USE_LEGACY_KERAS=1` y **silencia todos los warnings**. Entorno aparte, `keras` directo y el aviso forzado | P6, P9, §4.0.8, §7.17 |
 | **H47** | **El orden de las detecciones del Haar no es determinista** con varios hilos (mismo conjunto, otro orden, en 16 de 40 imágenes con varias caras): la «primera» del legacy eligió al azar. El clasificador usa la mayor, determinista | P6, P9, §7.17 |
 | **H46** | **DeepFace tampoco es simétrico, y al revés que el modelo propio**: 28 % con la cara como la ve la cámara y 47 % volteada; HSEmotion da lo mismo. La orientación cambia el resultado de dos de tres backends: el P9 la fija y la declara | P6, P9, §7.17 |
+| **H48** | **La prueba oficial de FER-2013 tiene fuga**: 438 de sus 6 043 imágenes (cinco clases) están repetidas píxel a píxel en Training, 431 con la misma etiqueta; el dataset entero tiene 34 034 imágenes distintas de 35 887. Validación agrupada por imagen idéntica, y la accuracy también sin las repetidas | P8, P9 punto 17, §7.18 |
+| **H49** | **Entrenar con volteo no hace simétrica a la red**: el modelo de FER-2013 acierta lo mismo con las caras volteadas, pero cambia de predicción en una de cada cinco (misma predicción 77.6 %). Con una sola persona no se compensa | P8, P9 punto 20, §7.18 |
+| **H50** | **Las etiquetas del operador no bastan para verificar el orden de clases de un modelo que confunde sus caras**: con el de FER-2013, de 120 permutaciones, una equivocada cuadró mejor que la buena con 183 caras. Fijan `feliz` y descartan las rotaciones; el resto lo atan las cifras canónicas | P8, §7.18 |
 | **H37** | **La simetría aproximaba la zona extendida, pero no la medía**: el reflejo `(a, f) ≡ (−a, f ± 180)` falló por un paso de 5° en 6-9 de 18 filas, y en el límite usado prometía 5° de más. Barrida con los detectores del visor (tras reproducir 37/37 filas de agosto); manda lo medido. Unión y motor: 0 choques. El cable, sin CAD, pasa a supuesto declarado | P5.3, §0.5, §3.3.11 |
 
 Los hallazgos H17 a H21 son de la ejecución del **PROMPT 4** y de la

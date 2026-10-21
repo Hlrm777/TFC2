@@ -1,0 +1,241 @@
+{
+  "clases": [
+    "feliz",
+    "triste",
+    "sorprendido",
+    "neutral",
+    "enojado"
+  ],
+  "entrada": [
+    48,
+    48,
+    1
+  ],
+  "preprocesamiento": "FER-2013: caras ya recortadas, 48x48 en gris, /255. En operacion: el de emotion_classifier.preprocesar_48 (Haar de OpenCV, recorte, resize 48x48 sobre BGR, BGR2GRAY, /255), que con una cara de 48x48 en gris da el mismo tensor.",
+  "origen": "tools/train_fer2013.py (PROMPT 8)",
+  "fecha": "2026-10-20T20:39:05",
+  "accuracy": 0.5583319543273209,
+  "advertencia": null,
+  "ensayo": false,
+  "dataset": {
+    "nombre": "FER-2013 (ICML 2013, Challenges in Representation Learning)",
+    "fuente": "https://huggingface.co/datasets/DerrickUnleashed/FER-2013",
+    "revision": "5b1d92d29dea477a4c13af5f928b2baee3744951",
+    "archivo": "fer2013.tar.gz",
+    "sha256_archivo": "bdc255c109a1bbf994e6a7dd02a6f4566eb21beaece7643cd988166ee3527a44",
+    "sha256_csv": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+    "imagenes": 35887,
+    "imagenes_de_un_solo_color": 12
+  },
+  "clases_fer2013": {
+    "Angry": "enojado",
+    "Disgust": null,
+    "Fear": null,
+    "Happy": "feliz",
+    "Sad": "triste",
+    "Surprise": "sorprendido",
+    "Neutral": "neutral"
+  },
+  "particion": {
+    "prueba": "oficial: PublicTest + PrivateTest, intacta",
+    "validacion": "0.1 de Training por clase, semilla 2013, agrupada por imagen identica",
+    "huella": "785315cac99b9f5044216ff419b3be0ede4a81a18ba87110f7b6255f0bbed7c6",
+    "por_clase": {
+      "entrenamiento": {
+        "feliz": 6493,
+        "triste": 4347,
+        "sorprendido": 2853,
+        "neutral": 4468,
+        "enojado": 3596
+      },
+      "validacion": {
+        "feliz": 722,
+        "triste": 483,
+        "sorprendido": 318,
+        "neutral": 497,
+        "enojado": 399
+      },
+      "prueba": {
+        "feliz": 1774,
+        "triste": 1247,
+        "sorprendido": 831,
+        "neutral": 1233,
+        "enojado": 958
+      }
+    },
+    "training_repetidas_en_training": 968,
+    "prueba_repetidas_en_training": 438
+  },
+  "pesos_de_clase": {
+    "feliz": 0.6701678730941013,
+    "triste": 1.00101219231654,
+    "sorprendido": 1.5252015422362426,
+    "neutral": 0.9739033124440466,
+    "enojado": 1.210066740823137
+  },
+  "entrenamiento": {
+    "epocas": 67,
+    "mejor_epoca": 57,
+    "paro_antes": true,
+    "val_loss": 1.0550689697265625,
+    "val_accuracy": 0.5531211495399475,
+    "tasa_final": 9.999999747378752e-06,
+    "segundos": 2197.4551374000002,
+    "semilla": 2013,
+    "lote": 64,
+    "tasa_inicial": 0.001,
+    "epocas_maximas": 100,
+    "optimizador": "adam",
+    "perdida": "sparse_categorical_crossentropy",
+    "early_stopping": {
+      "monitor": "val_loss",
+      "paciencia": 10,
+      "restaura_la_mejor": true
+    },
+    "reduce_lr": {
+      "monitor": "val_loss",
+      "factor": 0.5,
+      "paciencia": 4,
+      "minima": 1e-05
+    },
+    "aumentacion": {
+      "volteo": "horizontal",
+      "rotacion_grados": 10.0,
+      "zoom": 0.1,
+      "relleno": "reflect"
+    },
+    "arquitectura": "legacy (Conv 32/64/128 3x3 + MaxPool 2x2, Dense 128, Dropout 0.5, softmax) con BatchNormalization tras cada convolucion",
+    "parametros": 356261,
+    "historial": "emotion_model_fer2013_paciencia4.historial.csv"
+  },
+  "metricas": {
+    "prueba": {
+      "n": 6043,
+      "accuracy": 0.5583319543273209,
+      "macro_f1": 0.5206578412898608,
+      "accuracy_balanceada": 0.5405793506146137,
+      "por_clase": {
+        "feliz": {
+          "precision": 0.8453105968331304,
+          "recall": 0.7824126268320181,
+          "f1": 0.8126463700234192,
+          "soporte": 1774
+        },
+        "triste": {
+          "precision": 0.36049192928516527,
+          "recall": 0.7522052927024859,
+          "f1": 0.4873993244998701,
+          "soporte": 1247
+        },
+        "sorprendido": {
+          "precision": 0.822477650063857,
+          "recall": 0.7749699157641395,
+          "f1": 0.7980173482032218,
+          "soporte": 831
+        },
+        "neutral": {
+          "precision": 0.32020997375328086,
+          "recall": 0.0989456609894566,
+          "f1": 0.15117719950433706,
+          "soporte": 1233
+        },
+        "enojado": {
+          "precision": 0.4440944881889764,
+          "recall": 0.29436325678496866,
+          "f1": 0.3540489642184557,
+          "soporte": 958
+        }
+      },
+      "confusion": [
+        [
+          1388,
+          132,
+          43,
+          124,
+          87
+        ],
+        [
+          66,
+          938,
+          31,
+          105,
+          107
+        ],
+        [
+          39,
+          54,
+          644,
+          7,
+          87
+        ],
+        [
+          97,
+          921,
+          21,
+          122,
+          72
+        ],
+        [
+          52,
+          557,
+          44,
+          23,
+          282
+        ]
+      ]
+    },
+    "public_test": {
+      "n": 3037,
+      "accuracy": 0.5614092854790912,
+      "macro_f1": 0.5210309892522295,
+      "accuracy_balanceada": 0.5400649217529463
+    },
+    "private_test": {
+      "n": 3006,
+      "accuracy": 0.5552228875582169,
+      "macro_f1": 0.5204086415675062,
+      "accuracy_balanceada": 0.541274659050187
+    },
+    "prueba_sin_repetidas": {
+      "n": 5605,
+      "accuracy": 0.543621766280107,
+      "macro_f1": 0.5074071488626452,
+      "accuracy_balanceada": 0.5272052461102653
+    },
+    "validacion": {
+      "n": 2419,
+      "accuracy": 0.5531211244315833,
+      "macro_f1": 0.5194563763659317,
+      "accuracy_balanceada": 0.537122130515366
+    },
+    "simetria": {
+      "accuracy": 0.5583319543273209,
+      "accuracy_volteada": 0.5627999338077114,
+      "misma_prediccion": 0.817309283468476
+    },
+    "entrenamiento": {
+      "n": 21757,
+      "accuracy": 0.5980603943558395,
+      "macro_f1": 0.5667903104501987,
+      "accuracy_balanceada": 0.5893733508388401
+    }
+  },
+  "versiones": {
+    "python": "3.12.1",
+    "tensorflow": "2.16.1",
+    "keras": "3.15.1",
+    "numpy": "1.26.4",
+    "opencv": "4.10.0",
+    "procesador": "Intel64 Family 6 Model 165 Stepping 2, GenuineIntel",
+    "sistema": "Windows-11-10.0.26200-SP0"
+  },
+  "verificacion": {
+    "forma": [
+      1,
+      5
+    ],
+    "imagenes": 200,
+    "max_dif": 8.642673492431641e-07
+  },
+  "seleccion": "DESCARTADO (se conserva como evidencia). Dos entrenamientos identicos salvo la paciencia de ReduceLROnPlateau (4 y 8) y de EarlyStopping (10 y 20). El de paciencia 4 recortaba la tasa con la perdida de entrenamiento aun bajando (visto en su historial, no en la prueba). Se elige por VALIDACION: val_loss 1.0456 (paciencia 8) frente a 1.0551 (paciencia 4). Las metricas de prueba de los dos se reportan."
+}

@@ -1,5 +1,7 @@
 # Datasets y modelos pesados
 emotions_dataset/
+# FER-2013, que tools/train_fer2013.py descarga (fijado por revision y SHA-256)
+fer2013/
 *.keras
 *.h5
 *.dat

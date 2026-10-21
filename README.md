@@ -124,6 +124,26 @@ Sin ellos, el modo demo del clasificador (`python -m
 telmeow_teleop.emotion_classifier`) sigue funcionando y la tecla `b` se salta
 los backends que no están.
 
+### Modelo de emoción entrenado con FER-2013
+
+El modelo propio se entrenó con fuga de datos (frames consecutivos de una sola
+persona a los dos lados de la partición). [`tools/train_fer2013.py`](tools/train_fer2013.py)
+entrena la misma red con FER-2013 y su partición oficial: descarga el
+`fer2013.tar.gz` original (96 MB, fijado por revisión y SHA-256) a `fer2013/`,
+fuera de git, y escribe `emotion_model_fer2013.keras` con sus metadatos y su
+historial. En CPU tarda alrededor de media hora, y con la misma semilla da los
+mismos pesos bit a bit.
+
+```bash
+python tools/train_fer2013.py
+```
+
+El clasificador lo usa en vez del propio con:
+
+```bash
+$env:TELMEOW_MODEL_PATH="emotion_model_fer2013.keras"
+```
+
 ---
 
 ## Configuración del broker
@@ -326,11 +346,13 @@ por segundo cuando solo le interesa uno cada varios segundos.
 │   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/#
 │   ├── dev_broker.py   # broker MQTT sin privilegios de administrador
 │   ├── list_cameras.py # qué cámaras hay y qué resoluciones admiten
+│   ├── train_fer2013.py # entrenamiento con FER-2013 y su partición oficial (P8)
 │   └── medir_emocion.py, analizar_registro*.py, ...  # las cifras del plan
 ├── tests/              # pytest, sin broker ni cámara
 ├── legacy/             # los scripts originales, intactos
 ├── telmeow_viewer/     # el visor 3D y sus STL
 ├── emotion_model.meta.json   # orden de clases del modelo propio
+├── emotion_model_fer2013.meta.json, .historial.csv   # el de FER-2013 (el .keras no va en git)
 ├── mosquitto.conf
 └── requirements.txt / requirements-dev.txt / requirements-benchmark.txt
 ```

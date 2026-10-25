@@ -398,6 +398,44 @@ def test_la_red_es_la_del_legacy_con_batchnorm():
     assert [c.rate for c in modelo.layers if type(c).__name__ == "Dropout"] == [0.5]
 
 
+@pytest.mark.parametrize("arquitectura", ["vgg", "vgg_sin_dropout"])
+def test_las_candidatas_del_p8_1_son_mayores_y_solo_difieren_en_el_dropout(arquitectura):
+    modelo = tr.construir_modelo(arquitectura=arquitectura)
+    assert tuple(modelo.input_shape[1:]) == (48, 48, 1)
+    assert tuple(modelo.output_shape[1:]) == (len(EMOTION_LABELS),)
+    assert modelo.layers[-1].get_config()["activation"] == "softmax"
+    convs = [c for c in modelo.layers if type(c).__name__ == "Conv2D"]
+    assert [c.filters for c in convs] == [32, 32, 64, 64, 128, 128, 256, 256]
+    assert {c.get_config()["padding"] for c in convs} == {"same"}
+    assert modelo.count_params() == 1_765_925               # 5 veces la legacy
+    tipos = [type(c).__name__ for c in modelo.layers]
+    assert not [t for t in tipos if t.startswith("Random")]
+    abandono = [c.rate for c in modelo.layers if type(c).__name__ == "Dropout"]
+    assert abandono == ([0.25] * 4 + [0.5] if arquitectura == "vgg" else [0.5])
+
+
+def test_una_arquitectura_desconocida_se_rechaza():
+    with pytest.raises(ValueError, match="arquitectura desconocida"):
+        tr.construir_modelo(arquitectura="resnet")
+
+
+def test_cada_arquitectura_se_guarda_en_su_archivo_y_ninguna_pisa_el_elegido():
+    assert tr.salida_por_defecto("legacy") == ENTRENADO
+    otras = {tr.salida_por_defecto(a) for a in tr.ARQUITECTURAS if a != "legacy"}
+    assert ENTRENADO not in otras and len(otras) == len(tr.ARQUITECTURAS) - 1
+    assert tr.salida_por_defecto("vgg").name == "emotion_model_fer2013_vgg.keras"
+
+
+def test_una_red_vgg_guardada_la_carga_el_backend_del_p6(tmp_path):
+    ruta = tmp_path / "vgg.keras"
+    tr.construir_modelo(arquitectura="vgg").save(ruta)
+    tr.escribir_metadatos(ruta, {"clases": list(EMOTION_LABELS)})
+    backend = KerasBackend(ruta)                 # comprueba entrada 48x48x1 y softmax
+    d = backend.distribucion(np.full((48, 48), 128, np.uint8))
+    assert backend.clases == EMOTION_LABELS
+    assert sum(d.probabilidades.values()) == pytest.approx(1.0, abs=1e-5)
+
+
 @pytest.mark.skipif(not LEGACY.is_file(), reason="emotion_model.keras no está (vive fuera de git)")
 def test_las_capas_con_pesos_tienen_las_formas_del_modelo_legacy():
     """Atado al ``.keras`` legacy, el que se entrenó en 2024: mismos núcleos de
@@ -545,8 +583,9 @@ def test_reevaluar_exige_las_metricas_guardadas_y_anade_lo_que_falta(tmp_path, m
     assert tr.reevaluar(ruta, datos, 0.1) == 1
 
 
-def test_un_ensayo_no_pisa_el_modelo_de_verdad(capsys):
-    assert tr.main(["--limite", "100"]) == 1
+@pytest.mark.parametrize("arquitectura", sorted(tr.ARQUITECTURAS))
+def test_un_ensayo_no_pisa_el_modelo_de_verdad(capsys, arquitectura):
+    assert tr.main(["--limite", "100", "--arquitectura", arquitectura]) == 1
     assert "no pisa" in capsys.readouterr().out
 
 
@@ -580,6 +619,62 @@ def test_el_modelo_elegido_es_el_de_mejor_validacion():
     e = elegido["entrenamiento"]
     assert (e["semilla"], e["early_stopping"]["paciencia"], e["reduce_lr"]["paciencia"],
             e["epocas_maximas"]) == (tr.SEMILLA, tr.PACIENCIA, tr.PACIENCIA_TASA, tr.EPOCAS)
+    assert e["arquitectura"] == tr.ARQUITECTURAS["legacy"]
+
+
+VGG = PROJECT_ROOT / "emotion_model_fer2013_vgg.keras"
+
+
+def test_la_red_mayor_se_eligio_por_validacion_y_no_toca_el_modelo_del_p8():
+    """P8.1: dos candidatas fijadas antes de entrenar, todo lo demás igual al
+    modelo del P8 (semilla, partición, paciencias), y elegida la de mejor
+    validación. Los metadatos están en git aunque los .keras no."""
+    elegida = leer_metadatos(ruta_metadatos(VGG))
+    descartada = leer_metadatos(PROJECT_ROOT / "emotion_model_fer2013_vgg_sin_dropout.meta.json")
+    p8 = leer_metadatos(ruta_metadatos(ENTRENADO))
+    assert elegida["entrenamiento"]["arquitectura_id"] == "vgg"
+    assert descartada["entrenamiento"]["arquitectura_id"] == "vgg_sin_dropout"
+    assert elegida["entrenamiento"]["val_loss"] < descartada["entrenamiento"]["val_loss"]
+    assert elegida["seleccion"].startswith("ELEGIDO") and descartada["seleccion"].startswith("DESCARTADO")
+    for m in (elegida, descartada):
+        assert m["particion"]["huella"] == p8["particion"]["huella"]
+        for clave in ("semilla", "lote", "tasa_inicial", "epocas_maximas", "early_stopping", "reduce_lr",
+                      "aumentacion"):
+            assert m["entrenamiento"][clave] == p8["entrenamiento"][clave], clave
+    assert p8["entrenamiento"]["arquitectura"] == tr.ARQUITECTURAS["legacy"]
+    assert 0.6 < elegida["accuracy"] < tr.UMBRAL_SOSPECHA
+
+
+@pytest.mark.skipif(not VGG.is_file(), reason="emotion_model_fer2013_vgg.keras no está (vive fuera de git)")
+@pytest.mark.skipif(not (PROJECT_ROOT / "emotions_dataset").is_dir(),
+                    reason="emotions_dataset/ no está (vive fuera de git)")
+def test_con_la_red_mayor_las_etiquetas_del_operador_fijan_el_orden_entero():
+    """Con la red mayor el ancla del operador vuelve a servir entera (al revés
+    que con la legacy, H50): de las 120 permutaciones del orden de clases, la
+    del JSON es la que más cuadra con sus etiquetas. Medido el 2026-10-24 con
+    1 de cada 20 fotos: 58.8 % frente a 51.5 % de la mejor alternativa."""
+    import itertools
+
+    from telmeow_teleop.emotion_classifier import detectar_rostro
+
+    backend = KerasBackend(VGG)
+    cascade = cargar_cascade()
+    salidas, verdad = [], []
+    for archivo in sorted(a for a in (PROJECT_ROOT / "emotions_dataset").glob("*.jpg")
+                          if a.name.split("_")[0] in EMOTION_LABELS)[::20]:
+        img = cv2.imread(str(archivo))
+        rect = detectar_rostro(img, cascade)
+        if rect is None:
+            continue
+        x, y, w, h = rect
+        d = backend.distribucion(img[y:y + h, x:x + w])
+        salidas.append(int(np.argmax([d.probabilidades[c] for c in backend.clases])))
+        verdad.append(EMOTION_LABELS.index(archivo.name.split("_")[0]))
+    salidas, verdad = np.array(salidas), np.array(verdad)
+    bien = np.mean(salidas == verdad)
+    otras = [np.mean(np.array(p)[salidas] == verdad)
+             for p in itertools.permutations(range(5)) if p != tuple(range(5))]
+    assert bien > max(otras) + 0.03
 
 
 def test_feliz_y_sorprendido_son_las_que_mejor_reconoce_en_fer2013():

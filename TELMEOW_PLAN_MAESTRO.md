@@ -118,7 +118,7 @@ cambia respecto al plan original.
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
 | **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · falta verlo con el operador en el visor (P6.1) | |
-| **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · ¿probar una red mayor? (P8.1) | `675b9fe` |
+| **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ⬜ | |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
@@ -2516,8 +2516,9 @@ a 20 de su enunciado.
 
 ### Lo que falta
 
-1. **P8.1 — ¿Probar una red mayor?** Es decisión del operador, y se puede
-   tomar con el P9 delante. Lo que hay que saber para decidir:
+1. ~~**P8.1 — ¿Probar una red mayor?**~~ — **hecho el 2026-10-24**, a
+   petición del operador: ver la sección siguiente. Lo que se escribió antes de
+   hacerlo: Lo que hay que saber para decidir:
    - Con la red del legacy, C = 58.0 % y D ≈ 46 %. Por debajo de lo esperado,
      pero medido limpio y explicado, y **la comparación del P9 queda pura**:
      misma red, distintos datos.
@@ -2528,6 +2529,78 @@ a 20 de su enunciado.
      cabiendo de sobra a 5 Hz.
    - Si se prueba, va como **configuración aparte** (otra salida, otros
      metadatos), sin tocar la elegida, y se elige otra vez por validación.
+
+### P8.1 — La red mayor ✅ **hecho el 2026-10-24** · 73.6 % en la prueba oficial
+
+Dos candidatas, **fijadas antes de entrenarlas** y con todo lo demás idéntico
+al modelo del P8 —semilla, partición, aumentación, pesos de clase, paciencias—,
+y elegida por validación. `python tools/train_fer2013.py --arquitectura vgg`
+(o `vgg_sin_dropout`); cada una se guarda en su propio archivo, y una prueba
+exige que ninguna pise `emotion_model_fer2013.keras`, que **no se tocó**: la
+legacy sigue dando sus mismos pesos iniciales con la misma semilla.
+
+La red, al estilo VGG (Simonyan y Zisserman, 2015 — ⚠️ comprobar la cita): lo
+que le faltaba a la legacy era profundidad y resolución. Cuatro bloques de
+**dos** convoluciones 3×3 con relleno `same` (32, 64, 128 y 256 filtros), cada
+una con su BatchNormalization, MaxPool 2×2 tras cada bloque, Dense 256,
+Dropout 0.5 y softmax: **1 765 925 parámetros**, cinco veces la legacy. Las
+dos candidatas difieren solo en un Dropout 0.25 tras cada bloque, que era la
+duda: con él podía volver a quedarse corta; sin él, memorizar.
+
+| | Legacy (P8, elegido) | **`vgg` (elegida)** | `vgg_sin_dropout` |
+|---|---|---|---|
+| `val_loss` de la mejor época (**el criterio**) | 1.0456 | **0.7357** | 0.8205 |
+| Épocas · la mejor | 53 · 33 | 71 · 51 | 49 · 29 |
+| Tiempo de entrenamiento (CPU, prioridad baja) | 32 min | 137 min | 106 min |
+| Validación (2 419) | 57.0 % | 72.6 % | 70.6 % |
+| **Prueba oficial (6 043)** | 58.0 % · macro-F1 0.571 | **73.6 % · macro-F1 0.730** | 70.6 % · macro-F1 0.694 |
+| PublicTest / PrivateTest | 58.4 / 57.6 % | 72.4 / **74.8 %** | 69.8 / 71.3 % |
+| Sin las 438 repetidas (H48) | 56.5 % | 72.2 % | 69.1 % |
+| Entrenamiento sin aumentación | 61.0 % | 81.3 % | 77.9 % |
+| Volteada · misma predicción (H49) | 58.5 % · 77.6 % | 73.2 % · 86.6 % | 70.5 % · 84.9 % |
+| Dataset propio, 1 de cada 10 (adelanto de D) | 46.2 % | **56.0 %** · volteada 52.4 % | — |
+| Inferencia por cara, `model(x)` | 10-12 ms | **25 ms** | 25 ms |
+
+**Lo que dice.** El infraajuste del P8 era de capacidad, y esta red lo
+resuelve: llega al **73.6 %** con cinco clases, y la distancia entre su
+entrenamiento (81 %) y su prueba (74 %) ya es la de una red que aprende y
+empieza a memorizar, no la de una que no da más de sí. El Dropout por bloque
+ayudó (0.7357 frente a 0.8205 de `val_loss`) en vez de frenar. **La confusión
+neutral → triste del P8 casi desaparece** (de 53 a 23 %), y todas las clases
+pasan del 59 % de recall:
+
+| Clase | Precisión | Recall | F1 | Se confunde sobre todo con |
+|---|---|---|---|---|
+| feliz | 0.902 | 0.837 | 0.868 | neutral 6.7 % |
+| triste | 0.586 | 0.690 | 0.634 | neutral 17.9 % |
+| sorprendido | 0.839 | 0.869 | 0.853 | enojado 4.8 % |
+| neutral | 0.637 | 0.659 | 0.648 | triste 22.9 % |
+| enojado | 0.716 | 0.594 | 0.649 | triste 23.3 % |
+
+**Sobre la cara del operador, el fallo cambia de lado.** 56.0 % de sus fotos
+(la legacy, 46.2 %), pero **su alegría casi no la ve**: 119 de 153 caras
+felices salen neutral, y la legacy acertaba el 87 % de ellas. Por clase:
+neutral 86 %, enojado 70 %, triste 64 %, sorprendido 43 %, feliz 18 %. La
+sonrisa posada del dataset propio no se parece a las de FER-2013; es
+exactamente el domain gap que mide D, y el P9 lo reportará por clase.
+
+**El ancla del operador vuelve a servir entera** (al revés que con la legacy,
+H50): de las 120 permutaciones del orden de clases, la del JSON es la que más
+cuadra con sus etiquetas —56.4 % frente a 50.4 % de la mejor alternativa con
+746 caras; 58.8 frente a 51.5 % con 371, que es lo que exige una prueba—. Con
+un modelo que distingue las clases en su cara, sus etiquetas fijan el orden.
+
+**La selección y lo que no se hizo.** Se miraron las cifras de prueba de la
+legacy antes de proponer esta red, y se declara; la red se fijó por lo que
+mostraba el entrenamiento (infraajuste), no por la prueba, y entre las dos
+candidatas eligió la validación. No se probaron más tamaños ni más
+hiperparámetros: cada candidata cuesta dos horas de CPU, y cada prueba más
+sería otra oportunidad de elegir por azar.
+
+**Para el P7:** si se usa esta red, la inferencia cuesta **25 ms** en vez de
+10-12, más los ~20 del Haar, cada 200 ms: el bloque de emoción pasa a ~45 ms y
+hace tardío uno de cada seis frames del bucle único con más motivo; el hilo
+aparte del punto 16 deja de ser opcional. **Para el P9:** punto 21.
 
 ### Enunciado original
 
@@ -2729,6 +2802,16 @@ Fija semillas en todo. No reentrenes nada aquí.
     volteo (H49): sobre el dataset propio acierta distinto con la cara
     volteada. D se mide con la cara como la ve la cámara, igual que todo lo
     demás (punto 15), y la variante volteada se reporta al lado.
+
+--- AÑADIDO EN EL P8.1 ---
+
+21. HAY DOS MODELOS DE FER-2013, Y LOS DOS VAN AL P9: el de la red legacy
+    (`emotion_model_fer2013.keras`, 58.0 %) y el de la red mayor
+    (`emotion_model_fer2013_vgg.keras`, 73.6 %). C y D se reportan para los
+    dos. Con la legacy, la comparación con A y B es de datos a igual red; con
+    la mayor, es la del mejor modelo que se tiene. Así salen las dos lecturas
+    sin elegir una a priori, y la diferencia entre los dos C es lo que aporta
+    la arquitectura.
 
 Commit: "test: evaluacion comparativa de reconocimiento de emociones"
 ```
@@ -2936,7 +3019,10 @@ modelo de emoción en operación, que abrió el P8.
      funcione;
    - el de **FER-2013** (`emotion_model_fer2013.keras`) se entrenó con miles de
      caras, pero ninguna es la del puesto: otra luz, otro encuadre, y pocas de
-     adultos mayores (§3.3.3).
+     adultos mayores (§3.3.3);
+   - el de **FER-2013 con la red mayor** (`emotion_model_fer2013_vgg.keras`,
+     P8.1): 73.6 % en FER-2013 y 56 % sobre las fotos de Harold, pero casi no
+     ve su alegría, y cuesta 25 ms por cara en vez de 10-12.
 
    Hoy la configuración sigue apuntando al propio, y cambiar es una variable de
    entorno (`TELMEOW_MODEL_PATH`), no código. **El criterio son las cifras B y
@@ -3075,7 +3161,7 @@ modelo de emoción en operación, que abrió el P8.
     pequeños con el brazo colgando no se transmiten.
 
 15. **El modelo de FER-2013 es la red del legacy, y se queda en el 58 %**
-    (P8). Con cinco clases, en la prueba oficial, y por **infraajuste**: acierta
+    (P8). *(Con la red mayor del P8.1, 73.6 %: ver más abajo en este punto.)* Con cinco clases, en la prueba oficial, y por **infraajuste**: acierta
     el 61 % de su propio entrenamiento. La cifra no se compara tal cual con la
     literatura de FER-2013 —65±5 % humano, ~75 % el estado del arte—, que es
     con siete clases y redes mucho mayores. Se conservó la red para que el P9
@@ -3083,6 +3169,9 @@ modelo de emoción en operación, que abrió el P8.
     como triste** (recall 0.27), y en la cara del operador reconoce bien
     alegría y tristeza y mal el resto. Y la prueba oficial tiene un 7.2 % de
     imágenes repetidas en Training (H48): sin ellas, 56.5 %.
+    **Con la red mayor (P8.1): 73.6 %** con cinco clases —sigue sin ser la
+    cifra de siete clases de la literatura—, y sobre la cara del operador falla
+    al revés: ve neutral casi todo, su alegría incluida.
 
 ---
 

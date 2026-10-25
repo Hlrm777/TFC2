@@ -539,35 +539,89 @@ def a_tensor(pixeles: np.ndarray) -> np.ndarray:
 # --------------------------------------------------------------------------
 
 
-def construir_modelo(n_clases: int = len(EMOTION_LABELS)):
-    """La CNN del legacy con una BatchNormalization tras cada convolución.
+#: Las redes que sabe construir ``construir_modelo``, con la descripción que va
+#: a los metadatos. ``legacy`` es la del modelo propio y la del modelo elegido
+#: del P8; las otras son las candidatas del P8.1, fijadas ANTES de entrenarlas.
+ARQUITECTURAS: dict[str, str] = {
+    "legacy": ("legacy (Conv 32/64/128 3x3 + MaxPool 2x2, Dense 128, Dropout 0.5, "
+               "softmax) con BatchNormalization tras cada convolucion"),
+    "vgg": ("estilo VGG: 4 bloques de 2 Conv 3x3 'same' (32/64/128/256) con "
+            "BatchNormalization, MaxPool 2x2 y Dropout 0.25 por bloque; Dense 256, "
+            "Dropout 0.5, softmax"),
+    "vgg_sin_dropout": ("estilo VGG como 'vgg' pero sin el Dropout de cada bloque "
+                        "(solo el 0.5 de la cabeza)"),
+}
 
-    Legacy: tres bloques Conv(3×3, ReLU) + MaxPool(2×2) de 32, 64 y 128
+
+def construir_modelo(n_clases: int = len(EMOTION_LABELS), arquitectura: str = "legacy"):
+    """La red, con entrada 48×48×1 y salida softmax en todas las arquitecturas.
+
+    ``legacy``: la CNN del legacy con una BatchNormalization tras cada
+    convolución. Tres bloques Conv(3×3, ReLU) + MaxPool(2×2) de 32, 64 y 128
     filtros, Flatten, Dense 128 ReLU, Dropout 0.5 y softmax. Se conserva entera
     —mismos filtros, mismo relleno ``valid``, misma cabeza— y solo se añade la
     normalización entre cada convolución y su ReLU. La convolución va sin sesgo
     porque la normalización lo resta: sería un parámetro que no hace nada.
+
+    ``vgg`` y ``vgg_sin_dropout`` (P8.1): la legacy se quedó corta para
+    FER-2013 —acierta el 61 % de su propio entrenamiento: infraajuste—, y lo
+    que se le da es profundidad y resolución, al estilo de Simonyan y
+    Zisserman (2015): dos convoluciones por bloque en vez de una, un cuarto
+    bloque de 256 filtros, y relleno ``same`` para que el mapa no encoja más que
+    por los MaxPool (48 → 24 → 12 → 6 → 3). La cabeza crece a 256. Las dos
+    difieren solo en el Dropout 0.25 tras cada bloque, que es la duda de una
+    red con 1.8 millones de parámetros sobre 21 757 imágenes: con él puede
+    volver a infraajustar; sin él, memorizar. Se entrenan las dos y se elige
+    por validación.
 
     Termina en softmax, que el ``KerasBackend`` exige (P8, punto 10).
     """
     import keras
     from keras import layers
 
+    if arquitectura not in ARQUITECTURAS:
+        raise ValueError(f"arquitectura desconocida {arquitectura!r}; válidas: {tuple(ARQUITECTURAS)}")
     capas = [keras.Input((LADO, LADO, 1))]
-    for filtros in (32, 64, 128):
-        capas += [
-            layers.Conv2D(filtros, (3, 3), use_bias=False),
-            layers.BatchNormalization(),
-            layers.Activation("relu"),
-            layers.MaxPooling2D((2, 2)),
-        ]
+    if arquitectura == "legacy":
+        for filtros in (32, 64, 128):
+            capas += [
+                layers.Conv2D(filtros, (3, 3), use_bias=False),
+                layers.BatchNormalization(),
+                layers.Activation("relu"),
+                layers.MaxPooling2D((2, 2)),
+            ]
+        cabeza = 128
+    else:
+        for filtros in (32, 64, 128, 256):
+            for _ in range(2):
+                capas += [
+                    layers.Conv2D(filtros, (3, 3), padding="same", use_bias=False),
+                    layers.BatchNormalization(),
+                    layers.Activation("relu"),
+                ]
+            capas.append(layers.MaxPooling2D((2, 2)))
+            if arquitectura == "vgg":
+                capas.append(layers.Dropout(0.25))
+        cabeza = 256
     capas += [
         layers.Flatten(),
-        layers.Dense(128, activation="relu"),
+        layers.Dense(cabeza, activation="relu"),
         layers.Dropout(0.5),
         layers.Dense(n_clases, activation="softmax"),
     ]
-    return keras.Sequential(capas, name="emocion_fer2013")
+    return keras.Sequential(capas, name="emocion_fer2013" if arquitectura == "legacy"
+                            else f"emocion_fer2013_{arquitectura}")
+
+
+def salida_por_defecto(arquitectura: str) -> Path:
+    """Dónde se guarda cada arquitectura si no se dice otra cosa.
+
+    La ``legacy`` es el modelo elegido del P8 (``emotion_model_fer2013.keras``);
+    las demás van a su propio archivo, para que entrenarlas no lo pise nunca.
+    """
+    if arquitectura == "legacy":
+        return PROJECT_ROOT / "emotion_model_fer2013.keras"
+    return PROJECT_ROOT / f"emotion_model_fer2013_{arquitectura}.keras"
 
 
 def construir_aumentacion(semilla: int = SEMILLA):
@@ -920,7 +974,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="carpeta donde se descarga FER-2013 (fuera de git)")
     parser.add_argument("--archivo", type=Path,
                         help="usar esta copia (.csv o .tar.gz) en vez de descargar")
-    parser.add_argument("--salida", type=Path, default=PROJECT_ROOT / "emotion_model_fer2013.keras")
+    parser.add_argument("--arquitectura", choices=tuple(ARQUITECTURAS), default="legacy",
+                        help="la red; 'legacy' es la del modelo elegido del P8")
+    parser.add_argument("--salida", type=Path,
+                        help="dónde guardar el modelo; por defecto, el archivo de su arquitectura")
     parser.add_argument("--semilla", type=int, default=SEMILLA)
     parser.add_argument("--fraccion-validacion", type=float, default=FRACCION_VALIDACION)
     parser.add_argument("--epocas", type=int, default=EPOCAS)
@@ -937,8 +994,9 @@ def main(argv: list[str] | None = None) -> int:
                              "sus métricas guardadas y añadir a sus metadatos lo que falte")
     args = parser.parse_args(argv)
 
-    salida = args.salida.resolve()
-    if args.limite is not None and salida == (PROJECT_ROOT / "emotion_model_fer2013.keras").resolve():
+    salida = (args.salida or salida_por_defecto(args.arquitectura)).resolve()
+    oficiales = {salida_por_defecto(a).resolve() for a in ARQUITECTURAS}
+    if args.limite is not None and salida in oficiales:
         print("Un ensayo con --limite no pisa el modelo de verdad: indica otra --salida.")
         return 1
 
@@ -984,7 +1042,7 @@ def main(argv: list[str] | None = None) -> int:
     fijar_semillas(args.semilla)
     # Solo entrenamiento y validación: la prueba no se toca hasta evaluar().
     x = {n: a_tensor(datos.pixeles[conjuntos[n]]) for n in ("entrenamiento", "validacion")}
-    modelo = construir_modelo()
+    modelo = construir_modelo(arquitectura=args.arquitectura)
     # Un resumen propio y no modelo.summary(), que dibuja con caracteres de caja
     # que una salida redirigida en Windows (cp1252) no puede escribir (H45).
     print(f"\nRED ({modelo.count_params()} parametros)")
@@ -1056,8 +1114,8 @@ def main(argv: list[str] | None = None) -> int:
                           "paciencia": args.paciencia_tasa, "minima": TASA_MINIMA},
             "aumentacion": {"volteo": "horizontal", "rotacion_grados": ROTACION_GRADOS,
                             "zoom": ZOOM, "relleno": "reflect"},
-            "arquitectura": ("legacy (Conv 32/64/128 3x3 + MaxPool 2x2, Dense 128, Dropout 0.5, "
-                             "softmax) con BatchNormalization tras cada convolucion"),
+            "arquitectura": ARQUITECTURAS[args.arquitectura],
+            "arquitectura_id": args.arquitectura,
             "parametros": int(modelo.count_params()),
             "historial": historial.name,
         },

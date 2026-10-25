@@ -1,0 +1,243 @@
+{
+  "clases": [
+    "feliz",
+    "triste",
+    "sorprendido",
+    "neutral",
+    "enojado"
+  ],
+  "entrada": [
+    48,
+    48,
+    1
+  ],
+  "preprocesamiento": "FER-2013: caras ya recortadas, 48x48 en gris, /255. En operacion: el de emotion_classifier.preprocesar_48 (Haar de OpenCV, recorte, resize 48x48 sobre BGR, BGR2GRAY, /255), que con una cara de 48x48 en gris da el mismo tensor.",
+  "origen": "tools/train_fer2013.py (PROMPT 8)",
+  "fecha": "2026-10-24T22:54:35",
+  "accuracy": 0.7056097964587126,
+  "advertencia": null,
+  "ensayo": false,
+  "dataset": {
+    "nombre": "FER-2013 (ICML 2013, Challenges in Representation Learning)",
+    "fuente": "https://huggingface.co/datasets/DerrickUnleashed/FER-2013",
+    "revision": "5b1d92d29dea477a4c13af5f928b2baee3744951",
+    "archivo": "fer2013.tar.gz",
+    "sha256_archivo": "bdc255c109a1bbf994e6a7dd02a6f4566eb21beaece7643cd988166ee3527a44",
+    "sha256_csv": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+    "imagenes": 35887,
+    "imagenes_de_un_solo_color": 12
+  },
+  "clases_fer2013": {
+    "Angry": "enojado",
+    "Disgust": null,
+    "Fear": null,
+    "Happy": "feliz",
+    "Sad": "triste",
+    "Surprise": "sorprendido",
+    "Neutral": "neutral"
+  },
+  "particion": {
+    "prueba": "oficial: PublicTest + PrivateTest, intacta",
+    "validacion": "0.1 de Training por clase, semilla 2013, agrupada por imagen identica",
+    "fraccion_validacion": 0.1,
+    "huella": "785315cac99b9f5044216ff419b3be0ede4a81a18ba87110f7b6255f0bbed7c6",
+    "por_clase": {
+      "entrenamiento": {
+        "feliz": 6493,
+        "triste": 4347,
+        "sorprendido": 2853,
+        "neutral": 4468,
+        "enojado": 3596
+      },
+      "validacion": {
+        "feliz": 722,
+        "triste": 483,
+        "sorprendido": 318,
+        "neutral": 497,
+        "enojado": 399
+      },
+      "prueba": {
+        "feliz": 1774,
+        "triste": 1247,
+        "sorprendido": 831,
+        "neutral": 1233,
+        "enojado": 958
+      }
+    },
+    "training_repetidas_en_training": 968,
+    "prueba_repetidas_en_training": 438
+  },
+  "pesos_de_clase": {
+    "feliz": 0.6701678730941013,
+    "triste": 1.00101219231654,
+    "sorprendido": 1.5252015422362426,
+    "neutral": 0.9739033124440466,
+    "enojado": 1.210066740823137
+  },
+  "entrenamiento": {
+    "epocas": 49,
+    "mejor_epoca": 29,
+    "paro_antes": true,
+    "val_loss": 0.8204777836799622,
+    "val_accuracy": 0.7064902782440186,
+    "tasa_final": 0.0001250000059371814,
+    "segundos": 6334.063762299998,
+    "semilla": 2013,
+    "lote": 64,
+    "tasa_inicial": 0.001,
+    "epocas_maximas": 150,
+    "optimizador": "adam",
+    "perdida": "sparse_categorical_crossentropy",
+    "early_stopping": {
+      "monitor": "val_loss",
+      "paciencia": 20,
+      "restaura_la_mejor": true
+    },
+    "reduce_lr": {
+      "monitor": "val_loss",
+      "factor": 0.5,
+      "paciencia": 8,
+      "minima": 1e-05
+    },
+    "aumentacion": {
+      "volteo": "horizontal",
+      "rotacion_grados": 10.0,
+      "zoom": 0.1,
+      "relleno": "reflect"
+    },
+    "arquitectura": "estilo VGG como 'vgg' pero sin el Dropout de cada bloque (solo el 0.5 de la cabeza)",
+    "arquitectura_id": "vgg_sin_dropout",
+    "parametros": 1765925,
+    "historial": "emotion_model_fer2013_vgg_sin_dropout.historial.csv"
+  },
+  "metricas": {
+    "prueba": {
+      "n": 6043,
+      "accuracy": 0.7056097964587126,
+      "macro_f1": 0.6935734866947204,
+      "accuracy_balanceada": 0.6856557389480236,
+      "por_clase": {
+        "feliz": {
+          "precision": 0.806903451725863,
+          "recall": 0.9092446448703495,
+          "f1": 0.8550225284919164,
+          "soporte": 1774
+        },
+        "triste": {
+          "precision": 0.5188059701492538,
+          "recall": 0.6968724939855654,
+          "f1": 0.5947980835044491,
+          "soporte": 1247
+        },
+        "sorprendido": {
+          "precision": 0.8896366083445492,
+          "recall": 0.7954271961492179,
+          "f1": 0.8398983481575604,
+          "soporte": 831
+        },
+        "neutral": {
+          "precision": 0.6776677667766776,
+          "recall": 0.49959448499594483,
+          "f1": 0.5751633986928103,
+          "soporte": 1233
+        },
+        "enojado": {
+          "precision": 0.704323570432357,
+          "recall": 0.5271398747390397,
+          "f1": 0.6029850746268657,
+          "soporte": 958
+        }
+      },
+      "confusion": [
+        [
+          1613,
+          50,
+          24,
+          52,
+          35
+        ],
+        [
+          116,
+          869,
+          20,
+          156,
+          86
+        ],
+        [
+          72,
+          29,
+          661,
+          20,
+          49
+        ],
+        [
+          138,
+          420,
+          17,
+          616,
+          42
+        ],
+        [
+          60,
+          307,
+          21,
+          65,
+          505
+        ]
+      ]
+    },
+    "public_test": {
+      "n": 3037,
+      "accuracy": 0.6980572933816266,
+      "macro_f1": 0.6841694593450531,
+      "accuracy_balanceada": 0.677493622090829
+    },
+    "private_test": {
+      "n": 3006,
+      "accuracy": 0.7132401862940785,
+      "macro_f1": 0.7025708295303393,
+      "accuracy_balanceada": 0.6936165166290668
+    },
+    "prueba_sin_repetidas": {
+      "n": 5605,
+      "accuracy": 0.6913470115967886,
+      "macro_f1": 0.6779701762858885,
+      "accuracy_balanceada": 0.6686159607537983
+    },
+    "validacion": {
+      "n": 2419,
+      "accuracy": 0.7064902852418354,
+      "macro_f1": 0.6915275313729106,
+      "accuracy_balanceada": 0.6822967619903428
+    },
+    "simetria": {
+      "accuracy": 0.7056097964587126,
+      "accuracy_volteada": 0.7049478735727288,
+      "misma_prediccion": 0.8494125434386894
+    },
+    "entrenamiento": {
+      "n": 21757,
+      "accuracy": 0.7788757641218919,
+      "macro_f1": 0.771959527855213,
+      "accuracy_balanceada": 0.763795463438188
+    }
+  },
+  "versiones": {
+    "python": "3.12.1",
+    "tensorflow": "2.16.1",
+    "keras": "3.15.1",
+    "numpy": "1.26.4",
+    "opencv": "4.10.0",
+    "procesador": "Intel64 Family 6 Model 165 Stepping 2, GenuineIntel",
+    "sistema": "Windows-11-10.0.26200-SP0"
+  },
+  "verificacion": {
+    "forma": [
+      1,
+      5
+    ],
+    "imagenes": 200,
+    "max_dif": 7.748603820800781e-07
+  },
+  "seleccion": "DESCARTADO (se conserva como evidencia). P8.1: dos candidatas mayores fijadas antes de entrenar ('vgg' y 'vgg_sin_dropout', que solo difieren en el Dropout 0.25 de cada bloque), con todo lo demas igual al modelo elegido del P8. Se elige por VALIDACION: val_loss 0.7357 (vgg) frente a 0.8205 (vgg_sin_dropout). El modelo del P8 (emotion_model_fer2013.keras) no se toca."
+}

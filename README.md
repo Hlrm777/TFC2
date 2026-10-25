@@ -138,6 +138,10 @@ mismos pesos bit a bit.
 python tools/train_fer2013.py
 ```
 
+Con `--arquitectura vgg` o `--arquitectura vgg_sin_dropout` entrena las redes
+mayores del P8.1, cada una en su propio archivo (`emotion_model_fer2013_vgg.keras`…):
+ninguna pisa el modelo elegido.
+
 El clasificador lo usa en vez del propio con:
 
 ```bash

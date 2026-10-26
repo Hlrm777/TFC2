@@ -1195,3 +1195,16 @@ def test_el_csv_marca_las_filas_que_calibran(tmp_path):
         filas = list(csv.DictReader(f))
     assert [fl["calibrando"] for fl in filas] == ["1", "1", "1", "0", "0", "0"]
     assert [fl["prediccion"] for fl in filas[:3]] == ["", "", ""]
+
+
+def test_sin_expresion_clara_el_robot_pasa_a_neutral_a_los_2_s():
+    """Aprobado por el operador el 2026-10-26: si 2 s de votos (10 a 5 Hz) no
+    apoyan la expresión que se muestra, neutral, en vez de quedarse con ella."""
+    c = _clasificador([("feliz", 0.9)] * 5 + [("triste", 0.45), ("neutral", 0.4)] * 10)
+    emociones = [c.process(FRAME, timestamp=0.2 * i).etiqueta for i in range(25)]
+    assert c.max_sin_apoyo == 10
+    assert emociones[4:14] == ["feliz"] * 10
+    assert emociones[14] == "neutral"                    # el décimo voto sin apoyo
+    sin_regla = _clasificador([("feliz", 0.9)] * 5 + [("triste", 0.45)] * 20,
+                              neutral_sin_apoyo_s=0.0)
+    assert {sin_regla.process(FRAME, timestamp=0.2 * i).etiqueta for i in range(5, 25)} == {"feliz"}

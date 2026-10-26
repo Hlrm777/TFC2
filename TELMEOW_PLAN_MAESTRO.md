@@ -117,14 +117,14 @@ cambia respecto al plan original.
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
 | **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
-| **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo) | `1e3b6c1` |
+| **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral | `1e3b6c1` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ⬜ | |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1169 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1174 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -2497,9 +2497,30 @@ su confianza, latencia y brillo.
    triste 62 %), junto a lo que hizo el robot en vivo con 0.6 (8 de 9). La
    próxima grabación con 0.5 la confirma o no.
 
-   Lo curioso, pendiente de aprobar antes de probarlo: que tras unos segundos
-   sin una expresión clara el robot pase a neutral, en vez de quedarse con la
-   última.
+   **Sin expresión clara, a neutral** (aprobado por el operador el
+   2026-10-26). Si 2 s de votos seguidos (10 a 5 Hz) no apoyan la expresión
+   que se muestra —ninguno es para ella— y ninguna otra gana, el robot pasa a
+   neutral. Un voto para la actual reinicia la cuenta. Solo cuentan las
+   inferencias que votan: sin cara manda la regla de los 2 s (decisión 9), y
+   con las manos o calibrando no avanza.
+   - Implementación: `ClassHysteresis(..., fallback, max_sin_apoyo)`,
+     `EmotionConfig.neutral_sin_apoyo_s` = 2
+     (`TELMEOW_EMOTION_NEUTRAL_SIN_APOYO_S`, 0 la desactiva), y una columna
+     `sin_apoyo` en el CSV para que la reproducción siga exacta. Las
+     grabaciones anteriores no la tienen y se reproducen sin la regla.
+   - Los 2 s se fijaron antes de medir, iguales a los de «sin cara».
+   - Medido con `tools/evaluar_backends.py SESION.csv --backend combinado
+     --histeresis 5 C --neutral-sin-apoyo-s 2`:
+
+   | Sesión | `min_confidence` | Etiqueta 2, sin la regla | Etiqueta 2, con la regla | Lo demás |
+   |---|---|---|---|---|
+   | en vivo | 0.6 | **feliz 100 %** | **neutral 88 %**, feliz 12 % | igual |
+   | en vivo | 0.5 | triste 62 % | triste 58 %, neutral 35 % | igual: 3.2/min leyendo, 9/9 |
+   | mañana | 0.6 | triste 98 % | triste 95 % | igual |
+   | mañana | 0.5 | triste 83 % | triste 83 % | igual |
+
+   Es una red de seguridad: con 0.5 casi no actúa, y donde el modelo duda de
+   verdad cambia un robot feliz ante un operador triste por uno neutral.
 
    **Descargas** (aprobadas por el operador el 2026-10-24; en
    `modelos_externos/`, fuera de git):

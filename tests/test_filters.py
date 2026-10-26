@@ -496,3 +496,44 @@ def test_n_frames_1_no_filtra_nada():
     h = ClassHysteresis(n_frames=1)
     assert h.update("feliz", 1.0) == "feliz"
     assert h.update("triste", 1.0) == "triste"
+
+
+def test_sin_apoyo_pasa_a_la_clase_de_reserva():
+    """El caso del 2026-10-25: el robot seguía feliz mientras el modelo votaba
+    triste, neutral y enojado sin la confianza para ganar ninguna."""
+    h = ClassHysteresis(n_frames=5, min_confidence=0.6, initial="neutral",
+                        fallback="neutral", max_sin_apoyo=4)
+    for _ in range(5):
+        h.update("feliz", 0.9)
+    assert h.current == "feliz"
+    for etiqueta in ("triste", "neutral", "triste"):
+        assert h.update(etiqueta, 0.45) == "feliz"      # tres votos sin apoyo
+    assert h.update("enojado", 0.4) == "neutral"        # el cuarto
+
+
+def test_un_voto_para_la_clase_actual_reinicia_la_cuenta():
+    h = ClassHysteresis(n_frames=5, min_confidence=0.6, initial="neutral",
+                        fallback="neutral", max_sin_apoyo=3)
+    for _ in range(5):
+        h.update("feliz", 0.9)
+    for etiqueta in ("triste", "triste", "feliz", "triste", "triste"):
+        h.update(etiqueta, 0.45)
+    assert h.current == "feliz"
+    h.update("triste", 0.45)
+    assert h.current == "neutral"
+
+
+def test_sin_apoyo_desactivado_y_reset():
+    h = ClassHysteresis(n_frames=5, min_confidence=0.6, initial="feliz", fallback="neutral")
+    for _ in range(20):
+        h.update("triste", 0.4)
+    assert h.current == "feliz"                          # max_sin_apoyo = 0
+    h = ClassHysteresis(n_frames=5, min_confidence=0.6, initial="feliz",
+                        fallback="neutral", max_sin_apoyo=3)
+    h.update("triste", 0.4)
+    h.update("triste", 0.4)
+    h.reset(initial="feliz")                             # la cuenta vuelve a 0
+    h.update("triste", 0.4)
+    assert h.current == "feliz"
+    with pytest.raises(ValueError):
+        ClassHysteresis(max_sin_apoyo=-1)

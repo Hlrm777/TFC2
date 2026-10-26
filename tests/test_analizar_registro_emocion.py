@@ -545,3 +545,16 @@ def test_la_etiqueta_7_no_cuenta_el_cambio_de_entrada():
     sale = are.resumir_etiqueta(are.MANOS, _filas_manos(["neutral"] * 10 + ["triste"] * 2
                                                         + ["neutral"] * 10))
     assert sale.ok is False
+
+
+def test_reproduce_exactamente_el_paso_a_neutral_sin_apoyo(tmp_path):
+    """La regla del 2026-10-26 va al CSV ('sin_apoyo') y la reproducción la
+    aplica; sin ella, la reproducción ya no coincidiría."""
+    pasos = ([{"etiqueta": 1, "pred": ("feliz", 0.9)}] * 6
+             + [{"etiqueta": 2, "pred": p} for p in [("triste", 0.45), ("neutral", 0.4)] * 8])
+    filas = are.cargar(_grabar(tmp_path / "sin_apoyo.csv", pasos))
+    assert filas[0]["sin_apoyo"] == 10
+    assert filas[-1]["emocion"] == "neutral"            # pasó a neutral sin apoyo
+    assert are.comparar_con_grabado(filas).exacta
+    emociones, _ = are.reproducir(filas, 5, 0.6, sin_apoyo=0)
+    assert emociones[-1] == "feliz"                     # sin la regla, atascado

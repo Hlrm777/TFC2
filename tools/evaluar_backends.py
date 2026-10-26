@@ -195,7 +195,8 @@ class Evaluacion:
 
 def evaluar(filas: list[dict], carpeta: Path, backend, reloj=time.perf_counter,
             calibracion_s: float = CALIBRACION_S,
-            histeresis: tuple[int, float] | None = None) -> Evaluacion:
+            histeresis: tuple[int, float] | None = None,
+            sin_apoyo: int | None = None) -> Evaluacion:
     """Reclasifica cada cara con ``backend`` y rehace lo que habría hecho el robot.
 
     Sin cara, con la mano sobre la cara o con retorno a neutral, la fila se
@@ -203,7 +204,8 @@ def evaluar(filas: list[dict], carpeta: Path, backend, reloj=time.perf_counter,
     modelo). En las filas en manual el robot mostraba la tecla, y así se queda.
 
     ``histeresis`` = ``(n_frames, min_confidence)`` rehace lo del robot con
-    otros parámetros; por defecto, los de la grabación.
+    otros parámetros; por defecto, los de la grabación. ``sin_apoyo``, igual
+    con los votos sin apoyo tras los que se pasa a neutral (0 lo desactiva).
     """
     nombre = nombre_de(backend)
     grabado = filas[0].get("backend") + (
@@ -250,7 +252,7 @@ def evaluar(filas: list[dict], carpeta: Path, backend, reloj=time.perf_counter,
                 confusion[(esperada, nueva["prediccion"] or are.SIN_EQUIVALENTE)] += 1
         nuevas.append(nueva)
     n_frames, min_confidence = histeresis or are.parametros_grabados(filas)
-    emociones, _ = are.reproducir(nuevas, n_frames, min_confidence)
+    emociones, _ = are.reproducir(nuevas, n_frames, min_confidence, sin_apoyo)
     for nueva, emocion in zip(nuevas, emociones):
         nueva["emocion"] = nueva["manual"] or emocion
     grupos = are.indices_por_etiqueta(nuevas)
@@ -372,6 +374,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--histeresis", nargs=2, metavar=("N_FRAMES", "MIN_CONFIDENCE"),
                         help="lo que habria hecho el robot con otros parametros de la "
                              "histeresis, en vez de los de la grabacion")
+    parser.add_argument("--neutral-sin-apoyo-s", type=float,
+                        help="segundos de votos sin apoyo tras los que el robot pasa a "
+                             "neutral (0 lo desactiva); por defecto, los de la grabacion")
     parser.add_argument("--backend", action="append",
                         help="keras, keras:RUTA, deepface, hsemotion, blendshapes:PESOS, "
                              "onnx:MODELO o combinado:SPEC+SPEC; se puede repetir")
@@ -387,8 +392,11 @@ def main(argv: list[str] | None = None) -> int:
     evaluaciones = []
     for spec in args.backend or ["keras"]:
         histeresis = (int(args.histeresis[0]), float(args.histeresis[1])) if args.histeresis else None
-        evaluaciones.append(evaluar(filas, carpeta, crear(spec),
-                                    calibracion_s=args.calibracion_s, histeresis=histeresis))
+        from telmeow_teleop.config import AppConfig
+        sin_apoyo = (None if args.neutral_sin_apoyo_s is None
+                     else round(args.neutral_sin_apoyo_s * AppConfig.from_env().rates.emotion_hz))
+        evaluaciones.append(evaluar(filas, carpeta, crear(spec), calibracion_s=args.calibracion_s,
+                                    histeresis=histeresis, sin_apoyo=sin_apoyo))
         if histeresis:
             print(f"\n  (robot con n_frames={histeresis[0]}, min_confidence={histeresis[1]:g})")
         imprimir(evaluaciones[-1])

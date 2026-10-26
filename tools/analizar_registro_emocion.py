@@ -170,6 +170,8 @@ def cargar(ruta: Path) -> list[dict]:
         # 'calibrando' llegó el 2026-10-25: esa cara calibró la neutra de un
         # backend relativo y no votó.
         fila["calibrando"] = int(fila.get("calibrando") or 0)
+        # 'sin_apoyo' llegó el 2026-10-26; antes la regla no existía (0).
+        fila["sin_apoyo"] = int(fila.get("sin_apoyo") or 0)
     return filas
 
 
@@ -216,7 +218,7 @@ def voto(fila: dict) -> tuple[str, float] | None:
 
 
 def reproducir(
-    filas: list[dict], n_frames: int, min_confidence: float
+    filas: list[dict], n_frames: int, min_confidence: float, sin_apoyo: int | None = None
 ) -> tuple[list[str], list[float | None]]:
     """Pasa las predicciones crudas grabadas por una ``ClassHysteresis`` nueva.
 
@@ -229,7 +231,12 @@ def reproducir(
       llegó a mirar el umbral (no votó, votó por la vigente o no tenía
       mayoría).
     """
-    histeresis = ClassHysteresis(n_frames, min_confidence, initial=NEUTRAL)
+    # Los votos sin apoyo tras los que se pasa a neutral: los de la grabación,
+    # salvo que se pidan otros.
+    if sin_apoyo is None:
+        sin_apoyo = filas[0]["sin_apoyo"] if filas else 0
+    histeresis = ClassHysteresis(n_frames, min_confidence, initial=NEUTRAL,
+                                 fallback=NEUTRAL, max_sin_apoyo=sin_apoyo)
     emociones: list[str] = []
     margenes: list[float | None] = []
     backend = None

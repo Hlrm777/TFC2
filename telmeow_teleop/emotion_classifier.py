@@ -188,6 +188,10 @@ MARGEN_RECORTE = 0.5
 #: primera cara vista. Ver ``config.EmotionConfig.calibracion_s``.
 CALIBRACION_S = 3.0
 
+#: Segundos de votos sin apoyo a la expresión actual tras los que se pasa a
+#: neutral. Ver ``config.EmotionConfig.neutral_sin_apoyo_s``.
+NEUTRAL_SIN_APOYO_S = 2.0
+
 #: Nombre del cascade dentro de ``cv2.data.haarcascades``.
 CASCADE = "haarcascade_frontalface_default.xml"
 
@@ -878,6 +882,9 @@ class EmotionClassifier:
         margen_manos: ver ``mano_sobre_rostro``.
         calibracion_s: segundos de cara neutra con que se calibra un backend
             relativo. Los demás backends lo ignoran.
+        neutral_sin_apoyo_s: segundos de votos seguidos sin ninguno para la
+            expresión actual tras los que se pasa a neutral (a ``emotion_hz``
+            se convierten en votos). 0 lo desactiva.
     """
 
     def __init__(
@@ -896,19 +903,23 @@ class EmotionClassifier:
         retorno_neutral_s: float = RETORNO_NEUTRAL_S,
         margen_manos: float = MARGEN_MANOS,
         calibracion_s: float = CALIBRACION_S,
+        neutral_sin_apoyo_s: float = NEUTRAL_SIN_APOYO_S,
     ) -> None:
         if not emotion_hz > 0.0:
             raise ValueError(f"emotion_hz debe ser positivo, se recibió {emotion_hz!r}")
-        if retorno_neutral_s < 0.0 or margen_manos < 0.0 or calibracion_s < 0.0:
-            raise ValueError(
-                "retorno_neutral_s, margen_manos y calibracion_s no pueden ser negativos")
+        if min(retorno_neutral_s, margen_manos, calibracion_s, neutral_sin_apoyo_s) < 0.0:
+            raise ValueError("retorno_neutral_s, margen_manos, calibracion_s y "
+                             "neutral_sin_apoyo_s no pueden ser negativos")
         self.calibracion_s = float(calibracion_s)
         self.retorno_neutral_s = float(retorno_neutral_s)
         self.margen_manos = float(margen_manos)
         self.backend = backend
         self.frame_espejado = bool(frame_espejado)
         self._periodo = 1.0 / float(emotion_hz)
-        self._histeresis = ClassHysteresis(n_frames, min_confidence, initial=NEUTRAL)
+        # Los segundos sin apoyo cuentan votos: a 5 Hz, 2 s son 10.
+        self._histeresis = ClassHysteresis(
+            n_frames, min_confidence, initial=NEUTRAL, fallback=NEUTRAL,
+            max_sin_apoyo=round(neutral_sin_apoyo_s * emotion_hz))
         if detector is None:
             # UNA sola vez (bug 15). elegir_rostro valida el criterio aquí, y
             # no en el primer frame.
@@ -957,6 +968,7 @@ class EmotionClassifier:
             min_lado_rostro=cfg.emotion.min_lado_rostro or None,
             retorno_neutral_s=cfg.emotion.retorno_neutral_s,
             calibracion_s=cfg.emotion.calibracion_s,
+            neutral_sin_apoyo_s=cfg.emotion.neutral_sin_apoyo_s,
         )
 
     # -- estado, para el HUD y el registro ---------------------------------
@@ -1054,6 +1066,11 @@ class EmotionClassifier:
     @property
     def n_frames(self) -> int:
         return self._histeresis.n_frames
+
+    @property
+    def max_sin_apoyo(self) -> int:
+        """Votos seguidos sin apoyo para pasar a neutral (0: desactivado)."""
+        return self._histeresis.max_sin_apoyo
 
     @property
     def min_confidence(self) -> float:
@@ -1226,7 +1243,10 @@ _COLUMNAS_CSV = (
        "manos", "retorno", "retorno_neutral_s", "recorte", "rx", "ry",
        # Desde el 2026-10-25: la cara de esa fila se usó para calibrar la
        # neutra de un backend relativo y no votó.
-       "calibrando"]
+       "calibrando",
+       # Desde el 2026-10-26: votos sin apoyo tras los que se pasa a neutral,
+       # para que la reproducción offline aplique la misma regla.
+       "sin_apoyo"]
 )
 
 
@@ -1264,7 +1284,7 @@ def _fila_csv(t, etiqueta, clasificador: EmotionClassifier, brillo: float,
            int(clasificador.manos_en_cara), int(clasificador.retorno_en_ultima),
            f"{clasificador.retorno_neutral_s:g}",
            *(recorte if recorte else ("", "", "")),
-           int(clasificador.calibrando)]
+           int(clasificador.calibrando), clasificador.max_sin_apoyo]
     )
 
 

@@ -643,6 +643,12 @@ class EmotionConfig:
     referencia para el capítulo de resultados (P9), OPCIONALES: viven en
     ``requirements-benchmark.txt``.
 
+    ``neutral_sin_apoyo_s``: segundos de votos seguidos sin ninguno para la
+    expresión que se muestra tras los que el robot pasa a neutral (2, aprobado
+    por el operador el 2026-10-26; 0 lo desactiva). Así el robot no se queda
+    feliz ante un operador triste cuando el modelo duda. Ver
+    ``filters.ClassHysteresis``.
+
     ``calibracion_s``: segundos de cara neutra con que se calibra un backend
     relativo (el combinado) al ver la primera cara, y cada vez que se pide
     (tecla ``c``). Con 3 s (11 caras) la grabación del protocolo v3 da lo
@@ -707,6 +713,7 @@ class EmotionConfig:
     min_lado_rostro: int = 60
     retorno_neutral_s: float = 2.0
     calibracion_s: float = 3.0
+    neutral_sin_apoyo_s: float = 2.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "EmotionConfig":
@@ -727,6 +734,8 @@ class EmotionConfig:
                 env, "EMOTION_RETORNO_NEUTRAL_S", cls.retorno_neutral_s
             ),
             calibracion_s=_env_float(env, "EMOTION_CALIBRACION_S", cls.calibracion_s),
+            neutral_sin_apoyo_s=_env_float(
+                env, "EMOTION_NEUTRAL_SIN_APOYO_S", cls.neutral_sin_apoyo_s),
         )
 
 

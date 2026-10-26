@@ -606,11 +606,25 @@ class ClassHysteresis:
     la mayoría filtra el ruido esporádico y la confianza filtra la duda
     sostenida.
 
+    Sin apoyo, a la clase de reserva
+    --------------------------------
+    El reverso de no cambiar mientras se duda es quedarse con una clase vieja
+    que ya nadie vota. El 2026-10-25 el robot siguió feliz toda la etiqueta de
+    tristeza: el modelo votaba triste, neutral y enojado, ninguna con la
+    confianza para ganar, y ninguna feliz. Con ``max_sin_apoyo`` > 0, si esa
+    cantidad de votos SEGUIDOS no apoya la clase actual (ninguno es para ella)
+    y ninguna otra gana, se pasa a ``fallback``. Un solo voto para la clase
+    actual reinicia la cuenta. Solo cuentan las llamadas a ``update``: quien
+    no vota (sin cara, con la mano encima) no adelanta nada.
+
     Args:
         n_frames: tamaño de la ventana. Debe ser >= 1.
         min_confidence: confianza media mínima para aceptar un cambio.
         initial: clase reportada antes de la primera decisión. El proyecto
             arranca en NEUTRAL por decisión de diseño documentada.
+        fallback: clase a la que se pasa sin apoyo (ver arriba).
+        max_sin_apoyo: votos seguidos sin apoyo para pasar a ``fallback``;
+            0 lo desactiva.
     """
 
     def __init__(
@@ -618,7 +632,12 @@ class ClassHysteresis:
         n_frames: int = 5,
         min_confidence: float = 0.0,
         initial: Hashable | None = None,
+        *,
+        fallback: Hashable | None = None,
+        max_sin_apoyo: int = 0,
     ) -> None:
+        if max_sin_apoyo < 0:
+            raise ValueError(f"max_sin_apoyo no puede ser negativo, se recibió {max_sin_apoyo!r}")
         if n_frames < 1:
             raise ValueError(f"n_frames debe ser >= 1, se recibió {n_frames!r}")
         if not 0.0 <= min_confidence <= 1.0:
@@ -629,6 +648,9 @@ class ClassHysteresis:
         self.min_confidence = float(min_confidence)
         self._window: deque[tuple[Hashable, float]] = deque(maxlen=self.n_frames)
         self._current: Hashable | None = initial
+        self.fallback = fallback
+        self.max_sin_apoyo = int(max_sin_apoyo)
+        self._sin_apoyo = 0
 
     @property
     def current(self) -> Hashable | None:
@@ -643,6 +665,7 @@ class ClassHysteresis:
     def reset(self, initial: Hashable | None = None) -> None:
         self._window.clear()
         self._current = initial
+        self._sin_apoyo = 0
 
     def update(self, label: Hashable, confidence: float = 1.0) -> Hashable | None:
         """Añade una predicción y devuelve la clase estabilizada.
@@ -660,16 +683,21 @@ class ClassHysteresis:
         self._window.append((label, confidence))
 
         if label == self._current:
+            self._sin_apoyo = 0
             return self._current
 
         votos = [c for etiqueta, c in self._window if etiqueta == label]
         # Mayoría ESTRICTA sobre la ventana ya llena. Con la ventana a medio
         # llenar la comparación es contra su tamaño actual, así que arrancar es
         # rápido pero cambiar después exige el consenso completo.
-        if len(votos) * 2 <= len(self._window):
-            return self._current
-        if (sum(votos) / len(votos)) < self.min_confidence:
+        if len(votos) * 2 > len(self._window) and (sum(votos) / len(votos)) >= self.min_confidence:
+            self._current = label
+            self._sin_apoyo = 0
             return self._current
 
-        self._current = label
+        self._sin_apoyo += 1
+        if (self.max_sin_apoyo and self._current != self.fallback
+                and self._sin_apoyo >= self.max_sin_apoyo):
+            self._current = self.fallback
+            self._sin_apoyo = 0
         return self._current

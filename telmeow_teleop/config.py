@@ -627,18 +627,26 @@ class ArmConfig:
 #: Backends del clasificador de emoción. Se repiten aquí como cadenas para que
 #: este módulo siga sin importar cv2 ni TensorFlow; una prueba comprueba que
 #: coinciden con ``emotion_classifier.BACKENDS``.
-EMOTION_BACKENDS: tuple[str, ...] = ("keras", "deepface", "hsemotion")
+EMOTION_BACKENDS: tuple[str, ...] = ("combinado", "keras", "deepface", "hsemotion")
 
 
 @dataclass(frozen=True)
 class EmotionConfig:
     """Clasificador de la emoción del operador (PROMPT 6).
 
-    ``backend`` elige el modelo: ``"keras"`` es el propio, el de operación;
-    ``"deepface"`` y ``"hsemotion"`` son librerías de referencia para el
-    capítulo de resultados (P9). Esos dos son OPCIONALES: viven en
-    ``requirements-benchmark.txt`` y, si no están instalados, el programa sigue
-    con Keras.
+    ``backend`` elige el modelo. ``"combinado"`` es el de operación desde el
+    2026-10-25 (lo eligió el operador en el P6.4): HSEmotion ``mbf_va_mtl`` en
+    ONNX más los blendshapes de MediaPipe relativos a su cara neutra, a partes
+    iguales (``emotion_backends``). ``"keras"`` es el modelo propio, que queda
+    como línea base y de reserva: si faltan los modelos descargados, el demo
+    arranca con él. ``"deepface"`` y ``"hsemotion"`` son librerías de
+    referencia para el capítulo de resultados (P9), OPCIONALES: viven en
+    ``requirements-benchmark.txt``.
+
+    ``calibracion_s``: segundos de cara neutra con que se calibra un backend
+    relativo (el combinado) al ver la primera cara, y cada vez que se pide
+    (tecla ``c``). Con 3 s (11 caras) la grabación del protocolo v3 da lo
+    mismo que con 10; con 2, la tristeza baja de 98 a 91 % (P6.4).
 
     LA ESTABILIZACIÓN CUENTA INFERENCIAS, NO FRAMES. La emoción se infiere a
     ``RateConfig.emotion_hz`` (5 Hz), así que ``n_frames = 5`` es una ventana
@@ -651,11 +659,24 @@ class EmotionConfig:
     los votos de la clase candidata. Hace falta porque la mayoría sola no frena
     una alternancia perfecta entre dos clases (la ventana queda 3-2 y cambia de
     bando cada dos pasos). Lo que la frena es que un clasificador que alterna
-    está dudando, y sus confianzas rondan 0.5; por eso 0.6, por encima de la
-    duda entre dos clases. Ver ``filters.ClassHysteresis``.
+    está dudando, y sus confianzas rondan 0.5. Ver ``filters.ClassHysteresis``.
 
-    **Ninguno de los dos valores está medido todavía**: son el punto de partida
-    razonado. Se calibran con la grabación del modo demo (``--record``).
+    **Medidos el 2026-10-25** con el backend combinado sobre la grabación del
+    protocolo v3 (``tools/evaluar_backends.py --rejilla``, P6.4): con
+    ``min_confidence`` ≥ 0.6, leer en voz alta da 0.8 cambios por minuto con
+    cualquier ``n_frames`` de 3 a 9, porque el combinado ya casi no duda. 3
+    adelantaría el cambio 0.24 s pero añade un parpadeo en la tristeza; con una
+    sola sesión no compensa: ``n_frames`` se queda en 5.
+
+    **``min_confidence`` bajó de 0.6 a 0.5 el 2026-10-26**, por decisión del
+    operador, tras la verificación en vivo (``emocion_v3_combinado.csv``):
+    con 0.6 el combinado decía triste en la mayoría de las caras tristes, pero
+    con 0.4-0.6 de confianza, ninguna ventana llegaba al umbral y el robot se
+    quedaba en la expresión anterior (feliz). Con 0.5: triste 62 % en vivo
+    (0 % con 0.6) y 9 de 9 etiquetas, a cambio de 3.2 falsas alarmas por
+    minuto leyendo en voz alta en vez de 2.7. En la sesión de la mañana: 83 %
+    frente a 98 %, y 2.3 frente a 0.8. Se eligió viendo la sesión citable, y
+    así se declara (plan maestro, P6.4).
 
     ``colapso`` decide qué hacer con las clases que las librerías tienen y el
     robot no —asco y miedo; HSEmotion añade desprecio—: ``"cercana"`` suma su
@@ -663,6 +684,10 @@ class EmotionConfig:
     gana una de ellas no hay voto y el robot conserva la cara que tenía. Ver
     ``emotion_classifier.SIN_EQUIVALENTE``. No afecta al backend Keras, cuyas
     clases ya son las del robot.
+
+    ``retorno_neutral_s``: segundos sin ver la cara tras los que la expresión
+    vuelve a neutral (2, lo eligió el operador el 2026-10-24; 0 la mantiene sin
+    límite). Ver ``emotion_classifier.RETORNO_NEUTRAL_S``.
 
     ``min_lado_rostro`` es el ``minSize`` del detector Haar, en píxeles: deja
     de buscar caras más pequeñas, que es donde se le va casi todo el tiempo. Con
@@ -674,12 +699,14 @@ class EmotionConfig:
     usaba; 0 lo desactiva y reproduce el detector original.
     """
 
-    backend: str = "keras"
+    backend: str = "combinado"
     n_frames: int = 5
-    min_confidence: float = 0.6
+    min_confidence: float = 0.5
     colapso: str = "cercana"
     hsemotion_model: str = "enet_b0_8_best_afew"
     min_lado_rostro: int = 60
+    retorno_neutral_s: float = 2.0
+    calibracion_s: float = 3.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "EmotionConfig":
@@ -696,6 +723,10 @@ class EmotionConfig:
             min_lado_rostro=_env_int(
                 env, "EMOTION_MIN_LADO_ROSTRO", cls.min_lado_rostro
             ),
+            retorno_neutral_s=_env_float(
+                env, "EMOTION_RETORNO_NEUTRAL_S", cls.retorno_neutral_s
+            ),
+            calibracion_s=_env_float(env, "EMOTION_CALIBRACION_S", cls.calibracion_s),
         )
 
 
@@ -733,10 +764,24 @@ class PathConfig:
         default_factory=lambda: PROJECT_ROOT / "emotion_model.keras"
     )
     face_cascade: Path | None = None
+    #: El backend combinado (P6.4): el ONNX de HSEmotion y el Face Landmarker,
+    #: descargados a modelos_externos/ (tools/descargar_modelos.py), y los
+    #: pesos de la regresión de los blendshapes, versionados en la raíz.
+    emotion_onnx: Path = field(
+        default_factory=lambda: PROJECT_ROOT / "modelos_externos" / "mbf_va_mtl.onnx"
+    )
+    face_landmarker: Path = field(
+        default_factory=lambda: PROJECT_ROOT / "modelos_externos" / "face_landmarker.task"
+    )
+    emotion_blendshapes: Path = field(
+        default_factory=lambda: PROJECT_ROOT / "emotion_blendshapes_facs_relativo.json"
+    )
 
     def __post_init__(self) -> None:
         # Frozen: hay que saltarse el __setattr__ bloqueado para normalizar.
         object.__setattr__(self, "emotion_model", _resolve(Path(self.emotion_model)))
+        for campo in ("emotion_onnx", "face_landmarker", "emotion_blendshapes"):
+            object.__setattr__(self, campo, _resolve(Path(getattr(self, campo))))
         if self.face_cascade is not None:
             object.__setattr__(self, "face_cascade", _resolve(Path(self.face_cascade)))
 
@@ -747,6 +792,10 @@ class PathConfig:
         return cls(
             emotion_model=_env_path(env, "MODEL_PATH", default.emotion_model),
             face_cascade=Path(cascade) if cascade else None,
+            emotion_onnx=_env_path(env, "EMOTION_ONNX_PATH", default.emotion_onnx),
+            face_landmarker=_env_path(env, "FACE_LANDMARKER_PATH", default.face_landmarker),
+            emotion_blendshapes=_env_path(
+                env, "EMOTION_BLENDSHAPES_PATH", default.emotion_blendshapes),
         )
 
 

@@ -91,10 +91,26 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+### Modelos del clasificador de emoción
+
+El clasificador de emoción usa por defecto el backend `combinado` (elegido en
+el P6.4 del plan maestro): HSEmotion `mbf_va_mtl` en ONNX más los coeficientes
+de la cara de MediaPipe Face Landmarker, relativos a la cara neutra del
+operador. Sus dos modelos no van en git; se bajan, con su SHA-256 comprobado,
+a `modelos_externos/`:
+
+```bash
+python tools/descargar_modelos.py
+```
+
+Al arrancar, el clasificador toma la cara neutra con los primeros 3 s de cara:
+hay que mirar la pantalla con la cara relajada. En el modo demo, la tecla `c`
+la vuelve a tomar. Si faltan los modelos, el demo avisa y arranca con el modelo
+propio (`emotion_model.keras`, fuera de git).
+
 ### Backends opcionales del clasificador de emoción
 
-El clasificador de emoción funciona con el modelo propio (`emotion_model.keras`,
-fuera de git). DeepFace y HSEmotion solo hacen falta para la evaluación
+DeepFace y HSEmotion (con torch) solo hacen falta para la evaluación
 comparativa (P9), y **van en un entorno aparte**: las dependencias que declara
 DeepFace instalarían otra copia de OpenCV y un protobuf que rompe MediaPipe. La
 cabecera de [`requirements-benchmark.txt`](requirements-benchmark.txt) explica
@@ -345,17 +361,21 @@ por segundo cuando solo le interesa uno cada varios segundos.
 │   ├── head_tracker.py # Face Mesh → pan, tilt (P4)
 │   ├── arm_tracker.py  # BlazePose → abducción y flexión de los brazos (P5)
 │   ├── retarget.py, escorzo.py, saludo.py   # piezas del arm tracker
-│   └── emotion_classifier.py  # Haar + CNN propia, DeepFace, HSEmotion (P6)
+│   ├── emotion_classifier.py  # Haar, histéresis, manos, calibración; CNN propia, DeepFace, HSEmotion (P6)
+│   └── emotion_backends.py    # el combinado: HSEmotion ONNX + blendshapes de MediaPipe (P6.4)
 ├── tools/
 │   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/#
 │   ├── dev_broker.py   # broker MQTT sin privilegios de administrador
 │   ├── list_cameras.py # qué cámaras hay y qué resoluciones admiten
 │   ├── train_fer2013.py # entrenamiento con FER-2013 y su partición oficial (P8)
+│   ├── descargar_modelos.py, entrenar_blendshapes.py, evaluar_backends.py  # P6.4
 │   └── medir_emocion.py, analizar_registro*.py, ...  # las cifras del plan
 ├── tests/              # pytest, sin broker ni cámara
 ├── legacy/             # los scripts originales, intactos
 ├── telmeow_viewer/     # el visor 3D y sus STL
 ├── emotion_model.meta.json   # orden de clases del modelo propio
+├── emotion_blendshapes_*.json  # pesos de la regresión de los blendshapes (P6.4)
+├── modelos_externos/         # modelos descargados (fuera de git)
 ├── emotion_model_fer2013.meta.json, .historial.csv   # el de FER-2013 (el .keras no va en git)
 ├── mosquitto.conf
 └── requirements.txt / requirements-dev.txt / requirements-benchmark.txt

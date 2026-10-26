@@ -136,12 +136,18 @@ __all__ = [
     "ruta_metadatos",
     "leer_metadatos",
     "resolver_clases",
+    "mano_sobre_rostro",
+    "guardar_recorte",
+    "RETORNO_NEUTRAL_S",
+    "MARGEN_MANOS",
+    "MARGEN_RECORTE",
+    "registrar_inferencia",
 ]
 
 #: Backends disponibles, en el orden en que los recorre la tecla ``b`` del demo.
 #: ``config.EMOTION_BACKENDS`` repite la lista (sin importar este módulo) y una
 #: prueba comprueba que coinciden.
-BACKENDS: tuple[str, ...] = ("keras", "deepface", "hsemotion")
+BACKENDS: tuple[str, ...] = ("combinado", "keras", "deepface", "hsemotion")
 
 #: Lado de la entrada de los modelos propios: el legacy y el de FER-2013 (P8).
 LADO = 48
@@ -158,6 +164,29 @@ HAAR_MIN_NEIGHBORS = 5
 #: redondeo de ir sumando el periodo (0.2 + 0.2 + … no da exactamente 1.6):
 #: sin ella, un frame que llega justo en su ranura se la salta.
 _HOLGURA_S = 1e-6
+
+#: Segundos sin cara tras los que la expresión vuelve a neutral. Lo eligió el
+#: operador el 2026-10-24: un parpadeo de la detección no cambia la cara del
+#: robot, pero si el operador se va o se tapa la cara, el robot no se queda
+#: enojado indefinidamente. Es lo mismo que hacen los brazos, que vuelven al
+#: reposo cuando se pierden.
+RETORNO_NEUTRAL_S = 2.0
+
+#: Cuánto se amplía la caja del rostro, por cada lado y en fracción de su lado,
+#: para decidir que una mano está «sobre la cara». 0.5 llega a las orejas: la
+#: caja del Haar va de sien a sien, y las manos junto a las orejas quedan justo
+#: fuera de ella.
+MARGEN_MANOS = 0.5
+
+#: Margen del recorte que guarda el demo (``--guardar-recortes``), por cada
+#: lado y en fracción del lado de la caja: 0.5 da un recorte del doble de la
+#: caja, con la cara en el centro y contexto alrededor para los detectores que
+#: buscan la cara por su cuenta (el Face Landmarker de MediaPipe).
+MARGEN_RECORTE = 0.5
+
+#: Segundos de cara neutra con que se calibra un backend relativo, desde la
+#: primera cara vista. Ver ``config.EmotionConfig.calibracion_s``.
+CALIBRACION_S = 3.0
 
 #: Nombre del cascade dentro de ``cv2.data.haarcascades``.
 CASCADE = "haarcascade_frontalface_default.xml"
@@ -349,6 +378,48 @@ def preprocesar_48(rostro: np.ndarray) -> np.ndarray:
         reducido = cv2.cvtColor(reducido, cv2.COLOR_BGR2GRAY)
     normalizado = reducido / 255.0
     return normalizado.reshape(1, LADO, LADO, 1).astype(np.float32)
+
+
+def mano_sobre_rostro(puntos, rect, margen: float = MARGEN_MANOS) -> bool:
+    """Si algún punto de mano ``(x, y)`` cae en la caja del rostro ampliada.
+
+    La caja se amplía ``margen`` veces su lado por cada lado, para que cuenten
+    las manos junto a las orejas. Puntos y caja tienen que estar en las MISMAS
+    coordenadas: en el clasificador, las del frame que recibe ``process``, el
+    volteado, que son también las de ``ArmTracker.landmarks_imagen`` en el P7.
+    """
+    if rect is None:
+        return False
+    x, y, w, h = rect
+    x0, x1 = x - margen * w, x + w + margen * w
+    y0, y1 = y - margen * h, y + h + margen * h
+    return any(x0 <= px <= x1 and y0 <= py <= y1 for px, py in puntos)
+
+
+def guardar_recorte(frame_bgr: np.ndarray, rect, ruta: Path,
+                    margen: float = MARGEN_RECORTE) -> tuple[int, int]:
+    """Guarda el rostro con contexto alrededor, SIN pérdidas, y dice dónde quedó.
+
+    ``frame_bgr`` es el frame tal como lo vio el clasificador —ya sin el espejo
+    del pipeline— y ``rect`` la caja del Haar en ese frame. Se guarda la caja
+    ampliada ``margen`` veces su lado por cada lado (recortada al borde de la
+    imagen) en PNG, y se devuelve ``(rx, ry)``: dónde empieza la caja del Haar
+    dentro del recorte. Con eso, ``recorte[ry:ry+h, rx:rx+w]`` es EXACTAMENTE
+    lo que recibió el backend en vivo, y un evaluador offline reproduce su
+    predicción bit a bit. PNG y no JPEG por eso mismo: un JPEG cambia los
+    píxeles y la reproducción dejaría de ser exacta.
+    """
+    x, y, w, h = rect
+    alto, ancho = frame_bgr.shape[:2]
+    x0 = max(0, int(x - margen * w))
+    y0 = max(0, int(y - margen * h))
+    x1 = min(ancho, int(x + w + margen * w))
+    y1 = min(alto, int(y + h + margen * h))
+    ruta = Path(ruta)
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(ruta), frame_bgr[y0:y1, x0:x1]):
+        raise OSError(f"no se pudo escribir {ruta}")
+    return x - x0, y - y0
 
 
 def _a_bgr(rostro: np.ndarray) -> np.ndarray:
@@ -716,9 +787,16 @@ def crear_backend(nombre: str, cfg: AppConfig | None = None) -> EmotionBackend:
 
     Raises:
         BackendNoDisponible: si es ``deepface`` o ``hsemotion`` y la librería no
-            está instalada.
+            está instalada, o ``combinado`` sin onnxruntime.
+        FileNotFoundError: si es ``combinado`` y faltan sus modelos
+            descargados (``tools/descargar_modelos.py``).
     """
     cfg = cfg or AppConfig()
+    if nombre == "combinado":
+        from .emotion_backends import crear_combinado
+
+        return crear_combinado(cfg.paths.emotion_onnx, cfg.paths.emotion_blendshapes,
+                               cfg.paths.face_landmarker, colapso=cfg.emotion.colapso)
     if nombre == "keras":
         return KerasBackend(cfg.paths.emotion_model)
     if nombre == "deepface":
@@ -760,9 +838,25 @@ class EmotionClassifier:
     3. Clasificar el recorte con el backend.
     4. Estabilizar con ``ClassHysteresis`` (mayoría y confianza mínima).
 
-    Entre inferencias, ``process`` devuelve lo último decidido. Sin cara, la
-    expresión se mantiene: no se vuelve a neutral, igual que la cabeza del robot
-    se queda donde estaba cuando el head tracker pierde el rostro.
+    Entre inferencias, ``process`` devuelve lo último decidido.
+
+    SIN CARA, la expresión se mantiene ``retorno_neutral_s`` segundos (2 por
+    defecto) y luego pasa a neutral: un parpadeo de la detección no cambia la
+    cara del robot, pero si el operador se va o se tapa la cara con las manos,
+    el robot no se queda con la última expresión indefinidamente. Lo decidió el
+    operador el 2026-10-24.
+
+    CON LAS MANOS SOBRE LA CARA (``process(..., manos=...)``), la inferencia se
+    hace pero NO VOTA: la expresión se mantiene. Una mano junto a la oreja no
+    es una expresión, y el modelo no sabe distinguirla. Tapada del todo, el
+    Haar deja de ver la cara y manda la regla anterior.
+
+    CON UN BACKEND RELATIVO (el combinado, que mide la cara respecto a la
+    neutra del operador), las caras de los primeros ``calibracion_s`` segundos
+    desde que aparece la primera calibran la neutra y NO votan, igual que el
+    head tracker toma la primera cara como referencia. ``calibrar_neutro()``
+    la vuelve a tomar (tecla ``c`` en el demo). Mientras, la expresión se
+    mantiene. Las caras con una mano encima no sirven para calibrar.
 
     Args:
         backend: el ``EmotionBackend`` que clasifica.
@@ -779,6 +873,11 @@ class EmotionClassifier:
         detector: sustituye al Haar por otra función ``frame -> (x, y, w, h) |
             None``. Solo para las pruebas.
         clock: fuente de tiempo de la planificación. ``perf_counter`` (§0.7).
+        retorno_neutral_s: segundos sin cara tras los que se vuelve a neutral.
+            0 lo desactiva: la expresión se mantiene sin límite.
+        margen_manos: ver ``mano_sobre_rostro``.
+        calibracion_s: segundos de cara neutra con que se calibra un backend
+            relativo. Los demás backends lo ignoran.
     """
 
     def __init__(
@@ -787,16 +886,25 @@ class EmotionClassifier:
         *,
         emotion_hz: float = 5.0,
         n_frames: int = 5,
-        min_confidence: float = 0.6,
+        min_confidence: float = 0.5,
         cascade: Path | None = None,
         frame_espejado: bool = True,
         criterio_rostro: str = "mayor",
         min_lado_rostro: int | None = 60,
         detector: Callable[[np.ndarray], tuple[int, int, int, int] | None] | None = None,
         clock: Callable[[], float] = time.perf_counter,
+        retorno_neutral_s: float = RETORNO_NEUTRAL_S,
+        margen_manos: float = MARGEN_MANOS,
+        calibracion_s: float = CALIBRACION_S,
     ) -> None:
         if not emotion_hz > 0.0:
             raise ValueError(f"emotion_hz debe ser positivo, se recibió {emotion_hz!r}")
+        if retorno_neutral_s < 0.0 or margen_manos < 0.0 or calibracion_s < 0.0:
+            raise ValueError(
+                "retorno_neutral_s, margen_manos y calibracion_s no pueden ser negativos")
+        self.calibracion_s = float(calibracion_s)
+        self.retorno_neutral_s = float(retorno_neutral_s)
+        self.margen_manos = float(margen_manos)
         self.backend = backend
         self.frame_espejado = bool(frame_espejado)
         self._periodo = 1.0 / float(emotion_hz)
@@ -822,6 +930,17 @@ class EmotionClassifier:
         self._inferencias = 0
         self._sin_rostro = 0
         self._latencia_ms: float | None = None
+        self._sin_cara_desde: float | None = None
+        self._retorno = False
+        self._manos = False
+        self._rostro_sin_espejo: tuple[int, int, int, int] | None = None
+        # Calibración de la cara neutra: las caras recogidas (None si no se
+        # está calibrando), hasta cuándo, si la última inferencia calibró, y
+        # cuántas calibraciones se completaron.
+        self._neutras: list[np.ndarray] | None = None
+        self._calibrar_hasta: float | None = None
+        self._calibrando = False
+        self._calibraciones = 0
 
     @classmethod
     def desde_config(
@@ -836,6 +955,8 @@ class EmotionClassifier:
             cascade=cfg.paths.face_cascade,
             frame_espejado=cfg.camera.flip,
             min_lado_rostro=cfg.emotion.min_lado_rostro or None,
+            retorno_neutral_s=cfg.emotion.retorno_neutral_s,
+            calibracion_s=cfg.emotion.calibracion_s,
         )
 
     # -- estado, para el HUD y el registro ---------------------------------
@@ -846,7 +967,7 @@ class EmotionClassifier:
         if self._manual is not None:
             return Emocion(self._manual, None)
         actual = self._histeresis.current
-        if self._ultima is None or self._ultima.etiqueta is None:
+        if self._ultima is None or self._ultima.etiqueta is None or self._manos:
             return Emocion(actual, None)
         votos = [c for etiqueta, c in self._histeresis.window if etiqueta == actual]
         return Emocion(actual, sum(votos) / len(votos) if votos else None)
@@ -867,6 +988,43 @@ class EmotionClassifier:
         """Rectángulo del rostro de la última inferencia, en las coordenadas del
         frame que recibió ``process`` (o sea, el volteado)."""
         return self._rostro
+
+    @property
+    def rostro_sin_espejo(self) -> tuple[int, int, int, int] | None:
+        """El mismo rectángulo en el frame SIN espejo, el que ve el detector:
+        es el que sirve para recortar la cara de ese frame."""
+        return self._rostro_sin_espejo
+
+    @property
+    def manos_en_cara(self) -> bool:
+        """Si en la última inferencia había una mano sobre la cara (no votó)."""
+        return self._manos
+
+    @property
+    def retorno_en_ultima(self) -> bool:
+        """Si en la última inferencia la expresión volvió a neutral por llevar
+        ``retorno_neutral_s`` sin cara. Va al CSV para que la reproducción
+        offline lo aplique en la misma fila, sin depender del redondeo de los
+        tiempos."""
+        return self._retorno
+
+    @property
+    def calibrando(self) -> bool:
+        """Si la última inferencia se usó para calibrar la cara neutra (no
+        votó). Va al CSV para que el evaluador offline calibre con las mismas
+        caras."""
+        return self._calibrando
+
+    @property
+    def calibracion_pendiente(self) -> bool:
+        """Si el backend espera una cara neutra: está recogiéndola, o es
+        relativo y aún no se calibró."""
+        return self._neutras is not None or not getattr(self.backend, "calibrado", True)
+
+    @property
+    def calibraciones(self) -> int:
+        """Calibraciones de la cara neutra completadas."""
+        return self._calibraciones
 
     @property
     def t_ultima(self) -> float | None:
@@ -937,14 +1095,55 @@ class EmotionClassifier:
         self.backend = backend
         self._histeresis.reset(initial=self._histeresis.current)
         self._ultima = None
+        # Las caras a medio recoger eran para el anterior. Si el nuevo es
+        # relativo y no está calibrado, se calibra solo con las próximas.
+        self._neutras = None
+        self._calibrar_hasta = None
+
+    def calibrar_neutro(self) -> bool:
+        """Vuelve a tomar la cara neutra con las próximas ``calibracion_s``.
+
+        Devuelve ``False`` si el backend no se calibra (no es relativo).
+        """
+        if not getattr(self.backend, "relativo", False):
+            return False
+        self._neutras = []
+        self._calibrar_hasta = None
+        return True
+
+    def _recoger_neutra(self, rostro: np.ndarray, ahora: float) -> None:
+        if self._neutras is None:
+            self._neutras = []
+        if self._calibrar_hasta is None:
+            self._calibrar_hasta = ahora + self.calibracion_s
+        self._neutras.append(rostro.copy())
+        if ahora < self._calibrar_hasta - _HOLGURA_S:
+            return
+        try:
+            self.backend.calibrar(self._neutras)
+        except ValueError:
+            # Ninguna cara le sirvió (p. ej. el Face Landmarker no encontró
+            # ninguna): se vuelve a empezar con las próximas.
+            self._neutras, self._calibrar_hasta = [], None
+            return
+        self._neutras, self._calibrar_hasta = None, None
+        self._calibraciones += 1
+        # Los votos que hubiera son de la escala de antes de calibrar.
+        self._histeresis.reset(initial=self._histeresis.current)
 
     # -- proceso -----------------------------------------------------------
 
-    def process(self, frame_bgr: np.ndarray, timestamp: float | None = None) -> Emocion:
+    def process(self, frame_bgr: np.ndarray, timestamp: float | None = None,
+                manos=None) -> Emocion:
         """Expresión del robot a partir de un frame de la cámara, **en BGR**.
 
         Se puede llamar en cada frame: solo infiere cuando toca según
         ``emotion_hz``, y entre medias devuelve lo último decidido.
+
+        ``manos``: puntos ``(x, y)`` de las manos en píxeles del frame que se
+        pasa (el volteado), o una función sin argumentos que los devuelva. La
+        función solo se llama cuando toca inferir y hay cara, así que se puede
+        pasar un detector de manos caro sin pagarlo en cada frame.
         """
         ahora = self._clock() if timestamp is None else float(timestamp)
         if self._proxima is None or ahora >= self._proxima - _HOLGURA_S:
@@ -954,29 +1153,54 @@ class EmotionClassifier:
             # recuperan en ráfaga: se planifica desde ahora (P7, punto 10).
             siguiente = (ahora if self._proxima is None else self._proxima) + self._periodo
             self._proxima = siguiente if siguiente > ahora else ahora + self._periodo
-            self._inferir(frame_bgr, ahora)
+            self._inferir(frame_bgr, ahora, manos)
         return self.emocion
 
-    def _inferir(self, frame_bgr: np.ndarray, ahora: float) -> None:
+    def _inferir(self, frame_bgr: np.ndarray, ahora: float, manos=None) -> None:
         inicio = time.perf_counter()
         frame = cv2.flip(frame_bgr, 1) if self.frame_espejado else frame_bgr
         rectangulo = self._detector(frame)
         self._inferencias += 1
         self._t_ultima = ahora
+        self._retorno = False
+        self._manos = False
+        self._calibrando = False
         if rectangulo is None:
             self._ultima = None
             self._rostro = None
+            self._rostro_sin_espejo = None
             self._sin_rostro += 1
+            if self._sin_cara_desde is None:
+                self._sin_cara_desde = ahora
+            elif (self.retorno_neutral_s > 0.0
+                  and ahora - self._sin_cara_desde >= self.retorno_neutral_s
+                  and (self._histeresis.current != NEUTRAL or self._histeresis.window)):
+                # Una sola vez por ausencia: tras el reset la expresión es neutral
+                # y la ventana está vacía, así que esto no se repite hasta que
+                # vuelva la cara y vuelva a perderse.
+                self._histeresis.reset(initial=NEUTRAL)
+                self._retorno = True
         else:
             x, y, w, h = rectangulo
-            distribucion = self.backend.distribucion(frame[y:y + h, x:x + w])
-            self._ultima = distribucion
             self._sin_rostro = 0
+            self._sin_cara_desde = None
+            self._rostro_sin_espejo = (x, y, w, h)
             self._rostro = (
                 (frame.shape[1] - x - w, y, w, h) if self.frame_espejado else (x, y, w, h)
             )
-            if distribucion.etiqueta is not None:
-                self._histeresis.update(distribucion.etiqueta, distribucion.confianza)
+            puntos = manos() if callable(manos) else manos
+            self._manos = bool(puntos) and mano_sobre_rostro(
+                puntos, self._rostro, self.margen_manos)
+            if self.calibracion_pendiente:
+                self._ultima = None
+                self._calibrando = True
+                if not self._manos:
+                    self._recoger_neutra(frame[y:y + h, x:x + w], ahora)
+            else:
+                distribucion = self.backend.distribucion(frame[y:y + h, x:x + w])
+                self._ultima = distribucion
+                if distribucion.etiqueta is not None and not self._manos:
+                    self._histeresis.update(distribucion.etiqueta, distribucion.confianza)
         self._latencia_ms = (time.perf_counter() - inicio) * 1000.0
 
 
@@ -992,7 +1216,17 @@ _COLUMNAS_CSV = (
      "prediccion", "nativa", "confianza_pred"]
     + [f"p_{e}" for e in EMOTION_LABELS]
     + ["emocion", "confianza", "manual", "latencia_ms", "brillo",
-       "n_frames", "min_confidence", "colapso"]
+       "n_frames", "min_confidence", "colapso",
+       # Desde el 2026-10-24. 'manos': había una mano sobre la cara y la
+       # inferencia NO votó. 'retorno': en esa fila la expresión volvió a
+       # neutral por llevar 'retorno_neutral_s' sin cara. Con las dos, la
+       # reproducción offline de la histéresis sigue siendo exacta.
+       # 'recorte', 'rx', 'ry': el PNG guardado con --guardar-recortes y dónde
+       # empieza en él la caja del Haar (ver guardar_recorte).
+       "manos", "retorno", "retorno_neutral_s", "recorte", "rx", "ry",
+       # Desde el 2026-10-25: la cara de esa fila se usó para calibrar la
+       # neutra de un backend relativo y no votó.
+       "calibrando"]
 )
 
 
@@ -1009,7 +1243,8 @@ def _modelo_de(backend: EmotionBackend) -> str:
     return modelo if isinstance(modelo, str) else ""
 
 
-def _fila_csv(t, etiqueta, clasificador: EmotionClassifier, brillo: float) -> list:
+def _fila_csv(t, etiqueta, clasificador: EmotionClassifier, brillo: float,
+              recorte: tuple[str, int, int] | None = None) -> list:
     d = clasificador.ultima
     rect = clasificador.rostro or ("", "", "", "")
     emocion = clasificador.emocion
@@ -1025,8 +1260,39 @@ def _fila_csv(t, etiqueta, clasificador: EmotionClassifier, brillo: float) -> li
            clasificador.manual or "",
            f"{clasificador.latencia_ms:.1f}" if clasificador.latencia_ms else "",
            f"{brillo:.1f}", clasificador.n_frames, f"{clasificador.min_confidence:g}",
-           getattr(clasificador.backend, "colapso", "")]
+           getattr(clasificador.backend, "colapso", ""),
+           int(clasificador.manos_en_cara), int(clasificador.retorno_en_ultima),
+           f"{clasificador.retorno_neutral_s:g}",
+           *(recorte if recorte else ("", "", "")),
+           int(clasificador.calibrando)]
     )
+
+
+def registrar_inferencia(escritor, t: float, etiqueta, clasificador: EmotionClassifier,
+                         frame_bgr: np.ndarray, brillo: float,
+                         carpeta: Path | None = None) -> float | None:
+    """Escribe la fila de la última inferencia y, con ``carpeta``, su recorte.
+
+    ``frame_bgr`` es el frame que recibió ``process`` (el volteado), SIN el HUD
+    pintado encima. El recorte se guarda sin el espejo —lo que vio el
+    detector— y se llama como el número de inferencia, que es lo que enlaza
+    cada PNG con su fila. Es lo que usa el demo, y también las pruebas del
+    evaluador offline: así comprueban el camino real y no una copia.
+
+    Devuelve lo que costó escribir el PNG, en ms, o ``None`` si no se guardó.
+    """
+    recorte = None
+    coste = None
+    if carpeta is not None and clasificador.rostro_sin_espejo is not None:
+        inicio = time.perf_counter()
+        nombre = f"{clasificador.inferencias:06d}.png"
+        original = cv2.flip(frame_bgr, 1) if clasificador.frame_espejado else frame_bgr
+        rx, ry = guardar_recorte(original, clasificador.rostro_sin_espejo, Path(carpeta) / nombre)
+        coste = 1000.0 * (time.perf_counter() - inicio)
+        recorte = (nombre, rx, ry)
+    if escritor is not None:
+        escritor.writerow(_fila_csv(t, etiqueta, clasificador, brillo, recorte))
+    return coste
 
 
 def _demo(argv: list[str] | None = None) -> int:
@@ -1053,7 +1319,21 @@ def _demo(argv: list[str] | None = None) -> int:
         help="Registra una fila por inferencia, para calibrar la histéresis con "
              "datos. ESPACIO cambia de etiqueta.",
     )
+    parser.add_argument(
+        "--guardar-recortes", metavar="CARPETA", type=Path,
+        help="Con --record: guarda en CARPETA la cara de cada inferencia, en PNG "
+             "y con contexto alrededor, para evaluar OTROS modelos sobre las "
+             "mismas caras sin volver a grabar (tools/evaluar_backends.py).",
+    )
+    parser.add_argument(
+        "--manos", action="store_true",
+        help="Detecta las manos (MediaPipe Hands) en cada inferencia: con una "
+             "mano sobre la cara, la inferencia no vota y la expresion se "
+             "mantiene. En el P7 las manos vendran de BlazePose.",
+    )
     args = parser.parse_args(argv)
+    if args.guardar_recortes is not None and not args.record:
+        parser.error("--guardar-recortes necesita --record: el CSV dice que recorte es cada fila")
 
     backends: dict[str, EmotionBackend] = {}
     no_disponibles: set[str] = set()
@@ -1088,22 +1368,34 @@ def _demo(argv: list[str] | None = None) -> int:
     clasificador = EmotionClassifier.desde_config(cfg, backend=inicial)
     if isinstance(inicial, KerasBackend):
         print(f"Modelo {inicial.ruta.name}, clases {inicial.clases}.")
+    else:
+        print(f"Backend {inicial.nombre}: {_modelo_de(inicial)}.")
+    if getattr(inicial, "relativo", False):
+        print(
+            f"CALIBRACION: al aparecer tu cara, mira la pantalla con la cara\n"
+            f"  relajada {clasificador.calibracion_s:g} s: es tu cara neutra, y todo se mide\n"
+            f"  respecto a ella. La tecla c la vuelve a tomar.\n"
+        )
     print(
         f"Inferencia a {cfg.rates.emotion_hz:g} Hz; histeresis de "
         f"{clasificador.n_frames} inferencias y confianza minima "
         f"{clasificador.min_confidence:g}.\n"
     )
     print(
-        "VERIFICACION (P6.1): la tabla del plan maestro, etiquetas 0 a 6.\n"
+        "VERIFICACION (P6.1): la tabla del plan maestro, etiquetas 0 a 8.\n"
         "  Arranca en la 0 y ESPACIO pasa a la siguiente. 0-4: neutral, feliz,\n"
         "  triste, sorprendido, enojado, 10 s cada una. 5: leer en voz alta,\n"
         "  sin actuar, un texto sin emocion, 60 s (el robot debe quedarse en\n"
         "  neutral). 6: pulsa 6 y sonrie 5 s (el robot, CONCENTRADO); sin dejar\n"
-        "  de sonreir pulsa 6 otra vez y sigue 5 s (el robot, FELIZ). q al final.\n\n"
+        "  de sonreir pulsa 6 otra vez y sigue 5 s (el robot, FELIZ).\n"
+        "  7: cara neutra con las manos junto a las orejas, 10 s (NEUTRAL).\n"
+        "  8: sonrie 5 s y, sin dejar de sonreir, tapate la cara con las dos\n"
+        "  manos 10 s (FELIZ, y ~2 s despues de taparla, NEUTRAL). q al final.\n\n"
         "TECLAS\n"
         "  1..6 = forzar neutral, feliz, triste, sorprendido, enojado,\n"
         "         concentrado (la misma otra vez la suelta)\n"
         "  0 = volver a automatico    b = siguiente backend\n"
+        "  c = volver a tomar la cara neutra (combinado): cara relajada\n"
         "  ESPACIO = cambiar de etiqueta (solo con --record)    q = salir\n"
     )
 
@@ -1139,13 +1431,45 @@ def _demo(argv: list[str] | None = None) -> int:
         escritor = csv.writer(registro)
         escritor.writerow(_COLUMNAS_CSV)
         print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
+        if args.guardar_recortes is not None:
+            # La carpeta también se aparta: los PNG se numeran desde 000001 en
+            # cada sesión, y el 2026-10-25 la segunda toma del protocolo v3 pisó
+            # los de la primera, que solo conservó su CSV.
+            apartada = apartar_si_existe(args.guardar_recortes)
+            if apartada is not None:
+                print(f"AVISO: esa carpeta ya existia. Se conserva como {apartada.name}.\n")
+            args.guardar_recortes.mkdir(parents=True)
+            print(f"Guardando las caras en {args.guardar_recortes}.\n")
+
+    manos_mp = None
+    puntos_manos: list[tuple[float, float]] = []
+    if args.manos:
+        import mediapipe as mp
+
+        manos_mp = mp.solutions.hands.Hands(
+            static_image_mode=False, max_num_hands=2, model_complexity=0,
+            min_detection_confidence=0.5, min_tracking_confidence=0.5,
+        )
+
+    def detectar_manos(imagen_bgr) -> list[tuple[float, float]]:
+        # Sobre el MISMO frame que recibe process (el volteado), así que los
+        # puntos y la caja del rostro comparten coordenadas.
+        resultado = manos_mp.process(cv2.cvtColor(imagen_bgr, cv2.COLOR_BGR2RGB))
+        alto, ancho = imagen_bgr.shape[:2]
+        puntos_manos[:] = [
+            (p.x * ancho, p.y * alto)
+            for mano in (resultado.multi_hand_landmarks or ()) for p in mano.landmark
+        ]
+        return list(puntos_manos)
 
     fuente = cv2.FONT_HERSHEY_SIMPLEX
     t0 = time.perf_counter()
     marcas_fps: deque[float] = deque(maxlen=30)
     marcas_inferencia: deque[float] = deque(maxlen=10)
     vistas = 0
+    calibraciones = 0
     brillo = 0.0
+    costes_png: list[float] = []
     try:
         while True:
             ok, frame = cap.read()
@@ -1156,13 +1480,25 @@ def _demo(argv: list[str] | None = None) -> int:
             ahora = time.perf_counter()
             marcas_fps.append(ahora)
 
-            emocion = clasificador.process(frame, ahora)
+            imagen = frame
+            emocion = clasificador.process(
+                frame, ahora,
+                manos=(lambda: detectar_manos(imagen)) if manos_mp is not None else None,
+            )
             if clasificador.inferencias != vistas:
                 vistas = clasificador.inferencias
                 marcas_inferencia.append(ahora)
                 brillo = brillo_medio(frame)
-                if escritor is not None:
-                    escritor.writerow(_fila_csv(ahora - t0, etiqueta, clasificador, brillo))
+                # Antes de pintar el HUD: el recorte tiene que ser el frame que
+                # vio el detector.
+                coste = registrar_inferencia(
+                    escritor, ahora - t0, etiqueta, clasificador, frame, brillo,
+                    args.guardar_recortes)
+                if coste is not None:
+                    costes_png.append(coste)
+                if clasificador.calibraciones != calibraciones:
+                    calibraciones = clasificador.calibraciones
+                    print("cara neutra calibrada")
 
             if publicador is not None:
                 publicador.publish(emo=emocion.etiqueta)
@@ -1189,6 +1525,10 @@ def _demo(argv: list[str] | None = None) -> int:
 
             if clasificador.inferencias_sin_rostro:
                 crudo = f"sin rostro ({clasificador.inferencias_sin_rostro} inferencias)"
+            elif clasificador.calibrando:
+                crudo = "CALIBRANDO: cara relajada, mirando la pantalla"
+            elif clasificador.manos_en_cara:
+                crudo = "MANOS EN LA CARA: no vota, se mantiene"
             elif d is not None:
                 crudo = (
                     f"modelo: {d.etiqueta or 'sin equivalente'} {d.confianza:.2f}"
@@ -1228,6 +1568,8 @@ def _demo(argv: list[str] | None = None) -> int:
                     frame, f"CAMARA NEGRA (brillo {brillo:.1f})", (10, 216),
                     fuente, 0.6, (0, 0, 255), 2,
                 )
+            for px, py in puntos_manos:
+                cv2.circle(frame, (int(px), int(py)), 2, (255, 0, 255), -1)
             if escritor is not None:
                 cv2.putText(frame, f"etiqueta {etiqueta}", (10, 240), fuente, 0.6, (255, 200, 100), 2)
             if publicador is not None:
@@ -1251,6 +1593,12 @@ def _demo(argv: list[str] | None = None) -> int:
             elif tecla == ord("0"):
                 clasificador.clear_manual()
                 print("automatico")
+            elif tecla == ord("c"):
+                if clasificador.calibrar_neutro():
+                    print(f"calibrando la cara neutra: {clasificador.calibracion_s:g} s con la "
+                          f"cara relajada")
+                else:
+                    print(f"el backend {clasificador.backend.nombre} no se calibra")
             elif tecla in TECLAS_MANUAL:
                 vigente = clasificador.toggle_manual(TECLAS_MANUAL[tecla])
                 print(f"manual: {vigente}" if vigente else "automatico")
@@ -1267,6 +1615,14 @@ def _demo(argv: list[str] | None = None) -> int:
     finally:
         cap.release()
         cv2.destroyAllWindows()
+        if manos_mp is not None:
+            manos_mp.close()
+        if costes_png:
+            costes_png.sort()
+            print(
+                f"\nRecortes: {len(costes_png)} PNG en {args.guardar_recortes}, "
+                f"{costes_png[len(costes_png) // 2]:.1f} ms cada uno (mediana)"
+            )
         if publicador is not None:
             print(
                 f"\nMQTT: {publicador.message_count} enviados, "

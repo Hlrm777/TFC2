@@ -88,7 +88,9 @@ def _grabar(ruta, pasos, *, n_frames=5, min_confidence=0.6):
                 clasificador.clear_manual()
             actual["pred"] = paso["pred"]
             t = i / HZ
-            clasificador.process(FRAME, timestamp=t)
+            # 'manos': una mano dentro de la caja del rostro en esa inferencia.
+            manos = [(RECTANGULO[0] + 5, RECTANGULO[1] + 5)] if paso.get("manos") else None
+            clasificador.process(FRAME, timestamp=t, manos=manos)
             assert clasificador.inferencias == i + 1
             escritor.writerow(_fila_csv(t, paso["etiqueta"], clasificador, paso.get("brillo", 100.0)))
     return ruta
@@ -224,6 +226,52 @@ def test_una_discrepancia_al_filo_del_umbral_se_achaca_al_redondeo(tmp_path, cap
     assert "al filo del umbral" in capsys.readouterr().out
 
 
+def _protocolo_v3():
+    """Feliz con votos, las manos sobre la cara cuando el modelo diría triste
+    (no deben votar), y la cara tapada 3 s (debe volver a neutral a los 2 s)."""
+    pasos = [{"etiqueta": 1, "pred": ("feliz", 0.9)} for _ in range(10)]
+    pasos += [{"etiqueta": 7, "pred": ("triste", 0.95), "manos": True} for _ in range(10)]
+    pasos += [{"etiqueta": 8, "pred": ("feliz", 0.9)} for _ in range(5)]
+    pasos += [{"etiqueta": 8, "pred": None} for _ in range(15)]
+    pasos += [{"etiqueta": 0, "pred": ("neutral", 0.9)} for _ in range(5)]
+    return pasos
+
+
+def test_reproduce_exactamente_las_manos_y_el_retorno_a_neutral(tmp_path):
+    filas = are.cargar(_grabar(tmp_path / "v3.csv", _protocolo_v3()))
+    assert are.comparar_con_grabado(filas).exacta
+    manos = [f for f in filas if f["etiqueta"] == 7]
+    assert all(f["manos"] for f in manos) and {f["emocion"] for f in manos} == {"feliz"}
+    tapada = [f for f in filas if f["etiqueta"] == 8]
+    assert sum(f["retorno"] for f in tapada) == 1
+    primera_sin_cara = next(f for f in tapada if not f["rostro"])
+    retorno = next(f for f in tapada if f["retorno"])
+    assert retorno["t"] - primera_sin_cara["t"] == pytest.approx(2.0)
+    assert tapada[-1]["emocion"] == "neutral"
+
+
+def test_la_reproduccion_detecta_que_se_ignoren_las_manos_o_el_retorno(tmp_path):
+    """La anterior no pasa por casualidad: sin las columnas nuevas, la
+    reproducción ya no coincide con lo que mandó el clasificador."""
+    ruta = _grabar(tmp_path / "v3.csv", _protocolo_v3())
+    for columna in ("manos", "retorno"):
+        filas = are.cargar(ruta)
+        for fila in filas:
+            fila[columna] = 0
+        assert not are.comparar_con_grabado(filas).exacta, columna
+
+
+def test_las_etiquetas_7_y_8_se_juzgan(tmp_path):
+    filas = are.cargar(_grabar(tmp_path / "v3.csv", _protocolo_v3()))
+    grupos = are.indices_por_etiqueta(filas)
+    manos = are.resumir_etiqueta(7, [filas[i] for i in grupos[7]])
+    tapada = are.resumir_etiqueta(8, [filas[i] for i in grupos[8]])
+    # En la 7 el robot seguía en feliz (venía de la 1): sin cambios, pero no es
+    # neutral, y el protocolo pide neutral con cara neutra.
+    assert manos.cambios == 0 and manos.manos == 1.0 and manos.ok is False
+    assert tapada.ok is True and tapada.retorno_s == pytest.approx(2.0)
+
+
 def test_reproduce_lo_que_grabo_el_demo_entero(monkeypatch, tmp_path, capsys):
     """El demo de verdad, con cámara, teclas y backends simulados: la fila se
     escribe después de inferir, las teclas cambian de etiqueta, fuerzan
@@ -288,6 +336,7 @@ def test_reproduce_lo_que_grabo_el_demo_entero(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("TELMEOW_EMOTION_HZ", "1e9")
     monkeypatch.setenv("TELMEOW_EMOTION_N_FRAMES", "3")
     monkeypatch.setenv("TELMEOW_EMOTION_MIN_CONFIDENCE", "0.5")
+    monkeypatch.setenv("TELMEOW_EMOTION_BACKEND", "keras")
     registro = tmp_path / "emocion.csv"
 
     assert ec._demo(["--record", str(registro)]) == 0
@@ -480,3 +529,19 @@ def test_dos_grabaciones_pegadas_se_rechazan(tmp_path):
 def test_un_archivo_que_no_existe(tmp_path, capsys):
     assert are.main([str(tmp_path / "no.csv")]) == 1
     assert "No existe" in capsys.readouterr().out
+
+
+def _filas_manos(enviadas):
+    return [{"t": 0.2 * i, "emocion": e, "rostro": 1, "manual": None, "prediccion": "neutral",
+             "brillo": 100.0, "manos": 1, "retorno": 0, "calibrando": 0}
+            for i, e in enumerate(enviadas)]
+
+
+def test_la_etiqueta_7_no_cuenta_el_cambio_de_entrada():
+    """El robot llega feliz desde la 6: pasar a neutral al empezar no es una
+    falsa alarma de las manos; salir de neutral después, sí."""
+    entra = are.resumir_etiqueta(are.MANOS, _filas_manos(["feliz"] * 3 + ["neutral"] * 20))
+    assert entra.ok is True and entra.cambios == 1
+    sale = are.resumir_etiqueta(are.MANOS, _filas_manos(["neutral"] * 10 + ["triste"] * 2
+                                                        + ["neutral"] * 10))
+    assert sale.ok is False

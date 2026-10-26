@@ -27,6 +27,7 @@ mediapipe==0.10.14
 tensorflow==2.16.1
 paho-mqtt==2.1.0
 protobuf==4.25.3
+onnxruntime==1.20.1
 
 # --- Por qué estos paquetes y no otros -------------------------------------
 #
@@ -54,3 +55,11 @@ protobuf==4.25.3
 #
 # numpy 1.26.4
 #   TensorFlow 2.16 exige >=1.26,<2.0. NumPy 2 rompería TensorFlow y MediaPipe.
+#
+# onnxruntime 1.20.1
+#   Corre HSEmotion (mbf_va_mtl) en ONNX, la mitad del clasificador de emoción
+#   que eligió el operador el 2026-10-25 (P6.4). Sin torch ni el paquete
+#   emotiefflib, que traerían opencv-python y un protobuf>=6.31. La 1.20.1 no
+#   exige un protobuf nuevo: con ella, pip check limpio y la suite en verde.
+#   Los .onnx y face_landmarker.task se descargan a modelos_externos/ (plan
+#   maestro, P6.4, con URL y SHA-256).

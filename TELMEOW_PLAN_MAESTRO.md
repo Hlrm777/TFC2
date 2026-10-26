@@ -117,14 +117,14 @@ cambia respecto al plan original.
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
 | **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
-| **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · falta verlo con el operador en el visor (P6.1) | |
+| **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo) | |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ⬜ | |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1112 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1169 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -193,6 +193,10 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── analizar_registro_brazos.py ✅ CSV del arm tracker: 4 canales,
 │   │                            mano/codo, visibilidad, ganancias
 │   ├── medir_emocion.py      ✅ las cifras del P6: red, Haar, espejo, cara
+│   ├── analizar_registro_emocion.py ✅ el P6.1 por etiqueta, y la rejilla de la histéresis
+│   ├── evaluar_backends.py   ✅ otra red sobre las MISMAS caras grabadas (P6.4)
+│   ├── descargar_modelos.py  ✅ los modelos del combinado, con su SHA-256 (P6.4)
+│   ├── entrenar_blendshapes.py ✅ la regresión de los blendshapes con el dataset propio
 │   ├── train_fer2013.py      ✅ P8: FER-2013 verificado, partición oficial,
 │   │                            entrenamiento determinista, --evaluar
 │   └── eval_emotion.py       ⬜ P9
@@ -374,7 +378,7 @@ tesis.
 | 3 | **P3** | Filtros temporales (One Euro, histéresis) | ✅ |
 | 4 | **P4** | Head tracker (Face Mesh + Kabsch/solvePnP, sin dlib) | ✅ **hecho y calibrado con el operador** |
 | 5 | **P5** | Arm tracker corregido (bugs 1–4) | ✅ cerrado el 2026-10-19 |
-| 6 | **P6** | Clasificador de emoción con backends intercambiables | 🟡 código hecho · falta el visor (P6.1) |
+| 6 | **P6** | Clasificador de emoción con backends intercambiables | ✅ backend `combinado` elegido, integrado y verificado en vivo; `min_confidence` 0.5 (P6.4) |
 | 7 | **P8** | Entrenamiento con FER-2013 | ✅ 58.0 % · falta decidir P8.1 |
 | 8 | **P7** | Integración: captura única + HUD | ⬜ |
 | 9 | **P10** | Panel de control del operador | ⬜ |
@@ -1878,7 +1882,7 @@ Commit: "fix: calculo de angulos de brazo y mapeo a DOF del robot"
 
 ---
 
-## PROMPT 6 — Clasificador de emoción 🟡 **código hecho el 2026-10-19** · falta verlo con el operador (P6.1)
+## PROMPT 6 — Clasificador de emoción ✅ **código hecho el 2026-10-19** · manual verificado el 2026-10-24 · backend `combinado` elegido, integrado y verificado en vivo el 2026-10-25 (P6.4) · `min_confidence` 0.5 el 2026-10-26
 
 ### Lo hecho el 2026-10-19
 
@@ -1969,14 +1973,26 @@ evidencia directa de memorización para §3.3.4 y §3.3.5.
    350 ms del fundido del visor. 0.6 está por encima de la duda entre dos
    clases (~0.5), que es lo que frena la alternancia que la mayoría sola no
    frena. **Ninguno de los dos está medido**: se calibran con `--record`.
+   **Medidos en el P6.4**: `n_frames` se queda en 5, y `min_confidence`
+   **bajó a 0.5 el 2026-10-26**. Con el combinado, 0.6 dejaba la tristeza
+   atascada en la expresión anterior.
 8. **La confianza que devuelve `process` vale `None` cuando no hay una medida
    que la respalde ahora** —en manual, sin cara, o si ganó una clase sin
    equivalente—, en vez de repetir la última. Un número congelado que parece
    vivo es el H31.
-9. **Sin cara, la expresión se mantiene**: no vuelve a neutral, igual que la
-   cabeza del robot se queda donde estaba cuando el head tracker pierde el
-   rostro. Si el robot debe relajarse cuando el operador se levanta es una
-   decisión del P7, que ve los tres estimadores a la vez.
+9. **Sin cara, la expresión se mantiene 2 s y luego pasa a neutral**
+   (`retorno_neutral_s`, `TELMEOW_EMOTION_RETORNO_NEUTRAL_S`; 0 la mantiene sin
+   límite). **Reescrita el 2026-10-24 por decisión del operador**: hasta
+   entonces se mantenía indefinidamente. Un parpadeo de la detección no cambia
+   la cara del robot, pero si el operador se levanta o se tapa la cara, el robot
+   no se queda enojado; es lo mismo que hacen los brazos, que vuelven al reposo.
+   Y **con una mano sobre la cara** —dentro de la caja del rostro ampliada media
+   caja por lado, que llega a las orejas— la inferencia se hace pero **no
+   vota**: una mano junto a la oreja no es una expresión, y ningún modelo
+   revisado lo maneja solo. `process(frame, manos=...)` recibe los puntos de las
+   manos, o una función que los devuelva y que solo se llama cuando toca
+   inferir. El CSV marca las dos cosas (`manos`, `retorno`) para que la
+   reproducción offline siga siendo exacta.
 10. **CONCENTRADO es manual** (punto 7): `toggle_manual(e)` acepta las seis
     expresiones del visor, la misma otra vez la suelta, y `clear_manual()`
     vuelve a automático. **La inferencia sigue corriendo en manual**, para que
@@ -2087,8 +2103,10 @@ su confianza, latencia y brillo.
    y el visor levantados (§4.2):
 
    ```
-   python -m telmeow_teleop.emotion_classifier --publish --record emocion_2026-10-XX.csv
+   python -m telmeow_teleop.emotion_classifier --publish --record emocion_2026-10-XX.csv --guardar-recortes emocion_2026-10-XX_recortes --manos
    ```
+
+   **Protocolo v3** (desde el 2026-10-24; las etiquetas 7 y 8 son nuevas):
 
    | Etiqueta | Qué hacer | Tiempo | Qué debe hacer el robot |
    |---|---|---|---|
@@ -2099,6 +2117,14 @@ su confianza, latencia y brillo.
    | 4 | Ceño fruncido, como al regañar | 10 s | ENOJADO |
    | 5 | Leer en voz alta, **sin actuar**, un texto sin emoción —las instrucciones de un electrodoméstico, el parte del tiempo—, en voz normal | 60 s | NEUTRAL todo el rato: cada cambio es una falsa alarma |
    | 6 | Pulsar `6` y **sonreír** como en la 1; a los 5 s, **sin dejar de sonreír**, pulsar `6` otra vez y seguir sonriendo 5 s | 10 s | CONCENTRADO mientras está pulsado aunque sonrías; al soltar, FELIZ enseguida |
+   | 7 | Cara relajada, con **las manos junto a las orejas** | 10 s | NEUTRAL sin un solo cambio: las manos sobre la cara no votan |
+   | 8 | Sonreír 5 s y, **sin dejar de sonreír, taparse la cara con las dos manos** 10 s | 15 s | FELIZ, y ~2 s después de taparse, NEUTRAL |
+
+   Las 7 y 8 prueban las dos reglas de sistema del 2026-10-24 (decisión 9,
+   reescrita): la mano sobre la cara no vota, y sin cara la expresión vuelve a
+   neutral a los 2 s. `--manos` las detecta con MediaPipe Hands en el demo; en
+   el P7 vendrán de BlazePose. `--guardar-recortes` guarda la cara de cada
+   inferencia, para comparar modelos sin volver a grabar (P6.4).
 
    **Aclarado el 2026-10-21**, a pregunta del operador, que no veía clara la 5
    ni la 6:
@@ -2142,6 +2168,72 @@ su confianza, latencia y brillo.
    la reproducción da **exactamente** la columna `emocion` (si no, la rejilla no
    vale), y da la rejilla `n_frames` 3-9 × `min_confidence` 0.5-0.8: cambios
    por minuto en la etiqueta 5 y latencia de entrada en las 1-4.
+   **La grabación del 2026-10-24** (`emocion_2026-10-24_2.csv`, el operador en
+   su cuarto, luz estable y nadie pasando; protocolo v2, etiquetas 0-6; modelo
+   propio; `tools/analizar_registro_emocion.py`):
+
+   | Etiqueta | El robot | El modelo crudo | |
+   |---|---|---|---|
+   | 0 neutral | neutral 100 % | neutral 98 % | OK |
+   | 1 feliz | feliz 68 %, neutral 32 % | feliz 61 % | OK, la sonrisa tarda ~2 s en contar |
+   | 2 triste | **neutral 88 %**, feliz 12 % | neutral 79 %, feliz 17 % | **falla: nunca dice triste** (p_triste mediana 0.000, máximo 0.23) |
+   | 3 sorprendido | sorprendido 94 % | 91 % | OK |
+   | 4 enojado | enojado 74 %, neutral 22 % | 69 % | OK |
+   | 5 leer sin actuar | neutral 97 % | 94 % | OK: 6.7 falsas alarmas por minuto |
+   | 6 manual | concentrado mientras estaba pulsado; al soltar, neutral | neutral 97 % | **OK**: el operador tenía la cara relajada (lo confirmó), no sonriendo |
+
+   - **El modo manual queda verificado** de punta a punta (P6.1, en lo que toca
+     a la tecla).
+   - En buenas condiciones el modelo propio acierta 4 de 5, y la reproducción
+     de la histéresis con los parámetros grabados es EXACTA en las 969
+     inferencias fuera de manual. Rejilla: con `n_frames` 7 las falsas alarmas
+     leyendo bajan de 6.7 a 5.0 por minuto, a cambio de ~0.15 s más de
+     latencia. **No se recalibra todavía**: depende del backend que quede
+     (P6.4).
+   - **La tristeza no la reconoce, ni con buena luz (H51).**
+   - Los intentos del 2026-10-21, incompletos y en otro entorno (no cuentan),
+     daban «feliz» a casi todo: el contraste sugiere que un modelo entrenado
+     con fotos de una sola persona y un solo día es **muy sensible al
+     entorno**. Se medirá con una grabación en cada entorno (P6.4).
+   - La inferencia costó 63 ms de mediana (picos de 1.1 s), el doble de los
+     ~30 ms medidos en el P6 con la máquina en reposo. Habrá que medirlo con la
+     máquina sin otra carga antes del P7.
+   - La cara de operación midió ~170 px (más que los ~120 estimados en el P6):
+     el operador se sentó más cerca en su cuarto. `minSize` 60 sigue con
+     margen de sobra.
+
+   **La grabación del 2026-10-25** (`emocion_v3.csv` y `emocion_v3_recortes/`,
+   protocolo v3 completo, 286 s, 1328 caras guardadas; modelo propio en vivo;
+   `tools/analizar_registro_emocion.py`). Hubo una toma anterior con las
+   etiquetas 0-5 (`emocion_v3_anterior.csv`) que **no cuenta**: el operador la
+   repitió, y la segunda pisó sus PNG porque la carpeta de recortes no se
+   apartaba como el CSV. Corregido el mismo día (el demo la aparta igual).
+
+   | Etiqueta | El robot | |
+   |---|---|---|
+   | 0 neutral | neutral 72 %, sorprendido 28 % | OK |
+   | 1 feliz | **neutral 64 %**, feliz 36 % | falla |
+   | 2 triste | **neutral 80 %**; el modelo nunca dice triste | falla (H51) |
+   | 3 sorprendido | sorprendido 87 % | OK |
+   | 4 enojado | enojado 88 % | OK |
+   | 5 leer sin actuar | **sorprendido 76 %**, 12.1 cambios por minuto | falla (H53) |
+   | 6 manual sonriendo | concentrado mientras está pulsado; al soltar, neutral y feliz a los ~2 s | la tecla manda; el modelo veía la sonrisa como neutral |
+   | 7 manos en las orejas | **triste 63 %** | falla: las manos solo se vieron en el 57 % (H52) |
+   | 8 taparse la cara | feliz, y **neutral 2.2 s después** de perder la cara | OK: la regla del retorno funciona |
+
+   - **El modelo propio empeoró respecto al 24** con la misma luz (brillo 133
+     frente a 131) y la misma cara (172 px): neutral de 100 a 72 %, feliz de 68
+     a 36 %, y leyendo de 97 % neutral a 76 % sorprendido. Lo único medido que
+     cambió es que la cara quedó 44 px más abajo en la imagen. Lo explica H53.
+   - Lo que notó el operador, y los datos confirman: **abrir la boca basta
+     para «sorprendido»** (la etiqueta 5), **ladear la cabeza cambia la
+     expresión** (no está medido en el protocolo; sí es lo que enseñan las
+     fotos del dataset, H53), y **la tristeza solo aparece con las manos en
+     las orejas**: el modelo crudo dijo triste el 62 % de la etiqueta 7. No
+     reconoce tristeza; reacciona a las manos.
+   - Ancla: `tools/evaluar_backends.py` reproduce desde los PNG la predicción
+     grabada en las 1328 caras, bit a bit. La comparación del P6.4 vale.
+
 2. ~~**P6.2 — Confirmar la interfaz de los backends**~~ — **cerrado el
    2026-10-20**: el operador la deja como está. Cada backend recibe el recorte y
    lo prepara a su modo (decisión 2).
@@ -2149,6 +2241,274 @@ su confianza, latencia y brillo.
    **cerrado el 2026-10-20**: el operador no lo sabe. Se trabaja con las 1600
    por clase que hay y se declara así (§3.3.4, H44). No afecta al P6, y al P9
    tampoco le hacen falta: A y B se recalculan sobre lo que hay en disco.
+4. **P6.4 — Comparar modelos sobre las mismas caras, sin el operador** (plan
+   aprobado por el operador el 2026-10-24). Con la grabación del protocolo v3
+   y sus recortes, `tools/evaluar_backends.py` pasa las mismas caras por cada
+   candidato. Criterios **fijados antes de ver los números**:
+   - acierto en triste;
+   - falsas alarmas leyendo (5) y con las manos en las orejas (7);
+   - acierto medio en las 5 clases;
+   - coste ≤ 40 ms por inferencia a 5 Hz, junto a Face Mesh y BlazePose;
+   - licencia;
+   - que no rompa `.venv`;
+   - con una segunda grabación en el entorno «malo», cuánto cae.
+
+   Candidatos, con descarga aprobada por el operador:
+   - **(a) puntos del rostro**: blendshapes de MediaPipe Face Landmarker, con
+     reglas FACS relativas a la cara neutra del operador y un clasificador
+     pequeño entrenado con los blendshapes del dataset propio;
+   - **(b) HSEmotion/EmotiEffLib en ONNX** (`mbf_va_mtl` y
+     `enet_b0_8_best_vgaf`, Apache-2.0), en `.venv-benchmark`.
+
+   Línea base: el modelo propio y el de FER-2013 (P8). Los descartes, con
+   motivo, en §7.19.
+
+   **Resultado del 2026-10-25** sobre `emocion_v3.csv`, con todos los backends
+   en `.venv-benchmark`:
+
+   ```
+   python tools/evaluar_backends.py emocion_v3.csv --backend keras \
+       --backend keras:emotion_model_fer2013.keras --backend keras:emotion_model_fer2013_vgg.keras \
+       --backend blendshapes:emotion_blendshapes_facs.json --backend blendshapes:emotion_blendshapes_facs_relativo.json \
+       --backend blendshapes:emotion_blendshapes_todos.json --backend blendshapes:emotion_blendshapes_todos_relativo.json \
+       --backend onnx:modelos_externos/enet_b0_8_best_vgaf.onnx --backend onnx:modelos_externos/mbf_va_mtl.onnx
+   ```
+
+   Lo que habría hecho el **robot** (tras la histéresis, `n_frames` 5 y
+   `min_confidence` 0.6 como en la grabación), con las mismas caras, manos y
+   pérdidas de cara para todos:
+
+   | Backend | Triste (2) | Media 0-4 | Leyendo (5): neutral, cambios/min | Manos (7): neutral, cambios | ms/cara | Etiquetas OK |
+   |---|---|---|---|---|---|---|
+   | Propio (`emotion_model.keras`) | 0 % | 56 % | 24 %, 12.1 | 37 %, 2 | 7.5 | 4/9 |
+   | FER-2013 (P8) | 0 % | 37 % | 0 %, 0.0 | 0 %, 0 | 10.0 | 2/9 |
+   | FER-2013 vgg (P8.1) | 0 % | 40 % | 99 %, 0.8 | 100 %, 0 | 22.5 | 4/9 |
+   | Blendshapes FACS | **95 %** | **93 %** | 65 %, 8.3 | 0 %, 3 | 12.1 | 7/9 |
+   | Blendshapes FACS relativo | 76 % | 86 % | 93 %, 7.6 | 92 %, 5 | 12.2 | 8/9 |
+   | Blendshapes todos | 87 % | 86 % | 77 %, 8.3 | 23 %, 2 | 12.1 | 8/9 |
+   | Blendshapes todos relativo | 76 % | 78 % | 90 %, 12.1 | 73 %, 5 | 12.3 | 7/9 |
+   | HSEmotion `enet_b0_8_best_vgaf` | 65 % | 72 % | 87 %, 2.3 | 45 %, 2 | 10.1 | 5/9 |
+   | HSEmotion `mbf_va_mtl` | 77 % | 90 % | 90 %, 2.3 | 44 %, 2 | **7.9** | 8/9 |
+   | **Combinado `mbf_va_mtl` + blendshapes FACS relativo** | **98 %** | **94 %** | **99 %, 0.8** | **97 %, 1** | 19.2 | 8/9 |
+   | Combinado `mbf_va_mtl` + blendshapes FACS | 93 % | 93 % | 82 %, 2.3 | 0 %, 1 | 20.3 | 8/9 |
+
+   - **Blendshapes**: los 52 coeficientes de MediaPipe Face Landmarker sobre
+     la caja del Haar (la misma interfaz que los demás backends, P6.2), y una
+     regresión logística entrenada con los del dataset propio
+     (`tools/entrenar_blendshapes.py`: 7313 de las 8000 fotos tienen cara para
+     el Haar y el Face Landmarker). «FACS» usa 15 coeficientes elegidos por
+     las unidades de acción de cada expresión; «todos», los 31 simétricos.
+     «Relativo» mide respecto a la cara neutra: la del dataset al entrenar y
+     los primeros 10 s de la etiqueta 0 al evaluar, que es lo que haría la
+     tecla `c`. Validación con el último 20 % de la numeración de cada clase:
+     99.9 % y 99.4 %. Es la misma persona y el mismo día, así que **no se
+     cita** como generalización.
+   - Antes de la regresión se comprobó lo que pedía el plan: con la cara
+     triste del operador **sí se mueven** las comisuras abajo (`mouthFrown`,
+     AUC 0.89 frente a las etiquetas neutras) y el labio superior
+     (`mouthShrugUpper`, 0.98), aunque con valores pequeños (~0.01). Las cejas
+     internas (`browInnerUp`) no: su tristeza posada es un puchero, sin cejas.
+   - Las cuatro variantes se fijaron antes de correrlas y no se ajustó nada
+     con la grabación. El prototipo (en el scratchpad, sobre los recortes con
+     margen) sí se vio antes de pasarlo a `tools/`, y dio lo mismo en orden.
+   - **El modelo de FER-2013 del P8 reparte casi por igual**: confianza
+     mediana 0.34 con la cara del operador. Por eso su 99 % de «triste» crudo
+     no mueve al robot: nunca pasa de `min_confidence`. El evaluador imprime
+     ahora la confianza mediana para que esto no engañe.
+   - **La etiqueta 7 falla con todos**: no es del modelo, es que el detector
+     de manos no las vio en el 43 % de las inferencias (H52).
+   - Los tiempos se midieron uno tras otro en la laptop, sin controlar la
+     carga: son orientativos. Todos caben en los 40 ms.
+   - **No rompe `.venv`**: los blendshapes solo usan MediaPipe, que ya está.
+     HSEmotion en ONNX necesita `onnxruntime`; la 1.20.1 se instaló en
+     `.venv-benchmark` (copia de `requirements.txt`) con `pip check` limpio,
+     protobuf 4.25.3 intacto y la suite entera en verde.
+   - **Licencias**: MediaPipe y EmotiEffLib son Apache-2.0. Los pesos de
+     HSEmotion se entrenaron con AffectNet, cuyos términos son de uso
+     académico: valen para la tesis. Verificarlo antes de citarlo.
+
+   **Las combinaciones** (aprobadas por el operador el 2026-10-25, después de
+   ver la tabla de los siete primeros, y antes de correrlas): `CombinadoBackend`
+   promedia **a partes iguales** las probabilidades de `mbf_va_mtl` y de unos
+   blendshapes, sin ningún peso ajustado con la grabación. Se fijaron dos, con
+   los blendshapes FACS relativos y sin calibrar, y no se probó ninguna más:
+
+   ```
+   python tools/evaluar_backends.py emocion_v3.csv \
+       --backend "combinado:onnx:modelos_externos/mbf_va_mtl.onnx+blendshapes:emotion_blendshapes_facs_relativo.json" \
+       --backend "combinado:onnx:modelos_externos/mbf_va_mtl.onnx+blendshapes:emotion_blendshapes_facs.json"
+   ```
+
+   - **Con los relativos, la combinación es la mejor en todos los criterios**:
+     triste 98 %, media 94 %, y leyendo en voz alta un solo cambio en 79 s
+     (0.8 por minuto, frente a 12.1 del modelo propio).
+   - Hasta **aguanta las manos en las orejas** (97 % neutral) donde el
+     detector de manos falló (H52). No es que las detecte: ninguno de los dos
+     modelos lee esa cara como otra cosa a la vez.
+   - Los errores de uno y otro no coinciden: `mbf_va_mtl` confunde a veces la
+     sonrisa con enojo, y los blendshapes relativos, la tristeza con neutral.
+   - Cuesta la suma de los dos, 19 ms por cara, dentro de los 40.
+   - Lo que no hay que olvidar al citarlo: es **una sesión de una persona**, y
+     la idea de combinar salió de ver esta misma tabla. Las partes iguales y
+     las dos variantes fijadas antes de correrlas limitan el sesgo, pero no lo
+     quitan. La cifra que vale es la de una sesión nueva, que el P9 pide
+     igualmente.
+
+   **Lectura para decidir (Fase 3, la decide el operador):**
+
+   - **La combinación `mbf_va_mtl` + blendshapes FACS relativo (recomendada
+     desde el 2026-10-25)**: la mejor en todo lo medido. Necesita
+     `onnxruntime==1.20.1` en `.venv` y la calibración de la cara neutra al
+     arrancar (tecla `c`), que además es la mitigación de la edad (§3.3.3).
+
+   - Tres candidatos superan claramente al propio y **reconocen la tristeza**:
+     `mbf_va_mtl`, blendshapes FACS relativo y blendshapes FACS.
+   - **`mbf_va_mtl` solo**: si se quiere un solo modelo, la mejor estabilidad al hablar (2.3
+     falsas alarmas por minuto, frente a 12.1 del propio), 90 % de media, el
+     más barato. No se entrenó con fotos del operador, sino con miles de
+     personas de AffectNet: es el que más opciones tiene con un operador
+     mayor. Cuesta añadir `onnxruntime==1.20.1` a `.venv`. Su punto débil:
+     triste 77 %, y a veces lee la sonrisa como enojo.
+   - **Blendshapes FACS relativo**: sin dependencias nuevas, y su calibración
+     con la cara neutra es la mitigación de la edad (§3.3.3). Pero se entrenó
+     con una sola persona, y triste baja a 76 %.
+   - **Blendshapes FACS**: el mejor en triste (95 %) y en media (93 %), pero
+     leyendo pone enojado el 29 % del tiempo, y es el que más depende del
+     operador del dataset.
+   - Con cualquiera, las manos siguen pendientes del P7 (H52), y hay que
+     recalibrar `n_frames` y `min_confidence` con la rejilla (Fase 4).
+
+   **Fase 3 — Decisión del operador (2026-10-25): la combinación
+   `mbf_va_mtl` + blendshapes FACS relativo.**
+
+   **Fase 4 — Integrada el mismo día:**
+
+   - `telmeow_teleop/emotion_backends.py`: `OnnxHSEmotionBackend`,
+     `BlendshapesBackend`, `CombinadoBackend` y `crear_combinado`. Se importa
+     solo al pedir el `combinado`: quien use el modelo propio no carga MediaPipe
+     Tasks ni onnxruntime.
+   - **`combinado` es el backend por defecto** (`EmotionConfig.backend`;
+     `BACKENDS` lo pone primero). El modelo propio queda como línea base y de
+     reserva: si faltan los modelos descargados o onnxruntime, el demo avisa y
+     arranca con `keras`.
+   - **`onnxruntime==1.20.1` en `.venv` y en `requirements.txt`**, aprobado por
+     el operador: `pip check` limpio, protobuf 4.25.3 y MediaPipe intactos.
+   - Rutas en `PathConfig`: `emotion_onnx`, `face_landmarker` (en
+     `modelos_externos/`) y `emotion_blendshapes`
+     (`emotion_blendshapes_facs_relativo.json`, versionado). Variables
+     `TELMEOW_EMOTION_ONNX_PATH`, `TELMEOW_FACE_LANDMARKER_PATH` y
+     `TELMEOW_EMOTION_BLENDSHAPES_PATH`. **En otra máquina**:
+     `python tools/descargar_modelos.py`, que baja los dos modelos de su
+     origen, fijado por commit, y rechaza los que no tengan el SHA-256 de
+     abajo.
+   - **Calibración de la cara neutra**, como la del head tracker: con un
+     backend relativo, las caras de los primeros **3 s** desde la primera que
+     aparece calibran y **no votan**, y la tecla `c` del demo
+     (`calibrar_neutro()`) la vuelve a tomar. Las caras con una mano encima no
+     cuentan, y si ninguna sirve se vuelve a empezar. Al terminar, la ventana
+     de la histéresis se vacía (sus votos eran de antes) y la expresión se
+     mantiene. Con 3 s (11 caras) la sesión del protocolo v3 da exactamente lo
+     mismo que con 10; con 2 s (6 caras), la tristeza baja de 98 a 91 %.
+     `TELMEOW_EMOTION_CALIBRACION_S` lo cambia. Al arrancar, el operador tiene
+     que mirar la pantalla con la cara relajada 3 s: el demo lo dice.
+   - El CSV tiene una columna nueva, `calibrando`. El analizador no cuenta
+     esas filas como votos, y el evaluador **calibra con las mismas caras que
+     en vivo**, así que el ancla también vale para el combinado (hay una
+     prueba). Sin esas filas calibra con los primeros 3 s de la etiqueta 0.
+   - **Histéresis recalibrada con datos y confirmada: `n_frames` 5 y
+     `min_confidence` 0.6.** Rejilla con las predicciones del combinado
+     (`tools/evaluar_backends.py emocion_v3.csv --backend combinado
+     --rejilla`): con confianza ≥ 0.6, leer en voz alta da **0.8 cambios por
+     minuto con cualquier `n_frames` de 3 a 9**. El combinado casi no duda, y
+     la histéresis ya no tiene parpadeo que frenar. `n_frames` 3 llegaría 0.24 s
+     antes (1.15 frente a 1.39 s de media), pero añade un cambio en la
+     etiqueta de tristeza (93 % frente a 98 %). Con una sola sesión no
+     compensa. Con 0.5 de confianza las falsas alarmas suben a 2.3-5.3 por
+     minuto.
+   - Coste: ~20 ms por cara (los dos modelos), dentro de los 40 ms del
+     criterio. En el P7 se suma a Face Mesh y BlazePose (punto 19).
+
+   **Verificación en vivo (2026-10-25, noche)** — `emocion_v3_combinado.csv` y
+   sus recortes, protocolo v3 con el combinado y el visor, 322 s. Es la
+   primera sesión que **no se usó para elegir**: su resultado es el citable.
+   - La toma anterior (`emocion_v3_combinado_anterior.csv`, solo la etiqueta
+     0) no cuenta. La carpeta de recortes ya se apartó sola, con el arreglo
+     del mismo día.
+   - El operador recalibró con `c` a los 12 s, todavía en la etiqueta 0: dos
+     calibraciones, de 11 y 16 caras. Al final pulsó ESPACIO por error (una
+     etiqueta 9 de 2.4 s, fuera del protocolo). Dice que se adormecía en las
+     esperas largas, pero hizo todas las expresiones.
+   - **Instrumento**: el analizador reproduce la histéresis EXACTA en las 1517
+     inferencias fuera de manual. El evaluador reproduce la predicción del
+     combinado bit a bit en las 1468 caras, **rehaciendo cada calibración donde
+     ocurrió** (`episodios_de_calibracion`). Juntar las dos daría otra cara
+     neutra que la que usó el robot. El analizador vacía la ventana en las
+     filas que calibran, como el clasificador.
+
+   | Etiqueta | El robot (en vivo, 5 / 0.6) | |
+   |---|---|---|
+   | 0 neutral | neutral 100 % | OK |
+   | 1 feliz | feliz 91 % | OK |
+   | 2 triste | **feliz 100 %** | **falla** |
+   | 3 sorprendido | sorprendido 89 % | OK |
+   | 4 enojado | enojado 93 % | OK |
+   | 5 leer sin actuar | neutral 94 %, **2.7 cambios por minuto** (el propio: 9.7 con estas mismas caras) | OK |
+   | 6 manual sonriendo | concentrado mientras está pulsado; al soltar, **feliz** | OK |
+   | 7 manos en las orejas | neutral 93 %, y ninguna falsa alarma con las manos | OK |
+   | 8 taparse la cara | feliz, y neutral **2.0 s** después de perder la cara | OK |
+
+   - **8 de 9**. Con estas mismas caras, el modelo propio habría hecho 3 de 9.
+   - **La tristeza falla por el umbral, no por el modelo.** El combinado dijo
+     triste en la mayoría de las caras de la etiqueta 2, pero con confianza de
+     0.4 a 0.6. Ninguna ventana llegó a una media de 0.6, así que el robot se
+     quedó con lo último que tenía: el feliz de la etiqueta 1. La tristeza
+     posada era el mismo puchero que el día anterior (comparado en los
+     recortes), pero el modelo estaba menos seguro.
+   - **El fallo de fondo**: cuando el modelo duda, el robot se queda con una
+     expresión vieja. Es peor un robot feliz ante un operador triste que un
+     robot neutral.
+   - **La etiqueta 7 sale bien.** El analizador la daba por fallida por el
+     cambio de entrada (de feliz, que viene de la 6, a neutral). Ahora solo
+     cuenta los cambios después de llegar a neutral. Con esa regla, el
+     combinado hace también **9 de 9** sobre la grabación de la mañana
+     (`emocion_v3.csv`), donde la tabla de arriba decía 8 de 9.
+   - **Coste en vivo**: 87 ms de mediana por inferencia, sumando el Haar,
+     MediaPipe Hands y los dos modelos. Los dos modelos solos cuestan 21 ms
+     (evaluador). El día 24, con el modelo propio, eran 52-63 ms. En el P7
+     (punto 19) la inferencia va en un hilo aparte si la cámara baja de fps.
+
+   **`min_confidence` 0.6 o 0.5** (`n_frames` 5 en los dos casos). Con
+   `tools/evaluar_backends.py SESION.csv --backend combinado --histeresis 5
+   0.5`:
+
+   | Sesión | `min_confidence` | Triste | Media 0-4 | Leyendo: cambios/min | Etiquetas OK |
+   |---|---|---|---|---|---|
+   | v3 de la mañana (elegir) | 0.6 | 98 % | 94 % | 0.8 | 9/9 |
+   | v3 de la mañana (elegir) | 0.5 | 83 % | 91 % | 2.3 | 8/9 (en la 7, dos parpadeos con las manos) |
+   | en vivo (citable) | 0.6 | **0 %** | 75 % | 2.7 | 8/9 |
+   | en vivo (citable) | 0.5 | **62 %** | 81 % | 3.2 | **9/9** |
+
+   Con 0.5 la tristeza deja de quedarse atascada en las dos sesiones, a
+   cambio de ~1 falsa alarma más por minuto al hablar (sigue siendo un
+   tercio de las del modelo propio). **El operador eligió 0.5 el
+   2026-10-26**: es el valor por defecto de `EmotionConfig.min_confidence` y
+   del constructor de `EmotionClassifier`. Se eligió viendo la sesión citable,
+   y así se declara: la cifra de la tesis es la reproducción con 0.5 (9 de 9,
+   triste 62 %), junto a lo que hizo el robot en vivo con 0.6 (8 de 9). La
+   próxima grabación con 0.5 la confirma o no.
+
+   Lo curioso, pendiente de aprobar antes de probarlo: que tras unos segundos
+   sin una expresión clara el robot pase a neutral, en vez de quedarse con la
+   última.
+
+   **Descargas** (aprobadas por el operador el 2026-10-24; en
+   `modelos_externos/`, fuera de git):
+
+   | Archivo | Origen | Bytes | SHA-256 |
+   |---|---|---|---|
+   | `face_landmarker.task` | `storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/` | 3 758 596 | `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff` |
+   | `enet_b0_8_best_vgaf.onnx` | `github.com/sb-ai-lab/EmotiEffLib`, `models/affectnet_emotions/onnx/`, main en `520a051` | 16 039 595 | `fa07e841fd06c7a67ee651ea4e6e4a3a2bb5695f47b37a7da50492526f59c898` |
+   | `mbf_va_mtl.onnx` | ídem | 8 251 681 | `0323ace52ea6dbe9aa4a909d20933f7b8629c3fb41249e338f4316abf2a4828c` |
 
 ### Enunciado original
 
@@ -2333,10 +2693,27 @@ captura y UN solo bucle que alimente a los tres estimadores.
 
 17. EL HUD pone al lado de la expresión enviada la predicción cruda
     (`clasificador.ultima`), y la confianza vale `None` sin cara: no la
-    rellenes con la última (H31). Sin cara la expresión se mantiene; si el
-    robot debe volver a neutral cuando el operador se levanta, se decide aquí,
-    junto con lo que hacen la cabeza (se queda) y los brazos (vuelven al
-    reposo en 0.5 s).
+    rellenes con la última (H31). Sin cara, la expresión vuelve a neutral a los
+    2 s: lo decidió el operador el 2026-10-24 (decisión 9 del P6, reescrita).
+
+18. LAS MANOS DEL CLASIFICADOR DE EMOCIÓN SALEN DE BLAZEPOSE, que ya corre:
+    `ArmTracker.landmarks_imagen`, índices 15-22 (muñecas y dedos), pasados a
+    píxeles del MISMO frame volteado que recibe `EmotionClassifier.process(...,
+    manos=puntos)`. El demo del P6 usa MediaPipe Hands en su lugar; aquí no
+    hace falta una tercera red. Comprobar con la etiqueta 7 del protocolo si
+    BlazePose ve las manos pegadas a las orejas, que MediaPipe Hands pierde el
+    43 % de las veces (H52).
+
+19. EL CLASIFICADOR DE EMOCIÓN ES EL `combinado` (P6.4): ~20 ms por cara a
+    5 Hz, encima de Face Mesh y BlazePose. Se calibra solo con los primeros
+    3 s de cara, igual que el head tracker toma la primera cara como
+    referencia: que la tecla `c` del pipeline integrado calibre LAS DOS cosas
+    a la vez (`HeadTracker.set_neutral()` y
+    `EmotionClassifier.calibrar_neutro()`), porque piden lo mismo al operador:
+    mirar la pantalla con la cara relajada. El Face Landmarker del combinado y
+    la Face Mesh del head tracker son dos redes de cara: unificarlas es una
+    optimización posible, pero obliga a re-verificar el P4 en el visor. Solo si
+    el tiempo no alcanza, y con la aprobación del operador.
 
 Actualiza el README con: instalación, configuración de Mosquitto, cómo lanzar el
 visor (servidor HTTP local — NUNCA con file://), cómo lanzar el pipeline, y un
@@ -2961,8 +3338,8 @@ especializada en rostros de adultos mayores**. Debe declararse (§3.3).
 
 ## 3.2 Decisiones abiertas
 
-Quedan **tres**: dos de la v1 —las otras dos se cerraron (§0.6)—, y la del
-modelo de emoción en operación, que abrió el P8.
+Quedan **dos** de la v1 —las otras dos se cerraron (§0.6)—. La del modelo de
+emoción en operación, que abrió el P8, se cerró el 2026-10-25 (punto 4).
 
 1. **Ganancia de mapeo operador → robot.** Implementada y configurable
    (`HeadConfig`), con dos valores para el tilt porque las asimetrías del robot
@@ -3011,8 +3388,12 @@ modelo de emoción en operación, que abrió el P8.
    de pan/tilt y devuelve suavemente a la última posición en vivo, no a home),
    pero **no validado con una persona real**.
 
-4. **Qué modelo de emoción usa el robot en operación** *(abierta por el P8,
-   2026-10-20)*. Hay dos, y cada uno gana en una cosa:
+4. ~~**Qué modelo de emoción usa el robot en operación**~~ — **cerrada el
+   2026-10-25**: el operador eligió el `combinado` (`mbf_va_mtl` + blendshapes
+   relativos) con la tabla del P6.4 delante, porque supera a los tres modelos
+   propios en todo lo medido sobre su cara en el puesto. El P9 sigue
+   reportando B y D para los propios. Lo que se pensaba el 2026-10-20 *(abierta
+   por el P8)*. Hay dos, y cada uno gana en una cosa:
    - el **propio** (`emotion_model.keras`) conoce la cara de Harold —acierta el
      99.9 % de su dataset—, pero eso es memorización: no generaliza ni a esa
      misma cara en espejo (H43), y con otro narrador no hay motivo para que
@@ -3076,6 +3457,29 @@ modelo de emoción en operación, que abrió el P8.
    neutral, tristeza y enojo — tres de las cinco clases. Referencias:
    Goodfellow et al. (2013); Khaireddin & Chen (2021); revisión sistemática
    arXiv:2502.02618 (2025).
+
+   **Ampliado el 2026-10-24** (investigación del P6.4, §7.19). El operador real
+   será una persona adulta mayor que el estudiante de 24 años con cuyas fotos se
+   entrenó el modelo propio, y no hubo un adulto mayor disponible para grabar.
+   La literatura da:
+   - Una caída de **7-10 puntos** con mayores: macro-F1 0.84 → 0.75 con
+     ConvNeXt entrenado en AffectNet y probado con FACES (Gaya-Morey et al.
+     2025, arXiv 2507.07638); con FER2013, de jóvenes a mayores de 68 años,
+     −7 a −9.5 puntos según el método (Caroppo et al. 2020).
+   - **El fallo tiene dirección**: la cara neutra de una persona mayor se lee
+     como triste o enojada, porque las arrugas se solapan con los marcadores de
+     la expresión. Le pasa también a un sistema por Action Units, no solo a las
+     redes de apariencia (Freudenberg et al. 2015).
+   - **Los métodos por puntos del rostro no son más robustos a la edad**:
+     caen igual o más (Caroppo 2020). No se puede vender la vía de los
+     blendshapes como solución a la edad.
+
+   La mitigación defendible es **calibrar con la cara neutra del operador** al
+   empezar, como ya hace el head tracker (Baltrušaitis et al. 2015 normalizan
+   por persona y mejoran entre datasets). Se declara la limitación, y la
+   configuración G del P9 queda preparada para cuando haya un adulto mayor que
+   grabe el protocolo. Verificar las referencias antes de citarlas: Kim et al.
+   2021 y Guo et al. 2013 solo se leyeron por resúmenes.
 
 4. **Dataset propio de un solo sujeto.** 2000 imágenes por emoción de una sola
    persona en sesiones controladas —en disco quedan **1600 por emoción**, ver
@@ -3946,7 +4350,10 @@ from telmeow_teleop.emotion_classifier import (EmotionClassifier, KerasBackend,
                                                Emocion, Distribucion, BACKENDS)
 from telmeow_teleop.config import VIEWER_EMOTIONS   # las 6 del visor, orden de sus botones
 
-c = EmotionClassifier.desde_config(cfg)     # backend, tasa, histéresis, cascade, espejo
+c = EmotionClassifier.desde_config(cfg)     # backend (combinado), tasa, histéresis, cascade,
+                                            # espejo, calibracion_s
+c.calibrar_neutro() -> bool                 # tecla c: los próximos 3 s calibran (False si no es relativo)
+c.calibrando ; c.calibracion_pendiente ; c.calibraciones   # para el HUD y el CSV
 c.process(frame_bgr) -> Emocion(etiqueta, confianza)   # BGR, NO el RGB de MediaPipe
 c.toggle_manual("concentrado") ; c.clear_manual() ; c.manual
 c.cambiar_backend(crear_backend("hsemotion", cfg))     # conserva la expresión
@@ -3985,6 +4392,21 @@ con ese formato.
 Modo demo: `python -m telmeow_teleop.emotion_classifier [--backend B]
 [--publish] [--record CSV]`. Las cifras del P6: `python tools/medir_emocion.py
 [--paso 20] [--registro-cabeza calibracion_20260906_integrada.csv]`.
+
+**Desde el 2026-10-24.** `process(frame_bgr, timestamp=None, manos=None)`:
+`manos` son puntos `(x, y)` en el frame recibido, o una función que los
+devuelva; con alguno sobre la cara (`mano_sobre_rostro`, margen
+`MARGEN_MANOS` = media caja por lado) la inferencia no vota y
+`c.manos_en_cara` es `True`. Sin cara más de `retorno_neutral_s` (2 s), la
+expresión vuelve a neutral y `c.retorno_en_ultima` lo marca en esa fila.
+`c.rostro_sin_espejo` es la caja en el frame sin espejo.
+`registrar_inferencia(escritor, t, etiqueta, c, frame, brillo, carpeta)`
+escribe la fila y, con carpeta, el PNG del recorte (`guardar_recorte`: la caja
+con media caja de margen, sin pérdidas, y `rx`/`ry` de la caja dentro). Demo:
+`--guardar-recortes CARPETA` y `--manos`. Después:
+`python tools/evaluar_backends.py sesion.csv --recortes CARPETA --backend keras
+--backend keras:emotion_model_fer2013.keras`, que comprueba sola el ancla:
+con el backend grabado reproduce la predicción bit a bit.
 
 ## `tools/train_fer2013.py` (P8)
 
@@ -4717,6 +5139,92 @@ el `KerasBackend`. **Es una advertencia para el P6.1 y el P9**: una
 comprobación «de punta a punta» con la cara del operador solo verifica lo que
 el modelo reconoce bien en esa cara.
 
+## 7.19 El P6.1 con el operador y la búsqueda de un modelo mejor (H51-H53)
+
+**H51 — El modelo propio no reconoce la tristeza, ni con buena luz.** En la
+grabación del 2026-10-24, en el cuarto del operador y con luz estable, acierta
+neutral, feliz, sorprendido y enojado (68-100 % del tiempo), pero en la
+etiqueta de tristeza el robot puso neutral el 88 %. El modelo crudo **nunca**
+dijo triste: probabilidad de triste con mediana 0.000 y máximo 0.23 en 156
+inferencias. Es el par que más confunde la literatura —tristeza y neutral—, y
+lo más probable es que la tristeza posada del operador sea sutil (cejas y
+comisuras, AU1+AU4+AU15) para una red de 48×48 en gris; es una inferencia, no
+una medida. Contrasta con HSEmotion, que en el P6 leía la cara neutra del
+operador como triste (27 de 38): el error contrario.
+
+**La investigación del 2026-10-24** (14 agentes en solo lectura, con
+verificación de cada licencia y cada cifra en la fuente primaria) buscó un
+modelo abierto mejor que el propio:
+
+- **Ninguna gran empresa tiene un modelo abierto de emociones utilizable.**
+  - Microsoft retiró las emociones de Azure Face en 2022-2023 (privacidad y
+    falta de consenso científico).
+  - Meta no publica ninguno: el seguimiento facial del Quest Pro solo
+    funciona con las cámaras del casco, y Llama 3.2 Vision (11-90 B) es
+    inviable a 5 Hz en CPU.
+  - OpenAI no tiene uno, y la ficha de CLIP declara fuera de alcance los usos
+    desplegados y faciales.
+  - Google solo ofrece Cloud Vision (en la nube y de pago) y los blendshapes
+    de MediaPipe.
+  - Apple (ARKit) no funciona en Windows; Amazon Rekognition va en la nube y
+    es de pago.
+  - Los servicios en la nube mandarían la cara del operador a un tercero.
+- **Candidatos, para el P6.4**:
+  - HSEmotion/EmotiEffLib en ONNX (Apache-2.0): `enet_b0_8_best_vgaf`, con
+    AffectNet-8 61.3 % y AffectNet-7 64.6 %, y `mbf_va_mtl` (112 px, 8 MB,
+    62.3 % en AffectNet-8 según arXiv 2403.11590).
+  - Los blendshapes de MediaPipe Face Landmarker: 52 coeficientes,
+    `face_landmarker.task` de 3.6 MB, Apache-2.0. Comprobado que la API está
+    en mediapipe 0.10.14.
+  - Ojo con instalar `emotiefflib` con dependencias: trae opencv-python y onnx
+    1.23 (protobuf ≥ 6.31), y rompería `.venv` (como el H45). La vía es
+    onnxruntime y el `.onnx` a mano, primero en `.venv-benchmark`.
+- **Descartados, con motivo**:
+  - EmoNet: CC BY-NC-ND, sin obras derivadas, y su modelo de 5 clases no
+    tiene enojo.
+  - OpenFace 3.0: licencia de investigación sin redistribuir, y su paquete
+    fija Pillow 9.4, que no tiene rueda para Python 3.12.
+  - LibreFace: fija torch 2.0 y mediapipe 0.10.5, sin ruedas para Python
+    3.12, y da AffectNet 49.7 %.
+  - POSTER++: MIT, pero su entorno exige torch 1.8 y protobuf 3.20.
+  - DDAMFN: el repositorio no tiene licencia, y los pesos publicados no son
+    los del artículo.
+  - El ViT de trpakov: 343 MB, protocolo sin documentar, y su orden de clases
+    cruzaría tristeza, sorpresa y neutral.
+  - Py-Feat/ResMaskNet: 143 M parámetros, 552 MB.
+  - CLIP y los modelos de visión y lenguaje: por coste y por política de uso.
+- **Manos**: ningún modelo revisado publica robustez frente a manos junto a
+  la cara. Por eso son una regla del sistema (decisión 9 del P6) y no del
+  modelo. La Face Mesh, además, «completa» una cara tapada en vez de avisar.
+
+**H52 — El detector de manos no ve una mano pegada a la oreja.** En la
+etiqueta 7 del 2026-10-25 (manos junto a las orejas, 177 caras), MediaPipe
+Hands en el demo (complejidad 0, en seguimiento, sobre el frame entero) vio
+alguna mano en **101** (57 %). Sobre los recortes, en imagen fija, vio 77 con
+complejidad 0 y 103 con complejidad 1: el modelo mayor tampoco lo arregla. Una
+mano plana contra la cabeza se ve de canto. Donde no la vio, el modelo de
+emoción votó, y con el propio el robot se puso triste. La regla de las manos
+es correcta; **la entrada no es fiable**. En el P7 las manos vienen de las
+muñecas de BlazePose (punto 18), que siempre da una estimación con su
+visibilidad: hay que comprobar allí si las ve mejor. Si no, mantener la marca
+de «mano en la cara» un tiempo tras perderla; los huecos llegaron a 4.3 s.
+
+**H53 — El modelo propio aprendió atajos del dataset, no solo expresiones.**
+Las 8000 fotos son de una sola persona, un día y un cuarto, y vistas en
+conjunto (2026-10-25) tienen patrones que acompañan a la clase sin ser la
+expresión:
+- «sorprendido» es casi siempre una boca pequeña en «o»: **hablar abre la
+  boca** y el modelo dice sorprendido (76 % leyendo en voz alta, el 25);
+- la cabeza va inclinada o girada en muchas de sorprendido y enojado, y mirando
+  abajo en neutral: **ladear la cabeza** le cambia la expresión;
+- lleva gafas gruesas negras y chaqueta oscura; en las grabaciones, gafas
+  finas y otra ropa.
+
+Es una inferencia sobre las fotos, coherente con lo medido: con la misma luz
+y la misma cara el modelo propio pasó de 4 de 5 (el 24) a 3 de 5 (el 25), y leyendo de 97 % neutral a 24 %.
+Los blendshapes se calculan sobre la forma de la cara, no sobre los píxeles, y
+`mbf_va_mtl` no vio nunca al operador: los dos aguantaron ese cambio (P6.4).
+
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
@@ -4769,6 +5277,9 @@ el modelo reconoce bien en esa cara.
 | **H46** | **DeepFace tampoco es simétrico, y al revés que el modelo propio**: 28 % con la cara como la ve la cámara y 47 % volteada; HSEmotion da lo mismo. La orientación cambia el resultado de dos de tres backends: el P9 la fija y la declara | P6, P9, §7.17 |
 | **H48** | **La prueba oficial de FER-2013 tiene fuga**: 438 de sus 6 043 imágenes (cinco clases) están repetidas píxel a píxel en Training, 431 con la misma etiqueta; el dataset entero tiene 34 034 imágenes distintas de 35 887. Validación agrupada por imagen idéntica, y la accuracy también sin las repetidas | P8, P9 punto 17, §7.18 |
 | **H49** | **Entrenar con volteo no hace simétrica a la red**: el modelo de FER-2013 acierta lo mismo con las caras volteadas, pero cambia de predicción en una de cada cinco (misma predicción 77.6 %). Con una sola persona no se compensa | P8, P9 punto 20, §7.18 |
+| **H53** | **El modelo propio aprendió atajos del dataset**: boca abierta = sorprendido, cabeza ladeada, gafas. Con la misma luz pasó de 4 de 5 a 3 de 5 entre el 24 y el 25, y de 97 % a 24 % neutral leyendo; los blendshapes y `mbf_va_mtl` aguantan | P6.1, P6.4, §7.19 |
+| **H52** | **El detector de manos no ve una mano pegada a la oreja**: 57 % en vivo, 58 % con el modelo mayor. La regla de las manos es correcta, la entrada no; en el P7 se prueban las muñecas de BlazePose | P6.1, P7, §7.19 |
+| **H51** | **El modelo propio no reconoce la tristeza, ni con buena luz**: en la grabación del 2026-10-24 acierta 4 de 5, pero con la tristeza el robot pone neutral el 88 % y el modelo crudo nunca dice triste. Los modelos abiertos que podrían mejorarlo, y los descartados, en §7.19 | P6.1, P6.4, §7.19 |
 | **H50** | **Las etiquetas del operador no bastan para verificar el orden de clases de un modelo que confunde sus caras**: con el de FER-2013, de 120 permutaciones, una equivocada cuadró mejor que la buena con 183 caras. Fijan `feliz` y descartan las rotaciones; el resto lo atan las cifras canónicas | P8, §7.18 |
 | **H37** | **La simetría aproximaba la zona extendida, pero no la medía**: el reflejo `(a, f) ≡ (−a, f ± 180)` falló por un paso de 5° en 6-9 de 18 filas, y en el límite usado prometía 5° de más. Barrida con los detectores del visor (tras reproducir 37/37 filas de agosto); manda lo medido. Unión y motor: 0 choques. El cable, sin CAD, pasa a supuesto declarado | P5.3, §0.5, §3.3.11 |
 

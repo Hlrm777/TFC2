@@ -82,6 +82,8 @@ ESPERADAS: dict[int, str | None] = {
     4: "enojado",
     5: "neutral",
     6: "concentrado",
+    7: "neutral",
+    8: "neutral",
 }
 
 #: Lo que tiene que poner el robot al soltar la tecla 6 en la etiqueta 6. El
@@ -97,6 +99,12 @@ LECTURA = 5
 ENTRADAS = (1, 2, 3, 4)
 #: La de la tecla 6 (concentrado), que es manual.
 MANUAL = 6
+#: Protocolo v3 (2026-10-24). 7: cara neutra con las manos junto a las orejas;
+#: el robot no tiene que moverse de neutral (las manos sobre la cara no votan).
+#: 8: sonrisa y, sin dejar de sonreír, la cara tapada con las dos manos; el
+#: robot tiene que poner feliz y, ~2 s después de perder la cara, neutral.
+MANOS = 7
+TAPADA = 8
 
 #: La rejilla del barrido, alrededor de los valores razonados (5 y 0.6).
 REJILLA_N_FRAMES = (3, 5, 7, 9)
@@ -155,6 +163,13 @@ def cargar(ruta: Path) -> list[dict]:
         fila["min_confidence"] = float(fila["min_confidence"])
         latencia = fila.get("latencia_ms")
         fila["latencia_ms"] = float(latencia) if latencia else None
+        # 'manos' y 'retorno' llegaron al CSV el 2026-10-24; en las grabaciones
+        # anteriores no existen, y no hubo ni manos ni retorno a neutral.
+        fila["manos"] = int(fila.get("manos") or 0)
+        fila["retorno"] = int(fila.get("retorno") or 0)
+        # 'calibrando' llegó el 2026-10-25: esa cara calibró la neutra de un
+        # backend relativo y no votó.
+        fila["calibrando"] = int(fila.get("calibrando") or 0)
     return filas
 
 
@@ -190,9 +205,12 @@ def voto(fila: dict) -> tuple[str, float] | None:
 
     Como en ``EmotionClassifier._inferir``: sin rostro no se llama al backend,
     y con rostro tampoco vota si ganó una clase sin equivalente (``prediccion``
-    vacía).
+    vacía), ni si había una mano sobre la cara (``manos``), ni si la cara se
+    usó para calibrar la neutra (``calibrando``).
     """
     if not fila["rostro"] or not fila["prediccion"] or fila["confianza_pred"] is None:
+        return None
+    if fila.get("manos") or fila.get("calibrando"):
         return None
     return fila["prediccion"], fila["confianza_pred"]
 
@@ -222,6 +240,17 @@ def reproducir(
             histeresis.reset(initial=histeresis.current)
         backend = fila["backend"]
         margen = None
+        if fila.get("retorno"):
+            # El clasificador llevaba retorno_neutral_s sin cara y volvió a
+            # neutral en esta inferencia. Se aplica donde dice el CSV, y no
+            # recalculándolo con los tiempos, que van redondeados.
+            histeresis.reset(initial=NEUTRAL)
+        if fila.get("calibrando"):
+            # Al terminar de calibrar la cara neutra, el clasificador vacía la
+            # ventana y conserva la expresión. Mientras calibra no hay votos,
+            # así que vaciarla en cada fila que calibra da lo mismo, y no hace
+            # falta saber en cuál terminó.
+            histeresis.reset(initial=histeresis.current)
         v = voto(fila)
         if v is not None:
             etiqueta, confianza = v
@@ -370,6 +399,8 @@ class ResumenEtiqueta:
     manual: float
     al_soltar: str | None
     ok: bool | None
+    manos: float = 0.0
+    retorno_s: float | None = None
 
 
 def resumir_etiqueta(etiqueta: int, filas: list[dict]) -> ResumenEtiqueta:
@@ -384,10 +415,27 @@ def resumir_etiqueta(etiqueta: int, filas: list[dict]) -> ResumenEtiqueta:
     if manuales and manuales[-1] + 1 < len(filas):
         al_soltar = reparto(enviadas[manuales[-1] + 1:])[0][0]
 
+    # Etiqueta 8: cuánto tardó en volver a neutral desde que se perdió la cara.
+    retorno_s = None
+    sin_cara = [i for i, f in enumerate(filas) if not f["rostro"]]
+    retornos = [i for i, f in enumerate(filas) if f["retorno"]]
+    if sin_cara and retornos and retornos[0] >= sin_cara[0]:
+        retorno_s = filas[retornos[0]]["t"] - filas[sin_cara[0]]["t"]
+
     reparto_enviadas = reparto(enviadas)
     if etiqueta == MANUAL:
         concentrado = any(f["manual"] == esperada and f["emocion"] == esperada for f in filas)
         ok = concentrado and al_soltar == AL_SOLTAR
+    elif etiqueta == MANOS:
+        # Desde que el robot llega a neutral, ni un cambio. El de entrada no
+        # cuenta: viene arrastrado de la etiqueta anterior (la 6 acaba feliz),
+        # y el 2026-10-25 marcaba como fallo una etiqueta sin falsas alarmas.
+        desde = enviadas.index(esperada) if esperada in enviadas else None
+        ok = (desde is not None and set(enviadas[desde:]) == {esperada}
+              and reparto_enviadas[0][0] == esperada)
+    elif etiqueta == TAPADA:
+        antes = enviadas[:sin_cara[0]] if sin_cara else enviadas
+        ok = AL_SOLTAR in antes and enviadas[-1] == esperada and retorno_s is not None
     elif esperada is None:
         ok = None
     else:
@@ -399,7 +447,9 @@ def resumir_etiqueta(etiqueta: int, filas: list[dict]) -> ResumenEtiqueta:
         n=len(filas),
         duracion=filas[-1]["t"] - filas[0]["t"],
         enviadas=reparto_enviadas,
-        crudas=reparto([f["prediccion"] or SIN_EQUIVALENTE for f in con_rostro]),
+        # Las caras que calibraron la neutra no pasaron por el modelo.
+        crudas=reparto([f["prediccion"] or SIN_EQUIVALENTE for f in con_rostro
+                        if not f.get("calibrando")]),
         sin_rostro=1.0 - len(con_rostro) / len(filas),
         brillo=statistics.mean(f["brillo"] for f in filas),
         cambios=cambios,
@@ -407,6 +457,8 @@ def resumir_etiqueta(etiqueta: int, filas: list[dict]) -> ResumenEtiqueta:
         manual=len(manuales) / len(filas),
         al_soltar=al_soltar,
         ok=ok,
+        manos=sum(1 for f in filas if f["manos"]) / len(filas),
+        retorno_s=retorno_s,
     )
 
 
@@ -492,6 +544,10 @@ def imprimir_etiqueta(r: ResumenEtiqueta) -> None:
         esperada = "neutral (leyendo sin actuar: cada cambio es una falsa alarma)"
     elif r.etiqueta == MANUAL:
         esperada = f"concentrado en manual aunque sonria, y al soltar {AL_SOLTAR}"
+    elif r.etiqueta == MANOS:
+        esperada = "neutral sin un solo cambio, con las manos junto a las orejas"
+    elif r.etiqueta == TAPADA:
+        esperada = f"{AL_SOLTAR} y, al taparse la cara, neutral (~2 s despues)"
     elif r.esperada is None:
         esperada = "-- (fuera del protocolo)"
     else:
@@ -505,6 +561,11 @@ def imprimir_etiqueta(r: ResumenEtiqueta) -> None:
     elif r.ok is False and r.etiqueta == MANUAL:
         veredicto = (f"   <-- NO: falta concentrado en manual, o al soltarlo no puso "
                      f"{AL_SOLTAR}")
+    elif r.ok is False and r.etiqueta == MANOS:
+        veredicto = "   <-- NO: el robot cambio de expresion con las manos en la cara"
+    elif r.ok is False and r.etiqueta == TAPADA:
+        veredicto = (f"   <-- NO: falta {AL_SOLTAR} antes de taparse, o no volvio a "
+                     f"neutral al perder la cara")
     elif r.ok is False:
         veredicto = f"   <-- NO: el robot puso sobre todo {r.enviadas[0][0]}"
     print(f"    robot:  {_texto_reparto(r.enviadas)}{veredicto}")
@@ -525,6 +586,10 @@ def imprimir_etiqueta(r: ResumenEtiqueta) -> None:
             else "; no se solto dentro de la etiqueta"
         )
         print(f"    en manual el {100 * r.manual:.0f} % de las inferencias{soltar}")
+    if r.manos or r.etiqueta == MANOS:
+        print(f"    manos sobre la cara (no votaron) en el {100 * r.manos:.0f} % de las inferencias")
+    if r.retorno_s is not None:
+        print(f"    volvio a neutral {r.retorno_s:.1f} s despues de perder la cara")
     print()
 
 

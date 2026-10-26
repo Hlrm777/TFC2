@@ -17,6 +17,7 @@ saltan si no están: los dos viven fuera de git.
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 import shutil
@@ -114,7 +115,10 @@ def test_los_backends_de_la_configuracion_son_los_del_modulo():
 
 def test_la_configuracion_de_emocion_por_defecto():
     e = EmotionConfig()
-    assert (e.backend, e.n_frames, e.min_confidence, e.colapso) == ("keras", 5, 0.6, "cercana")
+    # El combinado desde el 2026-10-25 (P6.4), calibrado con 3 s de cara neutra,
+    # y min_confidence 0.5 desde el 2026-10-26 (verificación en vivo).
+    assert (e.backend, e.n_frames, e.min_confidence, e.colapso) == ("combinado", 5, 0.5, "cercana")
+    assert e.calibracion_s == 3.0
     assert e.hsemotion_model == "enet_b0_8_best_afew"
     assert e.min_lado_rostro == 60
 
@@ -721,11 +725,11 @@ def test_una_expresion_que_el_visor_no_tiene_se_rechaza():
 def test_cambiar_de_backend_conserva_la_expresion_y_vacia_la_ventana():
     c = _clasificador([("feliz", 0.9)])
     c.process(FRAME, timestamp=0.0)
-    c.cambiar_backend(_BackendFalso([("triste", 0.55)]))
+    c.cambiar_backend(_BackendFalso([("triste", 0.45)]))
     assert c.emocion == ("feliz", None)
     assert c.ventana == ()
     c.process(FRAME, timestamp=0.2)
-    assert c.emocion.etiqueta == "feliz"            # 0.55 < 0.6: el voto no basta
+    assert c.emocion.etiqueta == "feliz"            # 0.45 < 0.5: el voto no basta
 
 
 def test_el_espejo_se_deshace_antes_de_detectar_y_de_clasificar():
@@ -748,6 +752,112 @@ def test_el_espejo_se_deshace_antes_de_detectar_y_de_clasificar():
     volteado = cv2.flip(original, 1)
     x, y, w, h = c.rostro
     assert (volteado[y:y + h, x:x + w] == 50).all()
+
+
+def _sin_cara_tras(n_con_cara):
+    """Detector que ve la cara en las primeras ``n_con_cara`` inferencias."""
+    vistas = iter(range(10_000))
+    return lambda frame: (10, 20, 30, 40) if next(vistas) < n_con_cara else None
+
+
+def test_sin_cara_vuelve_a_neutral_a_los_2_s():
+    """Decisión del operador (2026-10-24): un parpadeo de la detección no
+    cambia la cara del robot; dos segundos sin verla, sí."""
+    c = _clasificador([("feliz", 0.9)], detector=_sin_cara_tras(3))
+    emociones = [c.process(FRAME, timestamp=0.2 * i).etiqueta for i in range(16)]
+    retornos = []
+    for i in range(16, 20):
+        emociones.append(c.process(FRAME, timestamp=0.2 * i).etiqueta)
+        retornos.append(c.retorno_en_ultima)
+    # Sin cara desde la inferencia 3 (t = 0.6): sigue feliz hasta t = 2.6.
+    assert emociones[:13] == ["feliz"] * 13
+    assert emociones[13] == "neutral"           # t = 2.6 = 0.6 + 2.0
+    assert set(emociones[13:]) == {"neutral"}
+    assert retornos == [False] * 4              # el retorno se marca una sola vez
+
+
+def test_el_retorno_se_marca_en_la_fila_en_que_ocurre():
+    c = _clasificador([("feliz", 0.9)], detector=_sin_cara_tras(3))
+    marcas = []
+    for i in range(20):
+        c.process(FRAME, timestamp=0.2 * i)
+        marcas.append(c.retorno_en_ultima)
+    assert marcas.count(True) == 1 and marcas.index(True) == 13
+
+
+def test_un_parpadeo_de_la_deteccion_no_cambia_la_expresion():
+    caras = iter([True] * 3 + [False] * 5 + [True] * 5)
+    c = _clasificador([("feliz", 0.9)],
+                      detector=lambda frame: (10, 20, 30, 40) if next(caras) else None)
+    assert {c.process(FRAME, timestamp=0.2 * i).etiqueta for i in range(13)} == {"feliz"}
+
+
+def test_con_retorno_cero_se_mantiene_como_antes():
+    c = _clasificador([("feliz", 0.9)], detector=_sin_cara_tras(3), retorno_neutral_s=0.0)
+    assert c.process(FRAME, timestamp=0.0).etiqueta == "feliz"
+    assert c.process(FRAME, timestamp=60.0).etiqueta == "feliz"
+
+
+def test_una_mano_sobre_la_cara_no_vota():
+    """Junto a la oreja (dentro de la caja ampliada) la inferencia se hace pero
+    no cambia la expresión; lejos de la cara, vota."""
+    c = _clasificador([("feliz", 0.9), ("enojado", 0.95), ("enojado", 0.95),
+                       ("enojado", 0.95), ("enojado", 0.95)])
+    c.process(FRAME, timestamp=0.0)
+    oreja = [(10 - 12, 20 + 20)]                 # 12 px a la izquierda de x = 10, w = 30
+    for i in range(1, 4):
+        assert c.process(FRAME, timestamp=0.2 * i, manos=oreja) == ("feliz", None)
+        assert c.manos_en_cara
+    assert c.ultima.etiqueta == "enojado"        # el modelo dijo enojado, y no votó
+    lejos = [(150, 110)]
+    c.process(FRAME, timestamp=0.8, manos=lejos)
+    assert not c.manos_en_cara
+
+
+def test_las_manos_se_piden_solo_cuando_toca_inferir():
+    llamadas = []
+
+    def manos():
+        llamadas.append(1)
+        return []
+
+    c = _clasificador([("feliz", 0.9)])
+    for i in range(30):
+        c.process(FRAME, timestamp=i / 30, manos=manos)
+    assert len(llamadas) == c.inferencias == 5
+
+
+def test_mano_sobre_rostro_y_su_margen():
+    from telmeow_teleop.emotion_classifier import mano_sobre_rostro
+
+    caja = (100, 100, 40, 40)
+    assert mano_sobre_rostro([(120, 120)], caja)
+    assert mano_sobre_rostro([(81, 120)], caja)               # oreja: 19 px fuera, margen 20
+    assert not mano_sobre_rostro([(79, 120)], caja)
+    assert not mano_sobre_rostro([(81, 120)], caja, margen=0.0)
+    assert not mano_sobre_rostro([], caja)
+    assert not mano_sobre_rostro([(120, 120)], None)
+
+
+def test_el_recorte_guardado_contiene_exactamente_la_caja(tmp_path):
+    from telmeow_teleop.emotion_classifier import guardar_recorte
+
+    frame = np.random.default_rng(5).integers(0, 256, (120, 160, 3), dtype=np.uint8)
+    for caja in [(60, 40, 30, 30), (2, 3, 30, 30), (140, 100, 20, 20)]:   # centro y bordes
+        ruta = tmp_path / f"{caja[0]}.png"
+        rx, ry = guardar_recorte(frame, caja, ruta)
+        guardado = cv2.imread(str(ruta))
+        x, y, w, h = caja
+        assert np.array_equal(guardado[ry:ry + h, rx:rx + w], frame[y:y + h, x:x + w])
+    assert guardado.shape[0] <= 2 * caja[3]       # recortado al borde de la imagen
+
+
+def test_la_configuracion_del_retorno_a_neutral():
+    assert EmotionConfig().retorno_neutral_s == 2.0
+    cfg = AppConfig.from_env({"TELMEOW_EMOTION_RETORNO_NEUTRAL_S": "0"})
+    assert cfg.emotion.retorno_neutral_s == 0.0
+    c = EmotionClassifier.desde_config(cfg, backend=_BackendFalso([("feliz", 0.9)]))
+    assert c.retorno_neutral_s == 0.0
 
 
 def test_una_tasa_no_positiva_se_rechaza():
@@ -810,14 +920,22 @@ def test_el_demo_corre_entero_con_camara_y_teclas_simuladas(monkeypatch, tmp_pat
     monkeypatch.setattr(cv2, "waitKey", lambda *a: next(teclas))
     monkeypatch.setattr(cv2, "destroyAllWindows", lambda: None)
     monkeypatch.setenv("TELMEOW_EMOTION_HZ", "1000")      # una inferencia por frame
+    monkeypatch.setenv("TELMEOW_EMOTION_BACKEND", "keras")
     registro = tmp_path / "emocion.csv"
 
-    assert ec._demo(["--record", str(registro)]) == 0
-    assert construidos[:3] == ["keras", "deepface", "hsemotion"]   # 'b' se salta el ausente
+    recortes = tmp_path / "recortes"
+    assert ec._demo(["--record", str(registro), "--guardar-recortes", str(recortes),
+                     "--manos"]) == 0
+    # 'b' se salta el ausente y da la vuelta.
+    assert construidos[:4] == ["keras", "deepface", "hsemotion", "combinado"]
     filas = registro.read_text(encoding="utf-8").splitlines()
     assert filas[0].split(",") == ec._COLUMNAS_CSV
     assert len(filas) > 20
     assert any(",concentrado," in f for f in filas)      # la tecla 6 llegó al CSV
+    # Un PNG por cada fila con cara, con el nombre que dice su fila.
+    with open(registro, newline="", encoding="utf-8") as f:
+        con_cara = [fila for fila in csv.DictReader(f) if fila["rostro"] == "1"]
+    assert {fila["recorte"] for fila in con_cara} == {p.name for p in recortes.glob("*.png")}
 
 
 # --------------------------------------------------------------------------
@@ -971,3 +1089,109 @@ def test_un_modelo_que_no_termina_en_softmax_se_rechaza(tmp_path):
     shutil.copy(PROJECT_ROOT / "emotion_model.meta.json", tmp_path / "logits.meta.json")
     with pytest.raises(ValueError, match="softmax"):
         KerasBackend(ruta)
+
+
+# --------------------------------------------------------------------------
+# Calibración de la cara neutra (backend relativo, P6.4 Fase 4)
+# --------------------------------------------------------------------------
+
+
+class _BackendRelativo(_BackendFalso):
+    """Como el combinado: no clasifica hasta que se calibra con caras neutras."""
+
+    nombre = "relativo"
+    relativo = True
+
+    def __init__(self, respuestas, fallar=0):
+        super().__init__(respuestas)
+        self.calibraciones = []
+        self.fallar = fallar
+
+    @property
+    def calibrado(self):
+        return bool(self.calibraciones)
+
+    def calibrar(self, rostros):
+        if self.fallar:
+            self.fallar -= 1
+            raise ValueError("ninguna cara")
+        self.calibraciones.append(len(rostros))
+        return len(rostros)
+
+    def distribucion(self, rostro_bgr):
+        assert self.calibrado, "clasificó sin estar calibrado"
+        return super().distribucion(rostro_bgr)
+
+
+def test_un_backend_relativo_se_calibra_con_los_primeros_segundos():
+    backend = _BackendRelativo([("feliz", 0.9)])
+    c = EmotionClassifier(backend, detector=lambda frame: (10, 20, 30, 40),
+                          frame_espejado=False, calibracion_s=1.0)
+    assert c.calibracion_pendiente
+    marcas, emociones = [], []
+    for i in range(12):
+        emociones.append(c.process(FRAME, timestamp=0.2 * i).etiqueta)
+        marcas.append(c.calibrando)
+    # t = 0 .. 1.0: seis caras calibran y no votan; luego, a votar.
+    assert marcas == [True] * 6 + [False] * 6
+    assert backend.calibraciones == [6] and c.calibraciones == 1
+    assert emociones[:6] == ["neutral"] * 6
+    assert emociones[-1] == "feliz"
+    assert len(backend.recortes) == 6           # no se llamó a la red al calibrar
+
+
+def test_la_tecla_c_vuelve_a_tomar_la_neutra():
+    backend = _BackendRelativo([("feliz", 0.9)])
+    c = EmotionClassifier(backend, detector=lambda frame: (10, 20, 30, 40),
+                          frame_espejado=False, calibracion_s=0.4)
+    for i in range(10):
+        c.process(FRAME, timestamp=0.2 * i)
+    assert c.process(FRAME, timestamp=2.0).etiqueta == "feliz"
+    assert c.calibrar_neutro()
+    marcas = []
+    for i in range(11, 16):
+        # Mientras recalibra, la expresión se mantiene.
+        assert c.process(FRAME, timestamp=0.2 * i).etiqueta == "feliz"
+        marcas.append(c.calibrando)
+    assert marcas == [True] * 3 + [False] * 2
+    assert backend.calibraciones == [3, 3]
+
+
+def test_un_backend_que_no_es_relativo_no_se_calibra():
+    c = _clasificador([("feliz", 0.9)])
+    assert not c.calibracion_pendiente and not c.calibrar_neutro()
+    c.process(FRAME, timestamp=0.0)
+    assert not c.calibrando
+
+
+def test_las_caras_con_mano_no_calibran_y_un_fallo_vuelve_a_empezar():
+    backend = _BackendRelativo([("feliz", 0.9)], fallar=1)
+    c = EmotionClassifier(backend, detector=lambda frame: (10, 20, 30, 40),
+                          frame_espejado=False, calibracion_s=0.4)
+    mano = [(25, 40)]                          # dentro de la caja (sin espejo)
+    c.process(FRAME, timestamp=0.0, manos=mano)
+    assert c.calibrando and c.manos_en_cara
+    for i in range(1, 9):
+        c.process(FRAME, timestamp=0.2 * i)
+    # La primera ronda (t 0.2-0.6) falla y se repite con t 0.8-1.2.
+    assert backend.calibraciones == [3]
+    assert not c.calibracion_pendiente
+
+
+def test_el_csv_marca_las_filas_que_calibran(tmp_path):
+    from telmeow_teleop.emotion_classifier import _COLUMNAS_CSV, registrar_inferencia
+
+    backend = _BackendRelativo([("feliz", 0.9)])
+    c = EmotionClassifier(backend, detector=lambda frame: (10, 20, 30, 40),
+                          frame_espejado=False, calibracion_s=0.4)
+    ruta = tmp_path / "r.csv"
+    with open(ruta, "w", newline="", encoding="utf-8") as f:
+        escritor = csv.writer(f)
+        escritor.writerow(_COLUMNAS_CSV)
+        for i in range(6):
+            c.process(FRAME, timestamp=0.2 * i)
+            registrar_inferencia(escritor, 0.2 * i, 0, c, FRAME, 100.0)
+    with open(ruta, newline="", encoding="utf-8") as f:
+        filas = list(csv.DictReader(f))
+    assert [fl["calibrando"] for fl in filas] == ["1", "1", "1", "0", "0", "0"]
+    assert [fl["prediccion"] for fl in filas[:3]] == ["", "", ""]

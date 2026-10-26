@@ -26,3 +26,14 @@ venv/
 # Los CSV de --record NO se ignoran a proposito: son la evidencia de las
 # mediciones que se reportan en la tesis (repetibilidad, temblor, recorrido
 # del operador). Pesan poco y sin ellos las cifras no serian reproducibles.
+
+# Las caras que guarda el demo del clasificador (--guardar-recortes): un PNG
+# sin perdidas por inferencia, ~150 MB por sesion. Se quedan fuera de git; el CSV
+# de la sesion si se versiona.
+*_recortes/
+*_recortes_anterior*/
+
+# Modelos descargados para el P6.4 (face_landmarker.task, HSEmotion en ONNX) y
+# los blendshapes del dataset que extrae tools/entrenar_blendshapes.py. Origen y
+# SHA-256 en el plan maestro, §7.19.
+modelos_externos/

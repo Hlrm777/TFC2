@@ -734,3 +734,17 @@ def test_apartar_si_existe_no_pisa_lo_ya_apartado(tmp_path):
     assert apartado == tmp_path / "pantalla_anterior2.csv"
     assert apartado.read_text(encoding="utf-8") == "segunda"
     assert (tmp_path / "pantalla_anterior.csv").read_text(encoding="utf-8") == "primera"
+
+
+def test_apartar_si_existe_tambien_aparta_una_carpeta(tmp_path):
+    """La carpeta de --guardar-recortes del clasificador de emoción: el
+    2026-10-25 la segunda toma pisó los PNG de la primera."""
+    carpeta = tmp_path / "sesion_recortes"
+    carpeta.mkdir()
+    (carpeta / "000001.png").write_bytes(b"primera")
+
+    apartado = apartar_si_existe(carpeta)
+
+    assert apartado == tmp_path / "sesion_recortes_anterior"
+    assert (apartado / "000001.png").read_bytes() == b"primera"
+    assert not carpeta.exists()

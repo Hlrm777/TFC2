@@ -127,6 +127,9 @@ __all__ = [
     "HSEmotionBackend",
     "EmotionClassifier",
     "crear_backend",
+    "crear_backend_o_reserva",
+    "COLUMNAS_CSV",
+    "TECLAS_MANUAL",
     "colapsar",
     "ruta_cascade",
     "cargar_cascade",
@@ -810,6 +813,22 @@ def crear_backend(nombre: str, cfg: AppConfig | None = None) -> EmotionBackend:
     raise ValueError(f"backend desconocido {nombre!r}; válidos: {BACKENDS}")
 
 
+def crear_backend_o_reserva(nombre: str, cfg: AppConfig | None = None,
+                            reserva: str = "keras", avisar=print) -> EmotionBackend | None:
+    """``crear_backend(nombre)`` y, si no se puede, el de ``reserva``.
+
+    Es lo que hace el demo al arrancar: si faltan onnxruntime o los modelos
+    descargados del ``combinado``, avisa y sigue con el modelo propio en vez de
+    no arrancar. Devuelve ``None`` si tampoco se puede la reserva.
+    """
+    for candidato in dict.fromkeys((nombre, reserva)):
+        try:
+            return crear_backend(candidato, cfg)
+        except (BackendNoDisponible, FileNotFoundError) as exc:
+            avisar(f"AVISO: {exc}\n")
+    return None
+
+
 # --------------------------------------------------------------------------
 # El clasificador
 # --------------------------------------------------------------------------
@@ -1248,6 +1267,8 @@ _COLUMNAS_CSV = (
        # para que la reproducción offline aplique la misma regla.
        "sin_apoyo"]
 )
+#: Las mismas columnas, con nombre público para el pipeline integrado (P7).
+COLUMNAS_CSV = _COLUMNAS_CSV
 
 
 def _modelo_de(backend: EmotionBackend) -> str:
@@ -1372,9 +1393,13 @@ def _demo(argv: list[str] | None = None) -> int:
             return None
         return backends[nombre]
 
-    inicial = obtener(args.backend) or obtener("keras")
+    print(f"Cargando el backend '{args.backend}'...")
+    inicial = crear_backend_o_reserva(args.backend, cfg)
     if inicial is None:
         return 1
+    backends[inicial.nombre] = inicial
+    if inicial.nombre != args.backend:
+        no_disponibles.add(args.backend)
 
     cap = abrir_camara(cfg.camera)
     if cap is None:

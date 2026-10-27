@@ -83,6 +83,8 @@ __all__ = [
     "LANDMARK_IDS",
     "FRONTAL_ROTATION",
     "apartar_si_existe",
+    "COLUMNAS_CSV",
+    "fila_csv",
 ]
 
 
@@ -374,6 +376,26 @@ class HeadTracker:
         self._reference_cloud: np.ndarray | None = None
         self._last_cloud: np.ndarray | None = None
         self._last_points_2d: np.ndarray | None = None
+
+    @classmethod
+    def desde_config(cls, cfg: AppConfig) -> "HeadTracker":
+        """El tracker con los parámetros de ``cfg.head``.
+
+        Lo usan el demo y el pipeline integrado (P7), y es a propósito el
+        MISMO camino: las ganancias y los signos se calibraron y verificaron con
+        el demo, y si el pipeline construyera el tracker por su cuenta un campo
+        olvidado lo dejaría con el valor por defecto sin ningún aviso.
+        """
+        return cls(
+            gain_pan=cfg.head.gain_pan,
+            gain_tilt_up=cfg.head.gain_tilt_up,
+            gain_tilt_down=cfg.head.gain_tilt_down,
+            method=cfg.head.method,
+            invert_pan=cfg.head.invert_pan,
+            invert_tilt=cfg.head.invert_tilt,
+            min_cutoff=cfg.head.min_cutoff,
+            beta=cfg.head.beta,
+        )
 
     # -- estado, para el HUD ----------------------------------------------
 
@@ -698,6 +720,34 @@ def _dibujar_orientacion(frame_bgr, origen, pan: float, tilt: float, largo=90.0)
 #: Altura en píxeles donde empieza el bloque de ayuda a la calibración.
 ALTO_TEXTO = 145
 
+#: Columnas del CSV de ``--record``, en orden. ``tools/analizar_registro.py``
+#: las lee por nombre; las escriben el demo y el pipeline integrado (P7).
+COLUMNAS_CSV = (
+    "t", "etiqueta", "metodo", "raw_pan", "raw_tilt",
+    "pan", "tilt", "gain_pan", "gain_tilt_up", "gain_tilt_down",
+    "recortado", "escala_cara", "ancho", "alto",
+)
+
+
+def fila_csv(tracker: HeadTracker, t: float, etiqueta: int,
+             pose: tuple[float, float], ancho: int, alto: int) -> list:
+    """La fila de ``COLUMNAS_CSV`` para un frame CON pose.
+
+    Solo se graban los frames con rostro, igual que en el P4: el analizador
+    mide temblor y recorrido, y una fila sin pose no aporta a ninguno.
+    """
+    crudo = tracker.raw_angles or (float("nan"), float("nan"))
+    recorte = tracker.last_clamp
+    return [
+        f"{t:.4f}", etiqueta, tracker.method,
+        f"{crudo[0]:.4f}", f"{crudo[1]:.4f}",
+        f"{pose[0]:.4f}", f"{pose[1]:.4f}",
+        f"{tracker.gain_pan:.2f}",
+        f"{tracker.gain_tilt_up:.2f}", f"{tracker.gain_tilt_down:.2f}",
+        int(bool(recorte and recorte.clamped)),
+        f"{tracker.face_scale or float('nan'):.2f}", ancho, alto,
+    ]
+
 
 def _demo(argv: list[str] | None = None) -> int:
     """`python -m telmeow_teleop.head_tracker [--record CSV] [--publish]`
@@ -763,16 +813,7 @@ def _demo(argv: list[str] | None = None) -> int:
         "  q = salir\n"
     )
 
-    tracker = HeadTracker(
-        gain_pan=cfg.head.gain_pan,
-        gain_tilt_up=cfg.head.gain_tilt_up,
-        gain_tilt_down=cfg.head.gain_tilt_down,
-        method=cfg.head.method,
-        invert_pan=cfg.head.invert_pan,
-        invert_tilt=cfg.head.invert_tilt,
-        min_cutoff=cfg.head.min_cutoff,
-        beta=cfg.head.beta,
-    )
+    tracker = HeadTracker.desde_config(cfg)
 
     # Publicación opcional al visor 3D. Es lo que permite comprobar el SENTIDO
     # del giro: el HUD dice el signo del ángulo, pero hacia qué lado gira el
@@ -810,11 +851,7 @@ def _demo(argv: list[str] | None = None) -> int:
             print(f"AVISO: ese CSV ya existia. Se conserva como {apartado.name}.\n")
         registro = open(args.record, "w", newline="", encoding="utf-8")
         escritor = csv.writer(registro)
-        escritor.writerow(
-            ["t", "etiqueta", "metodo", "raw_pan", "raw_tilt",
-             "pan", "tilt", "gain_pan", "gain_tilt_up", "gain_tilt_down",
-             "recortado", "escala_cara", "ancho", "alto"]
-        )
+        escritor.writerow(COLUMNAS_CSV)
         print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
 
     t0 = time.perf_counter()
@@ -910,17 +947,8 @@ def _demo(argv: list[str] | None = None) -> int:
                 publicador.publish(pan=pose[0], tilt=pose[1])
 
             if escritor is not None and pose is not None:
-                crudo = tracker.raw_angles or (float("nan"), float("nan"))
-                recorte = tracker.last_clamp
-                escritor.writerow([
-                    f"{time.perf_counter() - t0:.4f}", etiqueta, tracker.method,
-                    f"{crudo[0]:.4f}", f"{crudo[1]:.4f}",
-                    f"{pose[0]:.4f}", f"{pose[1]:.4f}",
-                    f"{tracker.gain_pan:.2f}",
-                    f"{tracker.gain_tilt_up:.2f}", f"{tracker.gain_tilt_down:.2f}",
-                    int(bool(recorte and recorte.clamped)),
-                    f"{tracker.face_scale or float('nan'):.2f}", width, height,
-                ])
+                escritor.writerow(fila_csv(
+                    tracker, time.perf_counter() - t0, etiqueta, pose, width, height))
 
             cv2.putText(
                 frame, f"etiqueta {etiqueta}" if escritor else "", (10, 200),

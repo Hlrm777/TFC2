@@ -127,6 +127,9 @@ __all__ = [
     "EJE_ANTERIOR",
     "INCLINACION_FLEXION",
     "CANALES",
+    "COLUMNAS_CSV",
+    "fila_csv",
+    "dibujar_barra",
 ]
 
 
@@ -949,6 +952,49 @@ class ArmTracker:
             self._limitadores_nd[lado] = limitador
         self._t_estimado: dict[Side, float] = {}
         self._estimado: dict[Side, bool] = {Side.L: False, Side.R: False}
+
+    @classmethod
+    def desde_config(cls, cfg: AppConfig) -> "ArmTracker":
+        """El tracker con los parámetros de ``cfg.arm`` y el espejo de la cámara.
+
+        Lo usan el demo y el pipeline integrado (P7), y es a propósito el
+        MISMO camino: todo el P5 se midió y se verificó con el demo, y si el
+        pipeline construyera el tracker por su cuenta un campo olvidado —la
+        focal, la rampa, la zona de reposo— lo dejaría con el valor por defecto
+        sin ningún aviso. ``frame_espejado`` sale de ``cfg.camera.flip`` porque
+        es un hecho de la captura, no una preferencia.
+        """
+        return cls(
+            mirror=cfg.arm.mirror,
+            frame_espejado=cfg.camera.flip,
+            target=cfg.arm.target,
+            invert_abduccion=cfg.arm.invert_abduccion,
+            invert_flexion=cfg.arm.invert_flexion,
+            gain_abduccion=cfg.arm.gain_abduccion,
+            gain_aduccion=cfg.arm.gain_aduccion,
+            gain_flexion=cfg.arm.gain_flexion,
+            gain_extension=cfg.arm.gain_extension,
+            min_cutoff=cfg.arm.min_cutoff,
+            beta=cfg.arm.beta,
+            min_visibility=cfg.arm.min_visibility,
+            model_complexity=cfg.arm.model_complexity,
+            reposo_abduccion=cfg.arm.reposo_abduccion,
+            reposo_flexion=cfg.arm.reposo_flexion,
+            gracia_s=cfg.arm.gracia_s,
+            velocidad_max=cfg.arm.velocidad_max,
+            mapeo=cfg.arm.mapeo,
+            flexion_min=cfg.arm.flexion_min,
+            alcance_humano=cfg.arm.alcance_humano,
+            rodilla=cfg.arm.rodilla,
+            margen_tabla=cfg.arm.margen_tabla,
+            histeresis_rama=cfg.arm.histeresis_rama,
+            banda_tronco=cfg.arm.banda_tronco,
+            zona_reposo=cfg.arm.zona_reposo,
+            escorzo=cfg.arm.escorzo,
+            focal_relativa=cfg.arm.focal_relativa,
+            rampa_mano=cfg.arm.rampa_mano,
+            saludo=cfg.arm.saludo,
+        )
 
     # -- estado para el HUD y la calibración -------------------------------
 
@@ -2085,7 +2131,7 @@ BRILLO_MINIMO: float = 8.0
 ANCHO_BARRA = 150
 
 
-def _dibujar_barra(frame_bgr, x: int, y: int, fraccion: float, recortado: bool) -> None:
+def dibujar_barra(frame_bgr, x: int, y: int, fraccion: float, recortado: bool) -> None:
     """Barra de posición dentro del rango ADMISIBLE del canal.
 
     En el brazo, el rango de abducción se interpola para la flexión actual, así
@@ -2127,6 +2173,159 @@ def _retarget_csv(paso: Retargeting | None, vivo: bool) -> list[str]:
     if paso is None or not vivo:
         return ["", "", ""]
     return [f"{paso.psi_humano:.3f}", f"{paso.alfa:.3f}", str(paso.rama)]
+
+
+#: Columnas del CSV de ``--record``, en orden. Las leen por nombre
+#: ``tools/analizar_registro_brazos.py``, ``reproducir_brazos.py`` y
+#: ``comparar_mapeo_brazos.py``; las escriben el demo y el pipeline (P7).
+COLUMNAS_CSV = (
+    "t", "etiqueta", "target", "espejo", "frame_espejado",
+    "crudo_abd_L", "crudo_flex_L", "crudo_abd_R", "crudo_flex_R",
+    "armL", "armLtw", "armR", "armRtw",
+    "estimado_L", "estimado_R",
+    "recortado_L", "recortado_R",
+    "vis_hombro_L", "vis_destino_L", "vis_codo_L",
+    "vis_hombro_R", "vis_destino_R", "vis_codo_R",
+    "puntos_destino_L", "puntos_destino_R",
+    "vis_cadera", "tronco_caderas", "tronco_origen",
+    "gain_abduccion", "gain_aduccion",
+    "gain_flexion", "gain_extension",
+    "ancho", "alto",
+    # P5.3. La dirección cruda permite reproducir OFFLINE cualquier
+    # mapeo sobre esta misma sesión (tools/comparar_mapeo_brazos.py).
+    "mapeo", "flexion_min",
+    "h_lat_L", "h_sup_L", "h_ant_L",
+    "h_lat_R", "h_sup_R", "h_ant_R",
+    "psi_L", "alfa_L", "rama_L",
+    "psi_R", "alfa_R", "rama_R",
+    # P5.4. Los vectores EN METROS hombro→destino (p) y hombro→codo
+    # (c), mismo marco que h_*. Con los dos se reconstruye el largo
+    # del brazo y cualquier mapeo —posicion, direccion, mano, codo—
+    # sobre la misma sesión, y se mide el ruido de la profundidad
+    # en centímetros (§3.3.1). 'ext' es |p| / (|c| + |p − c|).
+    "p_lat_L", "p_sup_L", "p_ant_L",
+    "p_lat_R", "p_sup_R", "p_ant_R",
+    "c_lat_L", "c_sup_L", "c_ant_L",
+    "c_lat_R", "c_sup_R", "c_ant_R",
+    "ext_L", "ext_R",
+    # P5.5. Con el escorzo, p_* y c_* son las posiciones CORREGIDAS;
+    # pb_* y cb_* las de BlazePose antes de corregir, y img_* los
+    # píxeles que el escorzo tomó por buenos. Con las tres se puede
+    # rehacer offline el escorzo con otra focal u otros pesos.
+    # peso_mano_*: cuánto mandó la mano frente al codo (híbrido);
+    # reposo_*: cuánto se llevó el canal al reposo.
+    "peso_mano_L", "peso_mano_R", "reposo_L", "reposo_R",
+    "pb_lat_L", "pb_sup_L", "pb_ant_L",
+    "pb_lat_R", "pb_sup_R", "pb_ant_R",
+    "cb_lat_L", "cb_sup_L", "cb_ant_L",
+    "cb_lat_R", "cb_sup_R", "cb_ant_R",
+    "img_hombro_x_L", "img_hombro_y_L", "img_codo_x_L",
+    "img_codo_y_L", "img_mano_x_L", "img_mano_y_L",
+    "img_hombro_x_R", "img_hombro_y_R", "img_codo_x_R",
+    "img_codo_y_R", "img_mano_x_R", "img_mano_y_R",
+    "escorzo", "focal_rel",
+    # P5.6. confianza_mano_*: la rampa de la mano (0 fuera de cuadro,
+    # 1 al cabo de rampa_mano segundos a la vista). hombros_*: el
+    # ancla del escorzo —separación de los hombros en el plano de la
+    # imagen y su diferencia de profundidad, en metros de BlazePose—,
+    # para rehacerlo offline sin reconstruirla.
+    "confianza_mano_L", "confianza_mano_R",
+    "hombros_ancho_m", "hombros_dz_m",
+    # P5.7. saludo_*: cuánto mandaba el saludo del robot (0..1).
+    "saludo_L", "saludo_R",
+)
+
+
+def fila_csv(tracker: "ArmTracker", mando: ArmAngles, t: float, etiqueta: int,
+             ancho: int, alto: int) -> list:
+    """La fila de ``COLUMNAS_CSV`` para el frame que se acaba de procesar.
+
+    Hay que llamarla después de ``process`` y ``comando`` de ese frame: todo lo
+    demás sale del estado que dejaron. ``mando`` es lo que devolvió
+    ``comando``, que es lo que se publica (columnas ``arm*``).
+    """
+    nada = (float("nan"), float("nan"))
+    crudos = tracker.raw_angles
+    recortes = tracker.last_clamp
+    estimado = tracker.estimado
+    vis = tracker.visibilidades
+    cl = crudos.get(Side.L, nada)
+    cr = crudos.get(Side.R, nada)
+    rl = recortes.get(Side.L)
+    rr = recortes.get(Side.R)
+    vivo_l = estimado.get(Side.L, False)
+    vivo_r = estimado.get(Side.R, False)
+    puntos_destino = tracker.puntos_destino
+    direcciones = tracker.direcciones
+    retargetings = tracker.retargetings
+    vectores = tracker.vectores
+    vectores_codo = tracker.vectores_codo
+    extensiones = tracker.extensiones
+    pesos_mano = tracker.pesos_mano
+    pesos_reposo = tracker.pesos_reposo
+    vectores_bp = tracker.vectores_bp
+    vectores_codo_bp = tracker.vectores_codo_bp
+    puntos_imagen = tracker.puntos_imagen
+    confianzas_mano = tracker.confianzas_mano
+    hombros = tracker.hombros_mundo
+    pesos_saludo = tracker.pesos_saludo
+
+    def _f(valor: float | None) -> str:
+        return "" if valor is None else f"{valor:.4f}"
+
+    return [
+        f"{t:.4f}", etiqueta,
+        tracker.target, int(tracker.mirror),
+        int(tracker.frame_espejado),
+        f"{cl[0]:.4f}", f"{cl[1]:.4f}",
+        f"{cr[0]:.4f}", f"{cr[1]:.4f}",
+        _f(mando.armL), _f(mando.armLtw),
+        _f(mando.armR), _f(mando.armRtw),
+        int(vivo_l), int(vivo_r),
+        int(bool(rl and rl.clamped)), int(bool(rr and rr.clamped)),
+        f"{vis.get('hombro_L', float('nan')):.3f}",
+        f"{vis.get('destino_L', float('nan')):.3f}",
+        f"{vis.get('codo_L', float('nan')):.3f}",
+        f"{vis.get('hombro_R', float('nan')):.3f}",
+        f"{vis.get('destino_R', float('nan')):.3f}",
+        f"{vis.get('codo_R', float('nan')):.3f}",
+        puntos_destino.get(Side.L, ""),
+        puntos_destino.get(Side.R, ""),
+        f"{vis.get('cadera', float('nan')):.3f}",
+        int(tracker.tronco_de_caderas), tracker.origen_tronco,
+        f"{tracker.gain_abduccion:.2f}",
+        f"{tracker.gain_aduccion:.2f}",
+        f"{tracker.gain_flexion:.2f}",
+        f"{tracker.gain_extension:.2f}",
+        ancho, alto,
+        tracker.mapeo, f"{tracker.flexion_range[0]:g}",
+        *_direccion_csv(direcciones.get(Side.L)),
+        *_direccion_csv(direcciones.get(Side.R)),
+        *_retarget_csv(retargetings.get(Side.L), vivo_l),
+        *_retarget_csv(retargetings.get(Side.R), vivo_r),
+        *_vector_csv(vectores.get(Side.L)),
+        *_vector_csv(vectores.get(Side.R)),
+        *_vector_csv(vectores_codo.get(Side.L)),
+        *_vector_csv(vectores_codo.get(Side.R)),
+        _f(extensiones.get(Side.L)),
+        _f(extensiones.get(Side.R)),
+        _f(pesos_mano.get(Side.L)),
+        _f(pesos_mano.get(Side.R)),
+        _f(pesos_reposo.get(Side.L)),
+        _f(pesos_reposo.get(Side.R)),
+        *_vector_csv(vectores_bp.get(Side.L)),
+        *_vector_csv(vectores_bp.get(Side.R)),
+        *_vector_csv(vectores_codo_bp.get(Side.L)),
+        *_vector_csv(vectores_codo_bp.get(Side.R)),
+        *_imagen_csv(puntos_imagen.get(Side.L)),
+        *_imagen_csv(puntos_imagen.get(Side.R)),
+        int(tracker.escorzo), f"{tracker.focal_relativa:g}",
+        _f(confianzas_mano.get(Side.L)),
+        _f(confianzas_mano.get(Side.R)),
+        *(("", "") if hombros is None else (f"{hombros[0]:.5f}", f"{hombros[1]:.5f}")),
+        _f(pesos_saludo.get(Side.L)),
+        _f(pesos_saludo.get(Side.R)),
+    ]
 
 
 def _demo(argv: list[str] | None = None) -> int:
@@ -2235,37 +2434,7 @@ def _demo(argv: list[str] | None = None) -> int:
         "  q = salir\n"
     )
 
-    tracker = ArmTracker(
-        mirror=cfg.arm.mirror,
-        frame_espejado=cfg.camera.flip,
-        target=cfg.arm.target,
-        invert_abduccion=cfg.arm.invert_abduccion,
-        invert_flexion=cfg.arm.invert_flexion,
-        gain_abduccion=cfg.arm.gain_abduccion,
-        gain_aduccion=cfg.arm.gain_aduccion,
-        gain_flexion=cfg.arm.gain_flexion,
-        gain_extension=cfg.arm.gain_extension,
-        min_cutoff=cfg.arm.min_cutoff,
-        beta=cfg.arm.beta,
-        min_visibility=cfg.arm.min_visibility,
-        model_complexity=cfg.arm.model_complexity,
-        reposo_abduccion=cfg.arm.reposo_abduccion,
-        reposo_flexion=cfg.arm.reposo_flexion,
-        gracia_s=cfg.arm.gracia_s,
-        velocidad_max=cfg.arm.velocidad_max,
-        mapeo=cfg.arm.mapeo,
-        flexion_min=cfg.arm.flexion_min,
-        alcance_humano=cfg.arm.alcance_humano,
-        rodilla=cfg.arm.rodilla,
-        margen_tabla=cfg.arm.margen_tabla,
-        histeresis_rama=cfg.arm.histeresis_rama,
-        banda_tronco=cfg.arm.banda_tronco,
-        zona_reposo=cfg.arm.zona_reposo,
-        escorzo=cfg.arm.escorzo,
-        focal_relativa=cfg.arm.focal_relativa,
-        rampa_mano=cfg.arm.rampa_mano,
-        saludo=cfg.arm.saludo,
-    )
+    tracker = ArmTracker.desde_config(cfg)
     print(
         f"destino = {tracker.target}   escorzo = "
         f"{'si' if tracker.escorzo else 'no'} (focal {tracker.focal_relativa:g} x ancho)"
@@ -2317,64 +2486,7 @@ def _demo(argv: list[str] | None = None) -> int:
         # porque el comando vuelve al reposo por una rampa. 'estimado_*' dice
         # cuál de los dos casos es cada fila, y sin esa columna el temblor se
         # calcularía sobre tramos de rampa.
-        escritor.writerow(
-            [
-                "t", "etiqueta", "target", "espejo", "frame_espejado",
-                "crudo_abd_L", "crudo_flex_L", "crudo_abd_R", "crudo_flex_R",
-                "armL", "armLtw", "armR", "armRtw",
-                "estimado_L", "estimado_R",
-                "recortado_L", "recortado_R",
-                "vis_hombro_L", "vis_destino_L", "vis_codo_L",
-                "vis_hombro_R", "vis_destino_R", "vis_codo_R",
-                "puntos_destino_L", "puntos_destino_R",
-                "vis_cadera", "tronco_caderas", "tronco_origen",
-                "gain_abduccion", "gain_aduccion",
-                "gain_flexion", "gain_extension",
-                "ancho", "alto",
-                # P5.3. La dirección cruda permite reproducir OFFLINE cualquier
-                # mapeo sobre esta misma sesión (tools/comparar_mapeo_brazos.py).
-                "mapeo", "flexion_min",
-                "h_lat_L", "h_sup_L", "h_ant_L",
-                "h_lat_R", "h_sup_R", "h_ant_R",
-                "psi_L", "alfa_L", "rama_L",
-                "psi_R", "alfa_R", "rama_R",
-                # P5.4. Los vectores EN METROS hombro→destino (p) y hombro→codo
-                # (c), mismo marco que h_*. Con los dos se reconstruye el largo
-                # del brazo y cualquier mapeo —posicion, direccion, mano, codo—
-                # sobre la misma sesión, y se mide el ruido de la profundidad
-                # en centímetros (§3.3.1). 'ext' es |p| / (|c| + |p − c|).
-                "p_lat_L", "p_sup_L", "p_ant_L",
-                "p_lat_R", "p_sup_R", "p_ant_R",
-                "c_lat_L", "c_sup_L", "c_ant_L",
-                "c_lat_R", "c_sup_R", "c_ant_R",
-                "ext_L", "ext_R",
-                # P5.5. Con el escorzo, p_* y c_* son las posiciones CORREGIDAS;
-                # pb_* y cb_* las de BlazePose antes de corregir, y img_* los
-                # píxeles que el escorzo tomó por buenos. Con las tres se puede
-                # rehacer offline el escorzo con otra focal u otros pesos.
-                # peso_mano_*: cuánto mandó la mano frente al codo (híbrido);
-                # reposo_*: cuánto se llevó el canal al reposo.
-                "peso_mano_L", "peso_mano_R", "reposo_L", "reposo_R",
-                "pb_lat_L", "pb_sup_L", "pb_ant_L",
-                "pb_lat_R", "pb_sup_R", "pb_ant_R",
-                "cb_lat_L", "cb_sup_L", "cb_ant_L",
-                "cb_lat_R", "cb_sup_R", "cb_ant_R",
-                "img_hombro_x_L", "img_hombro_y_L", "img_codo_x_L",
-                "img_codo_y_L", "img_mano_x_L", "img_mano_y_L",
-                "img_hombro_x_R", "img_hombro_y_R", "img_codo_x_R",
-                "img_codo_y_R", "img_mano_x_R", "img_mano_y_R",
-                "escorzo", "focal_rel",
-                # P5.6. confianza_mano_*: la rampa de la mano (0 fuera de cuadro,
-                # 1 al cabo de rampa_mano segundos a la vista). hombros_*: el
-                # ancla del escorzo —separación de los hombros en el plano de la
-                # imagen y su diferencia de profundidad, en metros de BlazePose—,
-                # para rehacerlo offline sin reconstruirla.
-                "confianza_mano_L", "confianza_mano_R",
-                "hombros_ancho_m", "hombros_dz_m",
-                # P5.7. saludo_*: cuánto mandaba el saludo del robot (0..1).
-                "saludo_L", "saludo_R",
-            ]
-        )
+        escritor.writerow(COLUMNAS_CSV)
         print(f"Registrando en {args.record}. ESPACIO cambia de etiqueta.\n")
 
     t0 = time.perf_counter()
@@ -2404,25 +2516,16 @@ def _demo(argv: list[str] | None = None) -> int:
             # 'estimado_*' dice si venía de una medida o de la rampa.
             mando = tracker.comando(pose)
             estimado = tracker.estimado
-            puntos_destino = tracker.puntos_destino
 
             if tracker.landmarks_imagen is not None:
                 dibujo.draw_landmarks(frame, tracker.landmarks_imagen, conexiones)
 
             crudos = tracker.raw_angles
             recortes = tracker.last_clamp
-            direcciones = tracker.direcciones
             retargetings = tracker.retargetings
-            vectores = tracker.vectores
-            vectores_codo = tracker.vectores_codo
             extensiones = tracker.extensiones
             pesos_mano = tracker.pesos_mano
             pesos_reposo = tracker.pesos_reposo
-            vectores_bp = tracker.vectores_bp
-            vectores_codo_bp = tracker.vectores_codo_bp
-            puntos_imagen = tracker.puntos_imagen
-            confianzas_mano = tracker.confianzas_mano
-            hombros = tracker.hombros_mundo
             pesos_saludo = tracker.pesos_saludo
             for fila, canal in enumerate((Side.L, Side.R)):
                 campo_abd, campo_flex = CANALES[canal]
@@ -2447,11 +2550,11 @@ def _demo(argv: list[str] | None = None) -> int:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.62, color, 2,
                 )
                 if recorte is not None:
-                    _dibujar_barra(
+                    dibujar_barra(
                         frame, 10, y + 20,
                         recorte.abduccion.fraction, recorte.abduccion.clamped,
                     )
-                    _dibujar_barra(
+                    dibujar_barra(
                         frame, 10 + ANCHO_BARRA + 20, y + 20,
                         recorte.flexion.fraction, recorte.flexion.clamped,
                     )
@@ -2575,72 +2678,8 @@ def _demo(argv: list[str] | None = None) -> int:
                 )
 
             if escritor is not None:
-                nada = (float("nan"), float("nan"))
-                cl = crudos.get(Side.L, nada)
-                cr = crudos.get(Side.R, nada)
-                rl = recortes.get(Side.L)
-                rr = recortes.get(Side.R)
-                vivo_l = estimado.get(Side.L, False)
-                vivo_r = estimado.get(Side.R, False)
-
-                def _f(valor: float | None) -> str:
-                    return "" if valor is None else f"{valor:.4f}"
-
-                escritor.writerow(
-                    [
-                        f"{time.perf_counter() - t0:.4f}", etiqueta,
-                        tracker.target, int(tracker.mirror),
-                        int(tracker.frame_espejado),
-                        f"{cl[0]:.4f}", f"{cl[1]:.4f}",
-                        f"{cr[0]:.4f}", f"{cr[1]:.4f}",
-                        _f(mando.armL), _f(mando.armLtw),
-                        _f(mando.armR), _f(mando.armRtw),
-                        int(vivo_l), int(vivo_r),
-                        int(bool(rl and rl.clamped)), int(bool(rr and rr.clamped)),
-                        f"{vis.get('hombro_L', float('nan')):.3f}",
-                        f"{vis.get('destino_L', float('nan')):.3f}",
-                        f"{vis.get('codo_L', float('nan')):.3f}",
-                        f"{vis.get('hombro_R', float('nan')):.3f}",
-                        f"{vis.get('destino_R', float('nan')):.3f}",
-                        f"{vis.get('codo_R', float('nan')):.3f}",
-                        puntos_destino.get(Side.L, ""),
-                        puntos_destino.get(Side.R, ""),
-                        f"{vis.get('cadera', float('nan')):.3f}",
-                        int(tracker.tronco_de_caderas), origen_tronco,
-                        f"{tracker.gain_abduccion:.2f}",
-                        f"{tracker.gain_aduccion:.2f}",
-                        f"{tracker.gain_flexion:.2f}",
-                        f"{tracker.gain_extension:.2f}",
-                        width, height,
-                        tracker.mapeo, f"{tracker.flexion_range[0]:g}",
-                        *_direccion_csv(direcciones.get(Side.L)),
-                        *_direccion_csv(direcciones.get(Side.R)),
-                        *_retarget_csv(retargetings.get(Side.L), vivo_l),
-                        *_retarget_csv(retargetings.get(Side.R), vivo_r),
-                        *_vector_csv(vectores.get(Side.L)),
-                        *_vector_csv(vectores.get(Side.R)),
-                        *_vector_csv(vectores_codo.get(Side.L)),
-                        *_vector_csv(vectores_codo.get(Side.R)),
-                        _f(extensiones.get(Side.L)),
-                        _f(extensiones.get(Side.R)),
-                        _f(pesos_mano.get(Side.L)),
-                        _f(pesos_mano.get(Side.R)),
-                        _f(pesos_reposo.get(Side.L)),
-                        _f(pesos_reposo.get(Side.R)),
-                        *_vector_csv(vectores_bp.get(Side.L)),
-                        *_vector_csv(vectores_bp.get(Side.R)),
-                        *_vector_csv(vectores_codo_bp.get(Side.L)),
-                        *_vector_csv(vectores_codo_bp.get(Side.R)),
-                        *_imagen_csv(puntos_imagen.get(Side.L)),
-                        *_imagen_csv(puntos_imagen.get(Side.R)),
-                        int(tracker.escorzo), f"{tracker.focal_relativa:g}",
-                        _f(confianzas_mano.get(Side.L)),
-                        _f(confianzas_mano.get(Side.R)),
-                        *(("", "") if hombros is None else (f"{hombros[0]:.5f}", f"{hombros[1]:.5f}")),
-                        _f(pesos_saludo.get(Side.L)),
-                        _f(pesos_saludo.get(Side.R)),
-                    ]
-                )
+                escritor.writerow(fila_csv(
+                    tracker, mando, time.perf_counter() - t0, etiqueta, width, height))
                 # Una línea por debajo de la de MQTT: con --publish y --record a
                 # la vez, las dos compartían la altura y la etiqueta —lo único
                 # que hay que mirar mientras se graba con protocolo— no se leía.

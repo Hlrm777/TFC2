@@ -93,6 +93,20 @@ Y un resultado por debajo de lo esperado, medido y explicado: **58.0 %** en la
 prueba oficial, porque la red del legacy se queda corta para FER-2013. Se
 conservó a propósito (P8.1).
 
+**La sesión del 2026-10-26 escribe el PROMPT 7** —`main.py`, el pipeline
+integrado— con ocho decisiones del operador tomadas antes de escribir código
+(panel al lado del video, sin tecla `m`, cuatro CSV compatibles con las
+herramientas, emoción en el bucle primero, publicación en su propio hilo,
+pausa en `k` y gesto de página en `j`/`l`, una sola red de cara como P7.2
+condicional, latencia medida en el P7.3) y un hallazgo:
+
+- **H54** — **los demos publicaban a 15 Hz, no a 20**: el publisher descarta lo
+  que llega a menos de 45 ms del anterior, y un bucle que publica en cada frame
+  a 30 fps pasa uno sí y otro no. El P7 publica desde un hilo con reloj propio.
+
+El código está hecho y probado; falta la sesión con el operador (P7, «Lo que
+falta»).
+
 Cómo leerlo:
 
 - **Partes 0 a 5** — el plan propiamente dicho, con los hallazgos ya integrados
@@ -119,12 +133,12 @@ cambia respecto al plan original.
 | **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral | `1e3b6c1` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
-| P7 — Integración | ⬜ | |
+| P7 — Integración | 🟡 **código hecho el 2026-10-26** · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · **falta la sesión con el operador** y, según lo que mida, el P7.1 (hilo de emoción) y el P7.2 (una red de cara) | `96cae1f`, `6ca0f01` |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1174 pruebas en verde** (600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1238 pruebas en verde** (desde el 2026-10-26: 1174 + 64 del P7 —el pipeline, el analizador de sesiones y las dos medidas de latencia—; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -176,7 +190,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── arm_tracker.py        🟡 BlazePose · signos verificados · falta medir
 │   ├── emotion_classifier.py 🟡 Haar + CNN propia, DeepFace, HSEmotion · falta el visor
 │   ├── control_panel.py      ⬜ P10
-│   └── main.py               ⬜ P7
+│   └── main.py               🟡 P7 · una cámara, los tres, 20 Hz · falta el operador
 ├── raspberry/
 │   └── story_display.py      ⬜ P11
 ├── telmeow_viewer/           ✅ el visor 3D y sus 40 STL · en git desde el 2026-09-06
@@ -186,7 +200,9 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── MQTT/
 │   └── haarcascade_frontalface_default.xml   (huérfano, ver §0.6)
 ├── tools/
-│   ├── mqtt_monitor.py       ✅
+│   ├── mqtt_monitor.py       ✅ · --latencia: la latencia desde la captura (P7.3)
+│   ├── analizar_sesion.py    ✅ P7: fps, frames perdidos, ms por etapa, criterio del P7.1
+│   ├── medir_latencia_camara.py ✅ P7.3: pantalla + cámara, con destellos
 │   ├── dev_broker.py         ✅ broker sin privilegios de administrador
 │   ├── list_cameras.py       ✅ qué cámara y qué backend usar, con fps REALES
 │   ├── analizar_registro.py  ✅ CSV del head tracker, por percentil
@@ -200,7 +216,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── train_fer2013.py      ✅ P8: FER-2013 verificado, partición oficial,
 │   │                            entrenamiento determinista, --evaluar
 │   └── eval_emotion.py       ⬜ P9
-├── tests/                    ✅ 1112 pruebas
+├── tests/                    ✅ 1238 pruebas
 ├── mosquitto.conf            ✅ los dos listeners
 ├── emotion_model.meta.json   ✅ orden de clases del modelo propio (el .keras no va en git)
 ├── emotion_model_fer2013.meta.json, .historial.csv   ✅ el de FER-2013 (P8), y el
@@ -245,6 +261,10 @@ Correcciones respecto a la v1, verificadas en `telmeow_viewer.html:987-1023`:
   Esto es lo que permite cumplir el requisito de «reutilizar el último valor
   válido» sin publicar ceros: basta con **omitir el campo**.
 - `gesture` acepta `page_next` / `page_prev`.
+- **`t`** (desde el 2026-10-26, P7.3, opcional): hora Unix en ms de la
+  **captura** del frame del que sale la pose. Lo pone el pipeline; el visor lo
+  usa para su indicador «Latencia» y `tools/mqtt_monitor.py --latencia` para la
+  cifra citable. No mueve nada del robot.
 
 Ángulos en grados (float), sin cuantizar.
 
@@ -268,6 +288,16 @@ que está acotado por arriba por el periodo de publicación: no puede variar con
 la latencia que dice aproximar. Medido, marca 49-51 ms, que es exactamente el
 periodo de 20 Hz. **La latencia extremo a extremo no está medida.** Ver §3.2
 para la decisión pendiente.
+**Desde el 2026-10-26 se mide (P7.3):** la celda pasa a llamarse «Periodo cmd»,
+que es lo que mide, y una nueva, «Latencia», resta la hora de captura que trae
+el campo `t`. Falta la cifra, que sale de la sesión del P7.
+
+**Sobre la tasa de los demos (H54).** Los demos llaman a `publish` en cada
+frame, y el publisher descarta lo que llega a menos de 45 ms del anterior: a 30
+fps pasa uno sí y otro no, así que publicaban a **15 Hz**, no a 20 (a 25 fps,
+12.5). Los 20 Hz verificados en el P2 son los del demo del publisher, que tiene
+su propio reloj. El pipeline del P7 publica desde un hilo con reloj propio y da
+los 20 con cualquier tasa de cámara.
 
 ## 0.5 Límites articulares
 
@@ -380,7 +410,7 @@ tesis.
 | 5 | **P5** | Arm tracker corregido (bugs 1–4) | ✅ cerrado el 2026-10-19 |
 | 6 | **P6** | Clasificador de emoción con backends intercambiables | ✅ backend `combinado` elegido, integrado y verificado en vivo; `min_confidence` 0.5 (P6.4) |
 | 7 | **P8** | Entrenamiento con FER-2013 | ✅ 58.0 % · falta decidir P8.1 |
-| 8 | **P7** | Integración: captura única + HUD | ⬜ |
+| 8 | **P7** | Integración: captura única + HUD | 🟡 código hecho; falta la sesión con el operador |
 | 9 | **P10** | Panel de control del operador | ⬜ |
 | 10 | **P11** | Servicio de pantalla externa en la Raspberry | ⬜ |
 | 11 | **P9** | Evaluación comparativa | ⬜ |
@@ -2621,7 +2651,169 @@ Commit: "feat: clasificador de emocion con backends intercambiables"
 
 ---
 
-## PROMPT 7 — Integración ⬜
+## PROMPT 7 — Integración 🟡 **código hecho el 2026-10-26** · falta la sesión con el operador
+
+### Las decisiones, tomadas con el operador antes de escribir código (2026-10-26)
+
+| Tema | Decisión | Por qué |
+|---|---|---|
+| HUD | **Panel al lado**: ventana de 960×480, el video a la izquierda limpio (solo esqueleto y caja de la cara), un panel de 320 px a la derecha | quince líneas de texto sobre 640×480 tapaban casi un tercio de la imagen, y con ella la cara y los brazos |
+| Tecla `m` | **Se quita** (desviación del enunciado) | voltear la imagen en caliente invertiría el pan sin aviso: el head tracker asume la imagen espejada, y los brazos y la emoción no. El convenio de imitación ya es configuración (`ArmConfig.mirror`, `HeadConfig.invert_pan`) |
+| `--record` | **Cuatro CSV**: `sesion.csv` y, con las columnas exactas de cada demo, `_cabeza`, `_brazos` y `_emocion` | todas las herramientas de `tools/` leen una sesión del pipeline sin cambios, y una sola sesión sirve para el P7, para confirmar el 0.5 del P6 y para el H52 |
+| Emoción | **En el bucle primero**; un hilo aparte solo si la medida lo pide (P7.1) | más simple; se mide antes de complicar |
+| Publicación | **Un hilo mínimo a 20 Hz** que envía la última pose | sin él salen 15 Hz a 30 fps (H54) |
+| Teclas | pausa en **`k`** (el enunciado decía `p`); **`j`/`l`** página anterior/siguiente | convención de reproductor de video; con `j`/`l` el gesto de página (§3.2.3) se valida ya con una persona moviéndose, y el P10 solo lo dispara desde sus botones |
+| Una red de cara | **P7.2, condicional**, con disparadores medidos | unificar Face Mesh y Face Landmarker ahorraría ~20-30 ms cada 200 ms y quitaría el Haar, pero obliga a rehacer el P4 en el visor o a reevaluar el P6.4 |
+| Latencia | **Se mide en el P7 (P7.3)** | el «< 150 ms» del documento no tenía cifra (§3.2.2) |
+
+«Si el tiempo no alcanza», en el punto 19, quería decir el **tiempo de cómputo
+por frame**, no el de calendario. Se aclaró a pregunta del operador.
+
+### Lo hecho el 2026-10-26
+
+**El refactor previo, sin cambio de comportamiento** (`96cae1f`). El pipeline
+tiene que construir los trackers y escribir los CSV exactamente como los demos
+con que se calibró y verificó todo, así que esas piezas salieron de los demos a
+funciones que usan los dos: `HeadTracker.desde_config` y
+`ArmTracker.desde_config`; `COLUMNAS_CSV` y `fila_csv` en `head_tracker` y
+`arm_tracker`; `crear_backend_o_reserva` (la reserva a `keras` del demo de
+emoción); `dibujar_barra`, pública. **Comprobado antes de tocar nada**: los dos
+demos, con escenas falsas y reloj fijo, escriben el mismo CSV byte a byte (sin
+la columna `t`) antes y después.
+
+**`telmeow_teleop/main.py`** (`6ca0f01`), con los diecinueve puntos del enunciado salvo la
+`m`:
+
+- **Una captura, un bucle**: flip, un solo `cvtColor` a RGB compartido por Face
+  Mesh y BlazePose, y el BGR volteado y sin dibujar para el clasificador (punto
+  14). Los tres se construyen con `desde_config`.
+- **Las manos de la emoción salen de BlazePose** (punto 18):
+  `manos_de_blazepose` pasa a píxeles los landmarks 15-22 del mismo frame y
+  descarta los que caen fuera de la imagen (H40). Una prueba exige que den el
+  mismo píxel que calcula el `ArmTracker` por su cuenta para el escorzo: dos
+  caminos de código independientes.
+- **`c` calibra la cabeza y la cara a la vez** (punto 19).
+- **Publicación**: `PublicadorPeriodico`, un hilo que cada 50 ms envía la última
+  pose, por fecha límite y saltando las ranuras perdidas (punto 10). No calcula
+  nada. Espera el enlace antes de arrancar (punto 8). En pausa no sale nada,
+  tampoco un gesto. Un error al publicar no lo mata: se cuenta y el panel lo
+  enseña, porque un hilo muerto en silencio dejaría al robot quieto con todo lo
+  demás diciendo que va bien.
+- **El panel** (puntos 4, 9, 11, 17): los seis ángulos con su barra (roja si se
+  recortan, `~` si el brazo no se midió en este frame), la expresión enviada
+  con la predicción cruda al lado, MANUAL, manos en la cara, CALIBRANDO, fps de
+  cámara y frames repetidos (H19), ms por etapa, y MQTT con enviados,
+  descartados y **perdidos**. Los Hz salen del contador de enviados y no de
+  `effective_hz`, que poda una cola que el hilo de publicación también poda.
+- **`--record`** escribe los cuatro CSV, todos con el mismo origen de `t` y
+  apartando lo anterior. `sesion.csv` lleva por frame la hora de captura, el
+  intervalo, si el frame se repite, los ms de cabeza, brazos, emoción y del
+  bucle entero, lo publicado, el gesto, la pausa y los contadores MQTT.
+- **CLI**: `config.add_cli_args` (ya trae `--camera`) más `--broker
+  HOST[:PUERTO]`, `--no-emotion` (no se construye backend), `--no-arms`,
+  `--record` y `--guardar-recortes`. Sin espejo (`--no-flip`) avisa de que el
+  pan iría al revés.
+- **Cierre limpio** ante `q`, Ctrl-C o una excepción (punto 7).
+
+**`tools/analizar_sesion.py`**: por etiqueta, fps (mediana y medios), fracción
+de intervalos de más de 1.5 periodos, repetidos, ms por etapa separando los
+frames con inferencia, Hz y perdidos; y con `--comparar` aplica el criterio del
+P7.1.
+
+**P7.3, la latencia**: `PosePublisher.publish(t=...)` manda la hora de captura;
+el visor (con la skill) renombra «Latencia cmd» a «Periodo cmd» y añade
+«Latencia» (llegada − `t`, mediana de 2 s), comprobado con Node sobre su propio
+manejador de mensajes; `tools/mqtt_monitor.py --latencia CSV` da la cifra
+citable por un camino independiente del visor; `tools/medir_latencia_camara.py`
+mide pantalla + cámara con destellos de la pantalla, probado con una cámara
+sintética de latencia conocida.
+
+**Pruebas nuevas** (`tests/test_main.py`, `test_analizar_sesion.py`,
+`test_latencia.py`): el pipeline entero con los estimadores de verdad y lo de
+debajo simulado —cámara, Face Mesh, BlazePose, detector de caras, backend—. Lo
+que se graba se comprueba **con las herramientas de `tools/`**, no con una
+copia de su lógica: `reproducir_brazos.py` reproduce el comando que grabó el
+pipeline, `analizar_registro_emocion.py` reproduce exacta su histéresis, y
+`analizar_registro.py` lee su CSV de cabeza. Y una fija el H54.
+
+### Criterios fijados antes de medir
+
+- **P7.1, hilo de emoción**: se añade si, narrando con buena luz, la sesión con
+  emoción procesa < 90 % de los fps medios de la sesión `--no-emotion`, o si la
+  mediana de los frames con inferencia pasa de 66 ms (dos periodos: un frame
+  perdido seguro). Si ni sin emoción llega a 25 fps con buena luz, primero
+  `TELMEOW_ARM_MODEL_COMPLEXITY=0` (reserva del P5). Lo aplica
+  `tools/analizar_sesion.py --comparar`.
+- **P7.2, una sola red de cara**: se plantea, y se decide con el operador, si
+  (a) el bucle sigue sin caber con el P7.1 y `model_complexity` 0, o (b) el Haar
+  no encuentra la cara en más del 10 % de las inferencias de las etiquetas de
+  giro de cabeza (1, 2, 3, 8 y 9 de `p7_movimiento`; columna `rostro` de
+  `p7_movimiento_emocion.csv`). Su coste: rehacer el P4 en el visor si cambia la
+  red de la cabeza, o reevaluar el P6.4 si cambia el recorte de la emoción.
+- **H52, manos de BlazePose**: sirven si en la etiqueta 7 del protocolo v3
+  marcan mano en la cara en ≥ 90 % de las inferencias con cara, y en la 5
+  (leyendo, manos abajo) en ≤ 5 %. Si no, se evalúa offline sobre la columna
+  `manos` sostener la marca un tiempo tras perderla.
+
+### Lo que falta — la sesión con el operador
+
+Todo con el broker único (§4.1), el visor servido y conectado a
+`ws://localhost:9001` (§4.2) y buena luz. Cuatro grabaciones:
+
+```
+.venv\Scripts\python.exe -m telmeow_teleop.main --no-emotion --record p7_sin_emocion.csv
+.venv\Scripts\python.exe tools\mqtt_monitor.py --latencia p7_latencia.csv      # en otra terminal, durante la siguiente
+.venv\Scripts\python.exe -m telmeow_teleop.main --record p7_movimiento.csv
+.venv\Scripts\python.exe -m telmeow_teleop.main --record p7_emocion.csv --guardar-recortes p7_emocion_recortes
+.venv\Scripts\python.exe tools\medir_latencia_camara.py --csv p7_latencia_camara.csv
+```
+
+**1. `p7_sin_emocion.csv`** — la línea base de fps (ESPACIO pasa de etiqueta):
+
+| Etiqueta | Qué hacer | Tiempo | Qué debe hacer el robot |
+|---|---|---|---|
+| 0 | Cara relajada mirando la pantalla, manos sobre la mesa | 10 s | cabeza al centro, brazos en reposo |
+| 1 | Narrar en voz alta un cuento cualquiera, gesticulando como con niños delante | 60 s | seguir cabeza y brazos |
+
+**2. `p7_movimiento.csv`**, con `mqtt_monitor.py --latencia` grabando a la vez.
+Un movimiento por etiqueta, para comprobar cada signo en el visor:
+
+| Etiqueta | Qué hacer | Tiempo | Qué debe hacer el robot |
+|---|---|---|---|
+| 0 | Cara relajada mirando la pantalla, manos sobre la mesa, sin moverse | 10 s | el panel dice CALIBRANDO ~3 s; luego neutral, cabeza al centro, brazos en reposo |
+| 1 | Girar la cabeza hacia TU izquierda hasta el borde de la pantalla, sostener 3 s, volver | 10 s | gira hacia SU izquierda (de frente en el visor parece al revés, P4.1) |
+| 2 | Lo mismo hacia tu derecha | 10 s | hacia su derecha |
+| 3 | Mirar el borde de arriba de la pantalla 3 s, luego el de abajo 3 s, volver | 10 s | sube y luego baja la cabeza |
+| 4 | Levantar el brazo izquierdo de lado hasta la horizontal, «como un avión» con un solo brazo; sostener 3 s y bajarlo | 10 s | sube el brazo izquierdo del robot |
+| 5 | Lo mismo con el derecho | 10 s | sube el derecho |
+| 6 | Saludar con la mano derecha como a alguien al otro lado de la calle, cinco vaivenes | 10 s | el robot saluda con el derecho ~1.4 s después |
+| 7 | Narrar como en la etiqueta 1 de la sesión 1 | 60 s | seguir cabeza y brazos; es el tramo que se compara para el P7.1 |
+| 8 | Girar la cabeza a TU izquierda y, sin volver, pulsar `l`; quieto 3 s | 10 s | barrido hacia la pantalla externa y bajada, y vuelve a la cabeza GIRADA, no al centro (§3.2.3) |
+| 9 | Lo mismo hacia tu derecha, con `j` | 10 s | ídem, barrido al revés |
+| 10 | Pulsar `k`, mover la cabeza a los lados 5 s, pulsar `k` otra vez | 10 s | quieto durante la pausa (el panel dice PAUSA), y retoma |
+| 11 | Pulsar `c` con la cara relajada mirando la pantalla, quieto 3 s | 5 s | recalibra (la consola dice `calibrar: cabeza si, emocion en curso`) |
+
+**3. `p7_emocion.csv`** — el protocolo v3 del P6.1 entero (etiquetas 0-8, tabla
+en el P6), ahora dentro del pipeline: confirma el 0.5 y «neutral sin apoyo»
+(la confirmación opcional del P6) y mide el H52 con las manos de BlazePose.
+
+**4. `medir_latencia_camara.py`** — 30 s mirando la pantalla, con la sala en
+penumbra para que el destello se note.
+
+Después, sin el operador:
+
+```
+python tools/analizar_sesion.py p7_movimiento.csv --comparar p7_sin_emocion.csv --etiqueta 7
+python tools/analizar_registro_emocion.py p7_emocion_emocion.csv
+python tools/analizar_registro_brazos.py p7_movimiento_brazos.csv
+python tools/analizar_registro.py p7_movimiento_cabeza.csv
+```
+
+De ahí salen la decisión del P7.1 (y quizá del P7.2), el H52, la tasa
+publicada (`analizar_sesion` y lo recibido por `mqtt_monitor`) y la latencia
+total = la de la cámara + la de captura a suscriptor.
+
+### Enunciado original
 
 ```
 Crea `telmeow_teleop/main.py`, el punto de entrada que integra todo.
@@ -3404,10 +3596,21 @@ emoción en operación, que abrió el P8, se cerró el 2026-10-25 (punto 4).
    - **O reetiquetar** el indicador como «periodo entre comandos» y declarar en
      limitaciones que la latencia extremo a extremo no se midió.
 
+   **Decidido el 2026-10-26: se mide (P7.3), y se reetiqueta.** El pipeline pone
+   en `t` la hora de CAPTURA del frame (no la de publicación), el visor muestra
+   «Periodo cmd» y «Latencia», `tools/mqtt_monitor.py --latencia` da la cifra
+   citable, y `tools/medir_latencia_camara.py` lo que tarda la cámara. Lo que
+   queda sin medir, el render del visor (~1 refresco), se declara. **En
+   medición**: falta la sesión del P7.
+
 3. **Qué hacer si el gesto de página coincide con movimiento del operador.**
    Implementado un handoff (`liveTiltPanBuffer`: el gesto toma control temporal
    de pan/tilt y devuelve suavemente a la última posición en vivo, no a home),
    pero **no validado con una persona real**.
+   **Desde el 2026-10-26 se valida en el P7**: las teclas `j`/`l` del pipeline
+   mandan `page_prev`/`page_next` mientras el operador mueve la cabeza
+   (etiquetas 8 y 9 de `p7_movimiento`). El P10 solo lo disparará desde sus
+   botones de página.
 
 4. ~~**Qué modelo de emoción usa el robot en operación**~~ — **cerrada el
    2026-10-25**: el operador eligió el `combinado` (`mbf_va_mtl` + blendshapes
@@ -3855,7 +4058,10 @@ instancia del repositorio en otro puerto TCP, apuntando el pipeline con
    esperar al P7. Admite `--record` a la vez: publica y graba en la misma pasada.
    Si el CSV de destino ya existe, **la grabación anterior se conserva** con el
    sufijo `_anterior`; no se pisa (se perdió una así el 2026-09-06).
-8. `python -m telmeow_teleop.main` con la cámara. *(tras P7)*
+8. `python -m telmeow_teleop.main` con la cámara: cabeza, brazos y emoción a la
+   vez, publicando a 20 Hz. Al arrancar, mirar la pantalla con la cara relajada
+   3 s. Teclas y opciones en el README («Lanzar el pipeline completo») y en el
+   P7. *(código hecho; falta verlo con el operador)*
 9. `python -m telmeow_teleop.control_panel`. *(tras P10)*
 10. En la Raspberry: `python raspberry/story_display.py --windowed`. *(tras P11)*
 
@@ -4014,6 +4220,11 @@ equivalente en Python puro, sin privilegios de administrador.
 - **«¿Cómo midió esos 150 ms de latencia?»** *(nueva — hay que resolverla antes)*
   Hoy la respuesta honesta es que no se midieron: el indicador mide el intervalo
   entre mensajes. Ver §3.2 punto 2.
+  **Desde el P7.3 tiene respuesta, a falta de la cifra:** cada mensaje lleva la
+  hora de captura de su frame y el suscriptor, en la misma máquina, se la resta
+  a la de llegada; lo que tarda la cámara se mide aparte, con destellos de la
+  pantalla que ve la propia cámara. La suma es la latencia de la luz al
+  mensaje; queda fuera el render del visor (~1 refresco), y se declara.
 
 - **«¿A qué tasa va su sistema, y de qué depende?»**
   El transporte MQTT sostiene 20 Hz, verificado, y la captura sostuvo 30 fps
@@ -4459,12 +4670,47 @@ from telmeow_teleop.publisher import PosePublisher
 with PosePublisher(cfg.mqtt, cfg.rates) as pub:
     pub.wait_connected(timeout=5.0)    # IMPRESCINDIBLE antes de emitir
     pub.publish(pan=..., tilt=..., armL=..., armLtw=..., armR=..., armRtw=...,
-                emo="feliz", gesture=None, page=None)   # -> bool
+                emo="feliz", gesture=None, page=None,
+                t=None)              # P7.3: hora Unix en ms de la CAPTURA -> campo t
 pub.message_count / .dropped_count / .failed_count / .effective_hz / .connected
 ```
 
 Los `None` se omiten del JSON. Los mensajes con `gesture` o `page` nunca se
-descartan por tasa.
+descartan por tasa. **Lo que llega a menos de 45 ms del anterior, sí** (H54):
+quien publique al ritmo de la cámara no saca 20 Hz; para eso está el
+`PublicadorPeriodico` del pipeline. `effective_hz` poda una cola que también
+poda `publish`: desde otro hilo, leer `message_count` y no `effective_hz`.
+
+## `main.py` (P7)
+
+```python
+from telmeow_teleop.main import (main, PublicadorPeriodico, Grabacion, EstadoPanel,
+                                 manos_de_blazepose, rutas_de_grabacion,
+                                 dibujar_panel, COLUMNAS_SESION, ANCHO_PANEL)
+
+main(["--record", "sesion.csv"])          # = python -m telmeow_teleop.main --record sesion.csv
+
+p = PublicadorPeriodico(pub, cfg.rates.publish_period)   # su hilo, 20 Hz, fecha límite
+p.actualizar(pan=..., armL=..., emo=..., t=...)          # la pose del próximo tick
+p.gesto("page_next") -> bool              # False en pausa · sale una sola vez
+p.alternar_pausa() -> bool ; p.pausado ; p.errores ; p.ultimo_error
+p.arrancar() ; p.parar() ; p.tick()       # tick: un envío, sin hilo (pruebas)
+
+manos_de_blazepose(arm.landmarks_imagen, ancho, alto) -> [(x, y)]   # 15-22, dentro del cuadro
+rutas_de_grabacion("sesion.csv") -> {"sesion", "cabeza", "brazos", "emocion": Path}
+```
+
+Lo que el pipeline reutiliza de cada tracker, y que comparten con sus demos a
+propósito: `HeadTracker.desde_config(cfg)`, `ArmTracker.desde_config(cfg)`,
+`EmotionClassifier.desde_config(cfg, backend=crear_backend_o_reserva(...))`; y
+para grabar, `head_tracker.COLUMNAS_CSV`/`fila_csv(tracker, t, etiqueta, pose,
+ancho, alto)`, `arm_tracker.COLUMNAS_CSV`/`fila_csv(tracker, mando, t,
+etiqueta, ancho, alto)` y `emotion_classifier.COLUMNAS_CSV`/
+`registrar_inferencia`. `arm_tracker.dibujar_barra` pinta las barras del panel.
+
+Herramientas: `python tools/analizar_sesion.py sesion.csv [--comparar
+sin_emocion.csv --etiqueta N]`, `python tools/mqtt_monitor.py --latencia
+CSV`, `python tools/medir_latencia_camara.py [--csv CSV]`.
 
 ---
 
@@ -5246,6 +5492,31 @@ y la misma cara el modelo propio pasó de 4 de 5 (el 24) a 3 de 5 (el 25), y ley
 Los blendshapes se calculan sobre la forma de la cara, no sobre los píxeles, y
 `mbf_va_mtl` no vio nunca al operador: los dos aguantaron ese cambio (P6.4).
 
+## 7.20 El P7: los demos publicaban a 15 Hz (H54)
+
+**H54 — Un bucle que publica en cada frame no da 20 Hz.** `PosePublisher`
+limita la tasa por descarte: rechaza lo que llega antes del 90 % del periodo,
+45 ms a 20 Hz (`publisher.py:127`, `_min_period`). Los tres demos llaman a
+`publish` una vez por frame, así que con la cámara a 30 fps (cada 33 ms) pasa
+uno sí y otro no: **15 Hz**, y 12.5 a 25 fps. Fijado con reloj inyectado en
+`test_publicar_en_cada_frame_a_30_fps_da_15_hz_y_el_hilo_da_20`
+(`tests/test_main.py`): 30 llamadas en un segundo, 15 enviadas y 15
+descartadas.
+
+Lo que no cambia: los 20 Hz del punto de control del P2 eran del demo del
+publisher, que tiene su propio reloj (`publisher._demo`), y el visor conserva
+el último valor entre mensajes, así que a 15 Hz el robot se movía igual de
+suave a la vista. Lo que sí cambia: **la tasa que se declare de una sesión de
+demo es 15 Hz**, y el contador `dropped_count` de esas sesiones no era un
+problema sino esto. El pipeline del P7 publica desde un hilo con su propio
+reloj (`PublicadorPeriodico`) y da 20 Hz con cualquier tasa de cámara; la
+sesión del P7 lo confirma por dos caminos, el contador del pipeline y lo que
+recibe `tools/mqtt_monitor.py`.
+
+Es una deducción del código atada por una prueba, no una medición en vivo: las
+sesiones del P5 no grababan la tasa publicada. Si hace falta citarla de una de
+ellas, se mide.
+
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
@@ -5300,6 +5571,7 @@ Los blendshapes se calculan sobre la forma de la cara, no sobre los píxeles, y
 | **H49** | **Entrenar con volteo no hace simétrica a la red**: el modelo de FER-2013 acierta lo mismo con las caras volteadas, pero cambia de predicción en una de cada cinco (misma predicción 77.6 %). Con una sola persona no se compensa | P8, P9 punto 20, §7.18 |
 | **H53** | **El modelo propio aprendió atajos del dataset**: boca abierta = sorprendido, cabeza ladeada, gafas. Con la misma luz pasó de 4 de 5 a 3 de 5 entre el 24 y el 25, y de 97 % a 24 % neutral leyendo; los blendshapes y `mbf_va_mtl` aguantan | P6.1, P6.4, §7.19 |
 | **H52** | **El detector de manos no ve una mano pegada a la oreja**: 57 % en vivo, 58 % con el modelo mayor. La regla de las manos es correcta, la entrada no; en el P7 se prueban las muñecas de BlazePose | P6.1, P7, §7.19 |
+| **H54** | **Los demos publicaban a 15 Hz, no a 20**: el publisher descarta lo que llega a menos de 45 ms del anterior y a 30 fps pasa un frame sí y otro no. El pipeline publica desde un hilo con reloj propio | §0.4, P7, Parte 6, §7.20 |
 | **H51** | **El modelo propio no reconoce la tristeza, ni con buena luz**: en la grabación del 2026-10-24 acierta 4 de 5, pero con la tristeza el robot pone neutral el 88 % y el modelo crudo nunca dice triste. Los modelos abiertos que podrían mejorarlo, y los descartados, en §7.19 | P6.1, P6.4, §7.19 |
 | **H50** | **Las etiquetas del operador no bastan para verificar el orden de clases de un modelo que confunde sus caras**: con el de FER-2013, de 120 permutaciones, una equivocada cuadró mejor que la buena con 183 caras. Fijan `feliz` y descartan las rotaciones; el resto lo atan las cifras canónicas | P8, §7.18 |
 | **H37** | **La simetría aproximaba la zona extendida, pero no la medía**: el reflejo `(a, f) ≡ (−a, f ± 180)` falló por un paso de 5° en 6-9 de 18 filas, y en el límite usado prometía 5° de más. Barrida con los detectores del visor (tras reproducir 37/37 filas de agosto); manda lo medido. Unión y motor: 0 choques. El cable, sin CAD, pasa a supuesto declarado | P5.3, §0.5, §3.3.11 |

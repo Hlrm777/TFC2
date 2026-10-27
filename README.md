@@ -12,29 +12,27 @@ en el documento.
 ## Flujo de datos
 
 ```
-                     ┌───────────────────────────────────────┐
-                     │            main.py (P7)               │
-   ┌──────────┐      │   UNA sola captura, UN solo bucle     │
-   │  cámara  ├─────►│                                       │
-   │  30 fps  │      │   frame ──┬──► HeadTracker    (P4)    │
-   └──────────┘      │           │      Face Mesh + solvePnP │
-                     │           │         └─► pan, tilt     │
-                     │           │                           │
-                     │           ├──► ArmTracker     (P5)    │
-                     │           │      BlazePose 3D         │
-                     │           │         └─► armL, armLtw, │
-                     │           │             armR, armRtw  │
-                     │           │                           │
-                     │           └──► EmotionClassifier (P6) │
-                     │                  CNN a 5 Hz           │
-                     │                     └─► emo           │
-                     │                                       │
-                     │   los 6 ángulos ──► limits.clamp_*    │
-                     └───────────────┬───────────────────────┘
-                                     │ 20 Hz
-                              publisher.PosePublisher
-                                     │
-                                     ▼
+             ┌────────────────────────────────────────────────────────────────────┐
+             │ main.py (P7) · UNA captura, UN bucle                               │
+ ┌──────────┐│                                                                    │
+ │  cámara  ├► frame ─► flip ─┬─► BGR ──────────────────────┐                     │
+ │  30 fps  ││  (hora t)      │                             │                     │
+ └──────────┘│                └─► RGB (una vez)             │                     │
+             │                     ├─► HeadTracker (P4)     │                     │
+             │                     │    Face Mesh           │                     │
+             │                     │    └─► pan, tilt       ▼                     │
+             │                     └─► ArmTracker (P5)    EmotionClassifier (P6)  │
+             │                          BlazePose ─ manos ─►combinado, 5 Hz       │
+             │                          └─► armL, armLtw,   └─► emo               │
+             │                              armR, armRtw                          │
+             │                                                                    │
+             │ instantánea {pan, tilt, arm*, emo, t}                              │
+             │        │                                                           │
+             │        ▼                                                           │
+             │ PublicadorPeriodico: su propio hilo, 20 Hz                         │
+             └─────────────────────────────────┬──────────────────────────────────┘
+                                               │ publisher.PosePublisher
+                                               ▼
                          ┌───────────────────────┐
                          │  Mosquitto (local)    │
                          │  1883 TCP · 9001 WS   │
@@ -48,6 +46,12 @@ en el documento.
                 │  clampa otra vez│   │  15.6" HDMI          │
                 └─────────────────┘   └──────────────────────┘
 ```
+
+Tres cadencias, cada una con su reloj: la visión corre a lo que dé la cámara,
+la emoción a 5 Hz dentro del mismo bucle, y la publicación a 20 Hz en un hilo
+propio que solo envía la última pose. Publicar en cada frame no da 20 Hz: el
+publisher descarta lo que llega a menos de 45 ms del anterior, y a 30 fps
+pasaría uno sí y otro no (15 Hz).
 
 El recorte de poses tiene **dos capas**: `limits.py` recorta en Python contra
 las tablas del barrido BVH antes de publicar, y el visor vuelve a verificar la
@@ -315,6 +319,69 @@ TELMEOW_MQTT_HOST=192.168.1.50 python -m telmeow_teleop.publisher
 
 ---
 
+## Lanzar el pipeline completo
+
+Con el broker levantado (un solo broker, ver arriba) y el visor servido:
+
+```bash
+python -m telmeow_teleop.main
+```
+
+Abre UNA cámara y corre a la vez cabeza, brazos y emoción. La ventana tiene el
+video a la izquierda, limpio salvo el esqueleto y la caja de la cara, y a la
+derecha un panel con los seis ángulos (en rojo si el robot los recorta), la
+expresión enviada junto a la predicción cruda, los fps y lo que cuesta cada
+etapa, y el estado del enlace: enviados, descartados y **perdidos** (sin enlace).
+
+**Al arrancar, mirar la pantalla con la cara relajada unos 3 s**: la cabeza toma
+esa postura como neutra y la emoción, esa cara.
+
+| Tecla | Qué hace |
+|---|---|
+| `q` | salir (también Ctrl-C; cierra cámara, ventana y MQTT en cualquier caso) |
+| `c` | calibrar a la vez la postura neutra de la cabeza y la cara neutra |
+| `1`..`6` | forzar neutral, feliz, triste, sorprendido, enojado, concentrado; la misma otra vez la suelta |
+| `0` | expresión automática |
+| `k` | pausar / reanudar la publicación |
+| `j` / `l` | gesto de página anterior / siguiente |
+| ESPACIO | cambiar de etiqueta (con `--record`) |
+
+Opciones:
+
+```bash
+python -m telmeow_teleop.main --record sesion.csv --guardar-recortes sesion_caras
+python -m telmeow_teleop.main --no-emotion        # sin backend de emoción
+python -m telmeow_teleop.main --no-arms           # sin BlazePose
+python -m telmeow_teleop.main --camera 1 --broker 192.168.1.50:1883
+```
+
+`--record sesion.csv` escribe cuatro archivos: `sesion.csv` (una fila por
+frame: lo publicado, fps y milisegundos por etapa) y `sesion_cabeza.csv`,
+`sesion_brazos.csv` y `sesion_emocion.csv`, con las mismas columnas que los
+demos de cada tracker, así que se analizan con las herramientas de siempre:
+
+```bash
+python tools/analizar_sesion.py sesion.csv
+python tools/analizar_registro.py sesion_cabeza.csv
+python tools/analizar_registro_brazos.py sesion_brazos.csv
+python tools/analizar_registro_emocion.py sesion_emocion.csv
+```
+
+Nada se pisa: lo que ya existiera se conserva con el sufijo `_anterior`.
+
+**Latencia.** Cada mensaje lleva en `t` la hora de captura de su frame. El
+visor muestra «Latencia» (llegada menos `t`) y «Periodo cmd» (el intervalo
+entre mensajes, que no es la latencia). La cifra para citar sale de
+
+```bash
+python tools/mqtt_monitor.py --latencia latencia.csv
+```
+
+con el pipeline en la misma máquina, y lo que tarda la propia cámara, de
+`python tools/medir_latencia_camara.py` (destellos de la pantalla).
+
+---
+
 ## Contrato MQTT
 
 Un único mensaje JSON en `telmeow/teleop/pose`:
@@ -332,6 +399,8 @@ Un único mensaje JSON en `telmeow/teleop/pose`:
 - `emo` acepta español o alias en inglés (`happy`, `sad`, `surprise`, `angry`,
   `focused`). También se acepta la clave `emotion` como alias de `emo`.
 - `gesture` acepta `page_next` o `page_prev` y dispara el gesto de cabeza.
+- `t` (opcional): hora Unix en ms de la captura del frame del que sale la pose,
+  para medir la latencia. El visor no la necesita para mover el robot.
 - Los mensajes con `gesture` o `page` **nunca** se descartan por límite de tasa:
   son eventos discretos que tienen que llegar.
 
@@ -362,9 +431,11 @@ por segundo cuando solo le interesa uno cada varios segundos.
 │   ├── arm_tracker.py  # BlazePose → abducción y flexión de los brazos (P5)
 │   ├── retarget.py, escorzo.py, saludo.py   # piezas del arm tracker
 │   ├── emotion_classifier.py  # Haar, histéresis, manos, calibración; CNN propia, DeepFace, HSEmotion (P6)
-│   └── emotion_backends.py    # el combinado: HSEmotion ONNX + blendshapes de MediaPipe (P6.4)
+│   ├── emotion_backends.py    # el combinado: HSEmotion ONNX + blendshapes de MediaPipe (P6.4)
+│   └── main.py         # el pipeline integrado: una cámara, los tres, 20 Hz (P7)
 ├── tools/
-│   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/#
+│   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/# · --latencia (P7.3)
+│   ├── analizar_sesion.py, medir_latencia_camara.py  # tasas, costes y latencia (P7)
 │   ├── dev_broker.py   # broker MQTT sin privilegios de administrador
 │   ├── list_cameras.py # qué cámaras hay y qué resoluciones admiten
 │   ├── train_fer2013.py # entrenamiento con FER-2013 y su partición oficial (P8)

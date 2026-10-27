@@ -8,6 +8,15 @@ Uso::
 
     python tools/mqtt_monitor.py
     python tools/mqtt_monitor.py --broker 192.168.1.50 --topic telmeow/teleop/pose
+    python tools/mqtt_monitor.py --latencia latencia.csv
+
+Con ``--latencia`` mide la latencia desde la cámara (P7.3): el pipeline pone en
+el campo ``t`` la hora de captura del frame del que sale cada pose, y aquí se
+le resta la hora de llegada. Es un camino independiente del visor, y el que da
+la cifra citable: procesamiento + espera del hilo de publicación + broker +
+suscriptor. Solo vale con los dos procesos en la MISMA máquina, que es lo único
+que comparte el reloj de pared. En vez de cada JSON imprime una línea por
+segundo, y al salir la mediana y el p95.
 
 El suscriptor original queda intacto en ``legacy/MQTT/MQTT_Subscriber.py``.
 """
@@ -15,7 +24,9 @@ El suscriptor original queda intacto en ``legacy/MQTT/MQTT_Subscriber.py``.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import statistics
 import sys
 import time
 from collections import defaultdict, deque
@@ -48,8 +59,38 @@ def _on_disconnect(client, userdata, *args):
     print("[!] Desconectado. Reintentando en segundo plano…")
 
 
+def latencia_ms(cuerpo, ahora_ms: float) -> float | None:
+    """Latencia de un mensaje de pose: hora de llegada menos su campo ``t``.
+
+    ``None`` si el mensaje no trae ``t`` numérico (el pipeline anterior al P7.3,
+    o el demo del publisher).
+    """
+    if not isinstance(cuerpo, dict):
+        return None
+    t = cuerpo.get("t")
+    if isinstance(t, bool) or not isinstance(t, (int, float)):
+        return None
+    return float(ahora_ms) - float(t)
+
+
+def resumen_latencias(valores: list[float]) -> dict[str, float] | None:
+    """Mediana, p95 y extremos, en ms. ``None`` sin valores."""
+    if not valores:
+        return None
+    ordenados = sorted(valores)
+    return {
+        "n": float(len(ordenados)),
+        "mediana": statistics.median(ordenados),
+        "p95": ordenados[min(len(ordenados) - 1, int(round(0.95 * (len(ordenados) - 1))))],
+        "min": ordenados[0],
+        "max": ordenados[-1],
+    }
+
+
 def _on_message(client, userdata, message):
-    now = time.monotonic()
+    # perf_counter y no monotonic (§0.7): en Windows monotonic va a saltos de
+    # 15.6 ms, comparables al periodo de 50 ms que se quiere medir.
+    now = time.perf_counter()
     topic = message.topic
 
     window = _rates[topic]
@@ -60,9 +101,25 @@ def _on_message(client, userdata, message):
 
     raw = message.payload.decode("utf-8", errors="replace")
     try:
-        body = json.dumps(json.loads(raw), indent=2, ensure_ascii=False, sort_keys=True)
+        cuerpo = json.loads(raw)
+        body = json.dumps(cuerpo, indent=2, ensure_ascii=False, sort_keys=True)
     except json.JSONDecodeError:
+        cuerpo = None
         body = raw  # el legacy publicaba escalares sueltos, no JSON
+
+    latencias = userdata.get("latencias")
+    if latencias is not None:
+        ahora_ms = time.time() * 1000.0
+        valor = latencia_ms(cuerpo, ahora_ms)
+        if valor is not None:
+            latencias.append(valor)
+            userdata["escritor"].writerow([f"{ahora_ms:.1f}", f"{cuerpo['t']}", f"{valor:.1f}"])
+        if now - userdata["ultimo_aviso"] >= 1.0:
+            userdata["ultimo_aviso"] = now
+            recientes = latencias[-20:]
+            mediana = f"{statistics.median(recientes):.0f} ms" if recientes else "sin campo t"
+            print(f"{topic}  {len(window)} Hz  latencia {mediana}  ({len(latencias)} medidas)")
+        return
 
     stamp = time.strftime("%H:%M:%S")
     print(
@@ -84,12 +141,34 @@ def main(argv: list[str] | None = None) -> int:
         default="telmeow/#",
         help="Filtro de suscripción (por defecto todo el árbol telmeow).",
     )
+    parser.add_argument(
+        "--latencia",
+        type=Path,
+        metavar="CSV",
+        help="Mide la latencia desde la captura (campo t del pipeline, P7.3) y "
+             "la graba: recibido_ms, t_captura_ms, latencia_ms.",
+    )
     args = parser.parse_args(argv)
+
+    datos = {"topic": args.topic}
+    registro = None
+    if args.latencia is not None:
+        # Aquí y no arriba: head_tracker importa MediaPipe, y el monitor solo lo
+        # necesita para no pisar una medición anterior.
+        from telmeow_teleop.head_tracker import apartar_si_existe
+
+        apartado = apartar_si_existe(args.latencia)
+        if apartado is not None:
+            print(f"AVISO: {args.latencia.name} ya existia. Se conserva como {apartado.name}.")
+        registro = open(args.latencia, "w", newline="", encoding="utf-8")
+        escritor = csv.writer(registro)
+        escritor.writerow(["recibido_ms", "t_captura_ms", "latencia_ms"])
+        datos.update(latencias=[], escritor=escritor, ultimo_aviso=0.0)
 
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2, client_id="telmeow-monitor"
     )
-    client.user_data_set({"topic": args.topic})
+    client.user_data_set(datos)
     client.on_connect = _on_connect
     client.on_disconnect = _on_disconnect
     client.on_message = _on_message
@@ -107,6 +186,16 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         client.disconnect()
         client.loop_stop()
+        if registro is not None:
+            registro.close()
+            resumen = resumen_latencias(datos["latencias"])
+            if resumen is None:
+                print("\nNingún mensaje traía el campo t: ¿es el pipeline del P7?")
+            else:
+                print(f"\nLatencia desde la captura ({resumen['n']:.0f} mensajes): "
+                      f"mediana {resumen['mediana']:.1f} ms, p95 {resumen['p95']:.1f}, "
+                      f"min {resumen['min']:.1f}, max {resumen['max']:.1f}. "
+                      f"Grabada en {args.latencia}")
         if _counts:
             print("\nResumen por topic:")
             for topic, count in sorted(_counts.items()):

@@ -248,8 +248,15 @@ class PosePublisher:
         emo: str | None = None,
         gesture: str | None = None,
         page: int | None = None,
+        t: float | None = None,
     ) -> bool:
         """Emite un único mensaje JSON con la pose.
+
+        ``t``: hora Unix en ms que viaja en el campo ``t``. El pipeline (P7.3)
+        pasa la de CAPTURA del frame del que sale la pose, para que quien reciba
+        el mensaje mida la latencia desde la cámara restando su propia hora. Sin
+        ``t``, el campo solo aparece con ``include_timestamp`` y lleva la hora
+        de publicación, como hasta ahora.
 
         LIMITACIÓN DE TASA POR DESCARTE: si se llama más rápido que
         ``publish_hz``, la llamada se descarta en vez de encolarse. En
@@ -298,7 +305,9 @@ class PosePublisher:
             payload["gesture"] = gesture
         if page is not None:
             payload["page"] = int(page)
-        if self.include_timestamp:
+        if t is not None:
+            payload["t"] = int(t)
+        elif self.include_timestamp:
             payload["t"] = int(time.time() * 1000)
 
         # QoS 0 y sin wait_for_publish(): no se bloquea ni se espera ack.

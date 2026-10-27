@@ -200,15 +200,18 @@
     <div class="sec">
       <h2>Telemetría</h2>
       <div class="telem">
-        <div class="tcell"><div class="k">Latencia cmd</div><div class="v" id="t-lat">— ms</div></div>
+        <div class="tcell"><div class="k">Periodo cmd</div><div class="v" id="t-lat">— ms</div></div>
+        <div class="tcell"><div class="k">Latencia</div><div class="v" id="t-lat-real">— ms</div></div>
         <div class="tcell"><div class="k">Tasa</div><div class="v" id="t-rate">0.0 Hz</div></div>
         <div class="tcell"><div class="k">Render</div><div class="v amber" id="t-fps">0 fps</div></div>
-        <div class="tcell"><div class="k">Origen</div><div class="v" id="t-src" style="font-size:12px">manual</div></div>
+        <div class="tcell" style="grid-column:1/-1"><div class="k">Origen</div><div class="v" id="t-src" style="font-size:12px">manual</div></div>
         <div class="tcell" style="grid-column:1/-1"><div class="k">Interferencia</div><div class="v" id="t-col" style="font-size:12px">—</div></div>
       </div>
       <div class="note">
-        Latencia = intervalo entre mensajes recibidos del broker (proxy del retardo extremo a extremo
-        del pipeline de visión → MQTT → render). Objetivo de diseño &lt; 150 ms.
+        Periodo = intervalo entre mensajes recibidos (≈50 ms a 20 Hz): NO es la latencia (H3).
+        Latencia = hora de llegada − hora de captura del frame (campo <code>t</code> del pipeline,
+        P7.3), mediana de los últimos 2 s; solo vale con el pipeline en esta misma máquina.
+        No incluye lo que tarda la cámara ni el render. Objetivo de diseño &lt; 150 ms.
       </div>
     </div>
   </aside>
@@ -1069,6 +1072,10 @@
   const dot=document.getElementById('mq-dot'), state=document.getElementById('mq-state');
   const errBox=document.getElementById('mq-err');
   let client=null, rawWS=null, lastMsg=0, rateAcc=[];
+  // P7.3: latencias desde la captura, [hora de llegada, ms], de los últimos 2 s.
+  // Date.now() y no performance.now(): el campo t es hora Unix del pipeline, y
+  // solo el reloj de pared es común a los dos procesos (en la misma máquina).
+  let latAcc=[];
 
   function setLink(s,msg){ dot.className='dot'+(s==='on'?' on':s==='wait'?' wait':''); state.textContent=msg; }
   function showErr(m){ errBox.style.display='block'; errBox.textContent=m; }
@@ -1109,6 +1116,14 @@
         rateAcc.push(now); rateAcc=rateAcc.filter(t=>now-t<1000);
         document.getElementById('t-rate').textContent=rateAcc.length.toFixed(1)+' Hz'; }
       lastMsg=now;
+      if(typeof o.t==='number'){
+        const llegada=Date.now();
+        latAcc.push([llegada, llegada-o.t]); latAcc=latAcc.filter(p=>llegada-p[0]<2000);
+        const orden=latAcc.map(p=>p[1]).sort((a,b)=>a-b);
+        const mitad=orden.length>>1;
+        const mediana=orden.length%2 ? orden[mitad] : (orden[mitad-1]+orden[mitad])/2;
+        document.getElementById('t-lat-real').textContent=mediana.toFixed(0)+' ms';
+      }
     }catch(e){ /* mensaje no-JSON, ignorar */ }
   }
 
@@ -1145,8 +1160,9 @@
     if(rawWS){rawWS.close();rawWS=null;}
     setLink('off','Sin conexión');
     document.getElementById('t-lat').textContent='— ms';
+    document.getElementById('t-lat-real').textContent='— ms';
     document.getElementById('t-rate').textContent='0.0 Hz';
-    lastMsg=0; rateAcc=[];
+    lastMsg=0; rateAcc=[]; latAcc=[];
   };
 
   /* ---------- loop ---------- */

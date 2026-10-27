@@ -1,0 +1,778 @@
+"""Pruebas del pipeline integrado (P7), sin cámara, sin MediaPipe y sin broker.
+
+Los tres estimadores son los de verdad —``HeadTracker``, ``ArmTracker`` y
+``EmotionClassifier``—; lo simulado es lo que hay debajo: la cámara, las dos
+redes de MediaPipe, el detector de caras y el backend de emoción. Así se
+comprueba el cableado que el P7 añade (qué frame recibe cada uno, qué sale por
+MQTT, qué se graba) sin reescribir los estimadores en las pruebas.
+
+Y lo que se graba se comprueba con las herramientas de ``tools/``, no con una
+copia de su lógica: si el CSV de brazos del pipeline no lo reproduce
+``reproducir_brazos.py`` o el de emoción no lo reproduce
+``analizar_registro_emocion.py``, el pipeline no graba lo que dice.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import cv2
+import numpy as np
+import pytest
+
+import telmeow_teleop.main as principal
+from telmeow_teleop.arm_tracker import ArmTracker, canal_del_robot
+from telmeow_teleop.config import VIEWER_EMOTIONS, AppConfig
+from telmeow_teleop.emotion_classifier import COLUMNAS_CSV as COLUMNAS_EMOCION
+from telmeow_teleop.emotion_classifier import EmotionClassifier, mano_sobre_rostro
+from telmeow_teleop.head_tracker import COLUMNAS_CSV as COLUMNAS_CABEZA
+from telmeow_teleop.arm_tracker import COLUMNAS_CSV as COLUMNAS_BRAZOS
+from telmeow_teleop.limits import AxisClamp, Side
+from telmeow_teleop.publisher import PosePublisher
+from test_confianza_mano import CODO, MANO_COLGANDO, MANO_DOBLADA, escena, tracker_con_escenas
+from test_emotion_classifier import _BackendFalso
+from test_publisher import ClienteFalso, RelojFalso
+
+RAIZ = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(RAIZ / "tools"))
+
+import analizar_registro as ar  # noqa: E402
+import analizar_registro_emocion as are  # noqa: E402
+import reproducir_brazos as rb  # noqa: E402
+
+ANCHO, ALTO = 640, 480
+
+
+# --------------------------------------------------------------------------
+# Lo simulado
+# --------------------------------------------------------------------------
+
+
+class CamaraFalsa:
+    """Frames distintos y deterministas, con los canales B y R distintos para
+    que un RGB no pase por un BGR."""
+
+    def __init__(self, n):
+        self.n = n
+        self.leidos = []
+        self.liberada = False
+
+    def read(self):
+        if len(self.leidos) >= self.n:
+            return False, None
+        rng = np.random.default_rng(len(self.leidos))
+        frame = rng.integers(0, 256, size=(ALTO, ANCHO, 3), dtype=np.uint8)
+        frame[..., 0] //= 2          # azul más oscuro que el rojo
+        self.leidos.append(frame.copy())
+        return True, frame
+
+    def get(self, _propiedad):
+        return 30.0
+
+    def release(self):
+        self.liberada = True
+
+
+class _Landmark:
+    __slots__ = ("x", "y", "z")
+
+    def __init__(self, x, y, z):
+        self.x, self.y, self.z = x, y, z
+
+
+_NUBE = np.random.default_rng(0).normal(scale=0.08, size=(478, 3))
+
+
+def _cara(k):
+    """Una nube de 478 puntos que gira despacio: lo que Face Mesh devolvería."""
+    a = math.radians(20 * math.sin(k / 5.0))
+    rot = np.array([[math.cos(a), 0, math.sin(a)], [0, 1, 0], [-math.sin(a), 0, math.cos(a)]])
+    puntos = _NUBE @ rot.T
+    return [_Landmark(0.5 + x, 0.45 + y, z) for x, y, z in puntos]
+
+
+class Registro:
+    """Todo lo que las piezas simuladas ven y hacen, para comprobarlo después."""
+
+    def __init__(self):
+        self.malla = []          # frames que recibió Face Mesh
+        self.pose = []           # frames que recibió BlazePose
+        self.emocion = []        # (frame, manos) que recibió EmotionClassifier.process
+        self.rgb = 0             # conversiones BGR -> RGB
+        self.eventos = []        # orden de las llamadas al publicador
+        self.publicados = []     # kwargs de cada publish
+        self.neutros = 0
+        self.calibraciones = 0
+        self.ventanas_cerradas = False
+        self.fallar_en = None    # frame de Face Mesh en que lanzar
+        self.backends_creados = []
+        self.cfg = None          # la configuración con que se creó el publicador
+        self.cfg_camara = None   # y con la que se abrió la cámara
+
+
+class PublicadorFalso:
+    def __init__(self, registro):
+        self.r = registro
+        self.message_count = self.dropped_count = self.failed_count = 0
+        self.effective_hz = 0.0
+        self.connected = False
+        self.desconectado = False
+
+    def connect(self):
+        self.r.eventos.append("connect")
+        return self
+
+    def wait_connected(self, timeout=5.0):
+        self.r.eventos.append("wait_connected")
+        self.connected = True
+        return True
+
+    def publish(self, **campos):
+        self.r.eventos.append("publish")
+        self.r.publicados.append({k: v for k, v in campos.items() if v is not None})
+        self.message_count += 1
+        return True
+
+    def disconnect(self):
+        self.desconectado = True
+
+
+class PeriodicoSincrono(principal.PublicadorPeriodico):
+    """El de verdad, pero sin hilo: un tick por cada pose que deja el bucle.
+    Así lo publicado es determinista; la cadencia del hilo se prueba aparte."""
+
+    def arrancar(self):
+        pass
+
+    def actualizar(self, **campos):
+        super().actualizar(**campos)
+        self.tick()
+
+
+@pytest.fixture
+def pipeline(monkeypatch, tmp_path):
+    """``correr(argv, frames, teclas)`` ejecuta ``main`` con todo simulado."""
+    import telmeow_teleop.arm_tracker as at
+    import telmeow_teleop.head_tracker as ht
+
+    for variable in [v for v in __import__("os").environ if v.startswith("TELMEOW_")]:
+        monkeypatch.delenv(variable)
+    monkeypatch.setenv("TELMEOW_EMOTION_HZ", "1000")   # una inferencia por frame
+    r = Registro()
+    estado = {}
+
+    class Malla:
+        def __init__(self, **_kw):
+            self.k = 0
+
+        def process(self, rgb):
+            self.k += 1
+            r.malla.append(rgb)
+            if r.fallar_en is not None and self.k >= r.fallar_en:
+                raise RuntimeError("fallo simulado de Face Mesh")
+            return SimpleNamespace(multi_face_landmarks=[SimpleNamespace(landmark=_cara(self.k))])
+
+        def close(self):
+            pass
+
+    escenas = [escena(CODO, MANO_DOBLADA), escena(CODO, MANO_COLGANDO)]
+
+    class Pose:
+        def __init__(self, **_kw):
+            self.k = 0
+
+        def process(self, rgb):
+            self.k += 1
+            r.pose.append(rgb)
+            mundo, imagen = escenas[(self.k // 4) % 2]
+            return SimpleNamespace(
+                pose_world_landmarks=SimpleNamespace(landmark=mundo),
+                pose_landmarks=SimpleNamespace(landmark=imagen),
+            )
+
+        def close(self):
+            pass
+
+    class Emocion(EmotionClassifier):
+        def __init__(self, *a, **k):
+            k["detector"] = lambda frame: (200, 120, 160, 160)
+            super().__init__(*a, **k)
+
+        def process(self, frame_bgr, timestamp=None, manos=None):
+            r.emocion.append((frame_bgr, manos))
+            return super().process(frame_bgr, timestamp, manos=manos)
+
+        def calibrar_neutro(self):
+            r.calibraciones += 1
+            return super().calibrar_neutro()
+
+    original_neutro = ht.HeadTracker.set_neutral
+
+    def set_neutral(self):
+        r.neutros += 1
+        return original_neutro(self)
+
+    original_cvt = cv2.cvtColor
+
+    def cvt(imagen, codigo, *a, **k):
+        if codigo == cv2.COLOR_BGR2RGB:
+            r.rgb += 1
+        return original_cvt(imagen, codigo, *a, **k)
+
+    def correr(argv=(), frames=8, teclas=(), backend=None):
+        camara = CamaraFalsa(frames)
+        estado["camara"] = camara
+        pulsadas = iter(list(teclas))
+        backend = backend or _BackendFalso([("feliz", 0.9), ("feliz", 0.9), ("triste", 0.8)])
+
+        def abrir(cfg_camara):
+            r.cfg_camara = cfg_camara
+            return camara
+
+        def crear_publicador(cfg):
+            r.cfg = cfg
+            return estado["publicador"]
+
+        def crear(nombre, cfg):
+            r.backends_creados.append(nombre)
+            return backend
+
+        monkeypatch.setattr(principal, "abrir_camara", abrir)
+        monkeypatch.setattr(principal, "describir", lambda cap, cfg: "camara falsa")
+        monkeypatch.setattr(principal, "crear_backend_o_reserva", crear)
+        monkeypatch.setattr(principal, "EmotionClassifier", Emocion)
+        monkeypatch.setattr(principal, "PublicadorPeriodico", PeriodicoSincrono)
+        estado["publicador"] = PublicadorFalso(r)
+        monkeypatch.setattr(principal, "_crear_publicador", crear_publicador)
+        monkeypatch.setattr(ht.mp.solutions.face_mesh, "FaceMesh", Malla)
+        monkeypatch.setattr(at.mp.solutions.pose, "Pose", Pose)
+        monkeypatch.setattr(at.mp.solutions.drawing_utils, "draw_landmarks", lambda *a, **k: None)
+        monkeypatch.setattr(ht.HeadTracker, "set_neutral", set_neutral)
+        monkeypatch.setattr(cv2, "cvtColor", cvt)
+        monkeypatch.setattr(cv2, "imshow", lambda *a: None)
+        monkeypatch.setattr(cv2, "waitKey", lambda *a: next(pulsadas, -1))
+
+        def cerrar():
+            r.ventanas_cerradas = True
+
+        monkeypatch.setattr(cv2, "destroyAllWindows", cerrar)
+        return principal.main(list(argv))
+
+    r.correr = correr
+    r.estado = estado
+    r.tmp = tmp_path
+    return r
+
+
+# --------------------------------------------------------------------------
+# 1. Una cámara, un RGB, y a cada uno lo suyo
+# --------------------------------------------------------------------------
+
+
+def test_una_camara_un_rgb_por_frame_y_la_emocion_recibe_el_bgr_volteado(pipeline):
+    assert pipeline.correr(frames=6) == 0
+    leidos = pipeline.estado["camara"].leidos
+    assert len(leidos) == 6
+    # Un solo cvtColor BGR->RGB por frame, y es el MISMO objeto el que reciben
+    # las dos redes de MediaPipe: no se convierte dos veces.
+    assert pipeline.rgb == 6
+    assert all(a is b for a, b in zip(pipeline.malla, pipeline.pose))
+    for original, rgb, (bgr, _manos) in zip(leidos, pipeline.malla, pipeline.emocion):
+        volteado = cv2.flip(original, 1)
+        assert np.array_equal(rgb, volteado[..., ::-1])
+        # El clasificador recibe el BGR volteado y SIN dibujar (punto 14).
+        assert np.array_equal(bgr, volteado)
+        assert not np.array_equal(bgr, rgb)
+
+
+def test_espera_el_enlace_antes_de_publicar_y_cierra_al_salir(pipeline):
+    assert pipeline.correr(frames=4) == 0
+    eventos = pipeline.eventos
+    assert eventos.index("wait_connected") < eventos.index("publish")
+    assert eventos.count("publish") == 4
+    assert pipeline.estado["publicador"].desconectado
+    assert pipeline.estado["camara"].liberada
+    assert pipeline.ventanas_cerradas
+
+
+def test_publica_un_solo_mensaje_con_los_seis_angulos_y_la_emocion(pipeline):
+    assert pipeline.correr(frames=5) == 0
+    ultimo = pipeline.publicados[-1]
+    assert set(ultimo) == {"pan", "tilt", "armL", "armLtw", "armR", "armRtw", "emo", "t"}
+    assert ultimo["emo"] in VIEWER_EMOTIONS
+
+
+def test_sin_rostro_se_omiten_pan_y_tilt(pipeline, monkeypatch):
+    import telmeow_teleop.head_tracker as ht
+
+    monkeypatch.setattr(ht.HeadTracker, "process", lambda self, rgb: None)
+    assert pipeline.correr(frames=3) == 0
+    for mensaje in pipeline.publicados:
+        assert "pan" not in mensaje and "tilt" not in mensaje
+        assert "armL" in mensaje           # los brazos nunca tienen huecos
+
+
+# --------------------------------------------------------------------------
+# 2. Teclas
+# --------------------------------------------------------------------------
+
+
+def test_c_calibra_la_cabeza_y_la_emocion_a_la_vez(pipeline):
+    assert pipeline.correr(frames=6, teclas=[-1, -1, ord("c")]) == 0
+    assert pipeline.neutros == 1
+    assert pipeline.calibraciones == 1
+
+
+@pytest.mark.parametrize("indice", range(6))
+def test_las_teclas_1_a_6_son_las_expresiones_del_visor(pipeline, indice):
+    tecla = ord(str(indice + 1))
+    assert pipeline.correr(frames=4, teclas=[tecla]) == 0
+    assert pipeline.publicados[-1]["emo"] == VIEWER_EMOTIONS[indice]
+
+
+def test_la_misma_tecla_suelta_la_expresion_y_0_vuelve_a_automatico(pipeline):
+    backend = _BackendFalso([("feliz", 0.95)])
+    assert pipeline.correr(frames=9, teclas=[ord("6"), -1, ord("6"), ord("2"), -1, ord("0")],
+                           backend=backend) == 0
+    emos = [m["emo"] for m in pipeline.publicados]
+    assert emos[1] == "concentrado" and emos[2] == "concentrado"
+    assert emos[3] != "concentrado"       # la misma tecla la suelta
+    assert emos[4] == VIEWER_EMOTIONS[1]  # '2' fuerza feliz... que el modelo también ve
+    assert emos[-1] == "feliz"            # automático
+
+
+def test_k_pausa_la_publicacion_y_no_deja_salir_gestos(pipeline):
+    teclas = [-1, ord("k"), ord("l"), -1, ord("k"), ord("l"), ord("j")]
+    assert pipeline.correr(frames=10, teclas=teclas) == 0
+    gestos = [m.get("gesture") for m in pipeline.publicados if m.get("gesture")]
+    # El 'l' en pausa no sale; los de después, una vez cada uno y en orden.
+    assert gestos == ["page_next", "page_prev"]
+    # Frames 0-1 salen; del 2 al 4 en pausa no sale nada; desde el 5, todo.
+    assert len(pipeline.publicados) == 2 + 5
+
+
+def test_q_sale_antes_de_que_se_acaben_los_frames(pipeline):
+    assert pipeline.correr(frames=50, teclas=[-1, -1, ord("q")]) == 0
+    assert len(pipeline.estado["camara"].leidos) == 3
+
+
+# --------------------------------------------------------------------------
+# 3. La latencia: el campo t es la hora de CAPTURA
+# --------------------------------------------------------------------------
+
+
+def test_el_campo_t_es_la_hora_de_captura_del_frame(pipeline, monkeypatch):
+    horas = iter([1_000.0 + i for i in range(100)])
+    monkeypatch.setattr(principal.time, "time", lambda: next(horas))
+    assert pipeline.correr(frames=3) == 0
+    assert [m["t"] for m in pipeline.publicados] == [1_000_000.0, 1_001_000.0, 1_002_000.0]
+
+
+def test_el_publisher_manda_t_tal_cual_y_sin_t_se_comporta_como_antes():
+    cliente = ClienteFalso()
+    reloj = RelojFalso()
+    pub = PosePublisher(client_factory=lambda: cliente, clock=reloj)
+    pub.publish(pan=1.0, t=1_234_567.8)
+    reloj.avanzar(1.0)
+    pub.publish(pan=2.0)
+    primero, segundo = (json.loads(p["payload"]) for p in cliente.publicaciones)
+    assert primero["t"] == 1_234_567
+    assert "t" not in segundo
+
+
+# --------------------------------------------------------------------------
+# 4. --no-emotion y --no-arms
+# --------------------------------------------------------------------------
+
+
+def test_sin_emocion_no_se_construye_backend_ni_se_manda_emo(pipeline):
+    assert pipeline.correr(argv=["--no-emotion"], frames=3) == 0
+    assert pipeline.backends_creados == []
+    assert pipeline.emocion == []
+    assert all("emo" not in mensaje for mensaje in pipeline.publicados)
+
+
+def test_con_emocion_se_construye_el_backend_de_la_configuracion(pipeline):
+    assert pipeline.correr(frames=1) == 0
+    assert pipeline.backends_creados == [AppConfig().emotion.backend]
+
+
+def test_sin_brazos_no_corre_blazepose_y_la_emocion_no_recibe_manos(pipeline, monkeypatch):
+    def prohibido(_cfg):
+        raise AssertionError("con --no-arms no se construye el ArmTracker")
+
+    monkeypatch.setattr(ArmTracker, "desde_config", classmethod(lambda cls, cfg: prohibido(cfg)))
+    assert pipeline.correr(argv=["--no-arms"], frames=3) == 0
+    assert pipeline.pose == []
+    assert all(manos is None for _frame, manos in pipeline.emocion)
+    assert all("armL" not in mensaje for mensaje in pipeline.publicados)
+
+
+def test_con_brazos_la_emocion_recibe_las_manos_de_blazepose(pipeline):
+    assert pipeline.correr(frames=3) == 0
+    _frame, manos = pipeline.emocion[-1]
+    assert callable(manos)
+    assert len(manos()) > 0
+
+
+# --------------------------------------------------------------------------
+# 5. Las manos de BlazePose
+# --------------------------------------------------------------------------
+
+
+def test_las_manos_salen_en_el_mismo_pixel_que_el_escorzo_del_arm_tracker():
+    """Dos caminos de código independientes: el del pipeline lee los landmarks
+    15-22 y los pasa a píxeles; el del ArmTracker hace lo mismo por su cuenta
+    para el escorzo (``puntos_imagen``), y ese camino está verificado en el P5.
+    Si uno tuviera el frame o el eje al revés, no coincidirían."""
+    tracker, reloj, estado = tracker_con_escenas(zona_reposo=0.0)
+    reloj["t"] = 0.0
+    estado["escena"] = escena(CODO, MANO_DOBLADA)
+    tracker.comando(tracker.process(np.zeros((ALTO, ANCHO, 3), dtype=np.uint8)), 0.0)
+    puntos = principal.manos_de_blazepose(tracker.landmarks_imagen, ANCHO, ALTO)
+    canal = canal_del_robot(Side.L, frame_espejado=False, mirror=True)
+    esperado = tracker.puntos_imagen[canal]["mano"]
+    # Los cuatro de la mano L (muñeca, meñique, índice, pulgar) van juntos en la
+    # escena, en el centroide que usa el tracker.
+    for u, v in puntos[:4]:
+        assert (u, v) == pytest.approx(esperado, abs=1e-9)
+
+
+def test_la_mano_fuera_de_cuadro_no_cuenta():
+    """BlazePose inventa la mano que no ve (H40): por debajo del cuadro no se
+    pasa a la regla de las manos."""
+    _mundo, imagen = escena(CODO, MANO_COLGANDO)
+    landmarks = SimpleNamespace(landmark=imagen)
+    puntos = principal.manos_de_blazepose(landmarks, ANCHO, ALTO)
+    assert all(0 <= u <= ANCHO and 0 <= v <= ALTO for u, v in puntos)
+    # Los cuatro de la mano L estaban fuera: quedan los cuatro de la R.
+    assert len(puntos) == 4
+
+
+def test_una_mano_de_blazepose_sobre_la_cara_activa_la_regla():
+    _mundo, imagen = escena(CODO, MANO_DOBLADA)
+    puntos = principal.manos_de_blazepose(SimpleNamespace(landmark=imagen), ANCHO, ALTO)
+    u, v = puntos[0]
+    rostro = (int(u) - 40, int(v) - 40, 80, 80)
+    assert mano_sobre_rostro(puntos, rostro, 0.5)
+    assert principal.manos_de_blazepose(None, ANCHO, ALTO) == []
+
+
+# --------------------------------------------------------------------------
+# 6. --record: cuatro CSV que las herramientas leen sin cambios
+# --------------------------------------------------------------------------
+
+
+def _cabecera(ruta):
+    return ruta.read_text(encoding="utf-8").splitlines()[0].split(",")
+
+
+def test_record_escribe_los_cuatro_csv_con_las_columnas_de_los_demos(pipeline):
+    ruta = pipeline.tmp / "sesion.csv"
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=12,
+                           teclas=[-1] * 5 + [ord(" ")]) == 0
+    rutas = principal.rutas_de_grabacion(ruta)
+    assert _cabecera(rutas["sesion"]) == list(principal.COLUMNAS_SESION)
+    assert _cabecera(rutas["cabeza"]) == list(COLUMNAS_CABEZA)
+    assert _cabecera(rutas["brazos"]) == list(COLUMNAS_BRAZOS)
+    assert _cabecera(rutas["emocion"]) == list(COLUMNAS_EMOCION)
+    sesion = rutas["sesion"].read_text(encoding="utf-8").splitlines()[1:]
+    assert len(sesion) == 12
+    assert {fila.split(",")[2] for fila in sesion} == {"0", "1"}   # ESPACIO
+
+
+def test_el_csv_de_cabeza_lo_lee_el_analizador(pipeline):
+    ruta = pipeline.tmp / "sesion.csv"
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=10) == 0
+    filas = ar.cargar(principal.rutas_de_grabacion(ruta)["cabeza"])
+    assert len(filas) == 10
+    assert any(abs(f["raw_pan"]) > 1.0 for f in filas)   # la cara giraba
+
+
+def test_reproducir_brazos_reproduce_el_comando_que_grabo_el_pipeline(pipeline):
+    ruta = pipeline.tmp / "sesion.csv"
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=24) == 0
+    filas = rb.leer(principal.rutas_de_grabacion(ruta)["brazos"])
+    salida = rb.reproducir(filas)
+    for canal, diferencia in rb.comparar(filas, salida).items():
+        assert diferencia["mediana"] < 0.05, canal
+        assert diferencia["p95"] < 1.0, canal
+
+
+def test_el_analizador_de_emocion_reproduce_exacta_la_histeresis_grabada(pipeline):
+    ruta = pipeline.tmp / "sesion.csv"
+    backend = _BackendFalso([("feliz", 0.9)] * 4 + [("triste", 0.7)] * 6 + [("feliz", 0.55)] * 5)
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=15, backend=backend) == 0
+    filas = are.cargar(principal.rutas_de_grabacion(ruta)["emocion"])
+    assert len(filas) == 15
+    comparacion = are.comparar_con_grabado(filas)
+    assert comparacion.comparables == 15
+    assert comparacion.distintas == ()
+
+
+def test_record_no_pisa_la_sesion_anterior(pipeline):
+    ruta = pipeline.tmp / "sesion.csv"
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=2) == 0
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=3) == 0
+    for clave, destino in principal.rutas_de_grabacion(ruta).items():
+        anterior = destino.with_name(f"{destino.stem}_anterior{destino.suffix}")
+        assert anterior.exists(), clave
+
+
+def test_sin_emocion_ni_brazos_no_se_crean_sus_csv(pipeline):
+    ruta = pipeline.tmp / "sesion.csv"
+    assert pipeline.correr(argv=["--record", str(ruta), "--no-emotion", "--no-arms"],
+                           frames=2) == 0
+    rutas = principal.rutas_de_grabacion(ruta)
+    assert rutas["sesion"].exists() and rutas["cabeza"].exists()
+    assert not rutas["brazos"].exists() and not rutas["emocion"].exists()
+
+
+def test_guardar_recortes_sin_record_es_un_error(pipeline):
+    with pytest.raises(SystemExit):
+        pipeline.correr(argv=["--guardar-recortes", str(pipeline.tmp / "caras")], frames=1)
+
+
+# --------------------------------------------------------------------------
+# 7. Cierre limpio ante una excepción
+# --------------------------------------------------------------------------
+
+
+def test_una_excepcion_en_un_tracker_cierra_todo_igual(pipeline):
+    pipeline.fallar_en = 3
+    ruta = pipeline.tmp / "sesion.csv"
+    with pytest.raises(RuntimeError, match="fallo simulado"):
+        pipeline.correr(argv=["--record", str(ruta)], frames=10)
+    assert pipeline.estado["camara"].liberada
+    assert pipeline.estado["publicador"].desconectado
+    assert pipeline.ventanas_cerradas
+    # En Windows un archivo abierto no se puede renombrar: si se renombra, se
+    # cerró. Y lo escrito hasta el fallo está en disco.
+    for destino in principal.rutas_de_grabacion(ruta).values():
+        destino.rename(destino.with_suffix(".cerrado"))
+    assert len((pipeline.tmp / "sesion.cerrado").read_text(encoding="utf-8").splitlines()) == 3
+
+
+# --------------------------------------------------------------------------
+# 8. El publicador a su propio ritmo (H54)
+# --------------------------------------------------------------------------
+
+
+class _PubContador:
+    def __init__(self, reloj, coste=0.0):
+        self.reloj = reloj
+        self.coste = coste
+        self.marcas = []
+        self.campos = []
+
+    def publish(self, **campos):
+        self.marcas.append(self.reloj())
+        self.campos.append(campos)
+        self.reloj.avanzar(self.coste)
+        return True
+
+
+def _correr_periodico(periodico, reloj, ticks):
+    llamadas = {"n": 0}
+
+    def dormir(segundos):
+        reloj.avanzar(segundos)
+        llamadas["n"] += 1
+        if llamadas["n"] >= ticks:
+            periodico._parar.set()
+
+    periodico._dormir = dormir
+    periodico.bucle()
+
+
+def test_el_hilo_publica_cada_50_ms():
+    reloj = RelojFalso()
+    pub = _PubContador(reloj)
+    periodico = principal.PublicadorPeriodico(pub, 0.05, reloj=reloj)
+    periodico.actualizar(pan=1.0)
+    _correr_periodico(periodico, reloj, 20)
+    intervalos = np.diff(pub.marcas)
+    assert len(pub.marcas) == 20
+    assert intervalos == pytest.approx(0.05)
+
+
+def test_tras_un_paron_no_dispara_las_ranuras_perdidas_en_rafaga():
+    """Punto 10: si un envío se atasca 0.3 s, el siguiente sale en cuanto acaba
+    el atasco y los demás vuelven a ir cada 50 ms; no salen seis seguidos para
+    recuperar las ranuras perdidas."""
+    reloj = RelojFalso()
+    pub = _PubContador(reloj)
+    periodico = principal.PublicadorPeriodico(pub, 0.05, reloj=reloj)
+    periodico.actualizar(pan=1.0)
+    original = pub.publish
+
+    def publish(**campos):
+        resultado = original(**campos)
+        if len(pub.marcas) == 5:
+            reloj.avanzar(0.3)
+        return resultado
+
+    pub.publish = publish
+    _correr_periodico(periodico, reloj, 12)
+    intervalos = np.diff(pub.marcas)
+    assert min(intervalos) == pytest.approx(0.05)
+    assert max(intervalos) == pytest.approx(0.3)
+    assert sorted(intervalos)[:-1] == pytest.approx([0.05] * (len(intervalos) - 1))
+
+
+def test_en_pausa_no_sale_nada_y_un_gesto_sale_una_sola_vez():
+    reloj = RelojFalso()
+    pub = _PubContador(reloj)
+    periodico = principal.PublicadorPeriodico(pub, 0.05, reloj=reloj)
+    periodico.actualizar(pan=1.0)
+    assert periodico.gesto("page_next")
+    assert periodico.tick() and periodico.tick()
+    assert [c["gesture"] for c in pub.campos] == ["page_next", None]
+    assert periodico.alternar_pausa()
+    assert not periodico.gesto("page_prev")
+    assert not periodico.tick()
+    assert not periodico.alternar_pausa()
+    assert periodico.tick()
+    assert [c["gesture"] for c in pub.campos] == ["page_next", None, None]
+
+
+def test_publicar_en_cada_frame_a_30_fps_da_15_hz_y_el_hilo_da_20():
+    """H54. El publisher descarta lo que llega a menos de 45 ms del anterior: un
+    bucle que publica en cada frame a 30 fps pasa uno sí y otro no. Es lo que
+    hacían los demos, y lo que el hilo de publicación evita."""
+    cliente = ClienteFalso()
+    reloj = RelojFalso()
+    pub = PosePublisher(client_factory=lambda: cliente, clock=reloj)
+    for _frame in range(30):                 # un segundo a 30 fps
+        pub.publish(pan=1.0)
+        reloj.avanzar(1.0 / 30.0)
+    assert pub.message_count == 15
+    assert pub.dropped_count == 15
+
+    cliente = ClienteFalso()
+    reloj = RelojFalso()
+    pub = PosePublisher(client_factory=lambda: cliente, clock=reloj)
+    periodico = principal.PublicadorPeriodico(pub, AppConfig().rates.publish_period, reloj=reloj)
+    periodico.actualizar(pan=1.0)
+    _correr_periodico(periodico, reloj, 20)  # un segundo a 20 Hz
+    assert pub.message_count == 20
+    assert pub.dropped_count == 0
+
+
+def test_un_error_al_publicar_no_mata_el_hilo_y_queda_contado():
+    """Un hilo de publicación muerto en silencio dejaría al robot quieto con el
+    resto del pipeline diciendo que todo va bien."""
+    reloj = RelojFalso()
+    pub = _PubContador(reloj)
+    original = pub.publish
+
+    def publish(**campos):
+        if len(pub.marcas) == 2 and not getattr(publish, "fallo", False):
+            publish.fallo = True
+            raise RuntimeError("broker caído a mitad de envío")
+        return original(**campos)
+
+    pub.publish = publish
+    periodico = principal.PublicadorPeriodico(pub, 0.05, reloj=reloj)
+    periodico.actualizar(pan=1.0)
+    _correr_periodico(periodico, reloj, 10)
+    assert periodico.errores == 1
+    assert "broker caído" in periodico.ultimo_error
+    assert len(pub.marcas) == 9
+
+
+def test_los_hz_salen_del_contador_del_ultimo_segundo():
+    muestras = principal.deque()
+    hz = 0.0
+    for k in range(61):                      # 3 s a 20 frames por segundo
+        hz = principal._hz(muestras, k / 20.0, enviados=k)
+    assert hz == pytest.approx(20.0)
+    assert principal._hz(principal.deque(), 5.0, 3) == 0.0
+
+
+def test_el_hilo_de_verdad_arranca_y_para():
+    pub = _PubContador(RelojFalso())
+    periodico = principal.PublicadorPeriodico(pub, 0.01)
+    periodico.actualizar(pan=1.0)
+    periodico.arrancar()
+    import time
+
+    time.sleep(0.1)
+    periodico.parar()
+    enviados = len(pub.marcas)
+    time.sleep(0.05)
+    assert enviados >= 3
+    assert len(pub.marcas) == enviados       # ya no publica
+
+
+# --------------------------------------------------------------------------
+# 9. El panel
+# --------------------------------------------------------------------------
+
+
+def _estado_con_recorte(recortado: bool) -> principal.EstadoPanel:
+    eje = AxisClamp(value=40.0, raw=55.0 if recortado else 40.0, lower=-50.0, upper=40.0,
+                    clamped=recortado)
+    return principal.EstadoPanel(
+        cabeza=(40.0, 0.0),
+        recorte_cabeza=SimpleNamespace(pan=eje, tilt=eje),
+        brazos_activos=False, emocion="feliz", confianza=0.8, cruda="feliz",
+        confianza_cruda=0.7, enlace=True, fps=29.5, brillo=120.0,
+    )
+
+
+def test_el_panel_no_toca_el_video():
+    rng = np.random.default_rng(1)
+    lienzo = rng.integers(0, 256, size=(ALTO, ANCHO + principal.ANCHO_PANEL, 3), dtype=np.uint8)
+    video = lienzo[:, :ANCHO].copy()
+    principal.dibujar_panel(lienzo, ANCHO, _estado_con_recorte(False))
+    assert np.array_equal(lienzo[:, :ANCHO], video)
+    assert not np.array_equal(lienzo[:, ANCHO:], 0)
+
+
+def test_el_angulo_recortado_se_pinta_en_rojo():
+    def rojos(recortado):
+        lienzo = np.zeros((ALTO, ANCHO + principal.ANCHO_PANEL, 3), dtype=np.uint8)
+        principal.dibujar_panel(lienzo, ANCHO, _estado_con_recorte(recortado))
+        panel = lienzo[:, ANCHO:].astype(int)
+        return int(np.sum((panel[..., 2] > 200) & (panel[..., 1] < 80) & (panel[..., 0] < 80)))
+
+    assert rojos(True) > rojos(False) + 20
+
+
+def test_el_panel_pinta_todos_los_estados_sin_fallar():
+    lienzo = np.zeros((ALTO, ANCHO + principal.ANCHO_PANEL, 3), dtype=np.uint8)
+    for estado in (
+        principal.EstadoPanel(),
+        principal.EstadoPanel(pausa=True, calibrando=True, emocion_activa=False, brillo=2.0,
+                              grabando=True, etiqueta=3, aviso="en pausa: gesto no enviado"),
+        principal.EstadoPanel(enlace=True, emocion="triste", manual="triste", manos_en_cara=True,
+                              brazos_activos=False, fallidos=4),
+    ):
+        principal.dibujar_panel(lienzo, ANCHO, estado)
+
+
+# --------------------------------------------------------------------------
+# 10. Línea de comandos
+# --------------------------------------------------------------------------
+
+
+def test_broker_con_y_sin_puerto():
+    cfg = AppConfig()
+    assert principal._aplicar_broker(cfg, "192.168.1.7:1884").mqtt.host == "192.168.1.7"
+    assert principal._aplicar_broker(cfg, "192.168.1.7:1884").mqtt.port == 1884
+    assert principal._aplicar_broker(cfg, "otra").mqtt.port == cfg.mqtt.port
+    assert principal._aplicar_broker(cfg, None) is cfg
+
+
+def test_los_argumentos_de_configuracion_llegan_a_la_configuracion(pipeline):
+    """``--camera`` y ``--broker`` son del enunciado (punto 6); el primero lo da
+    ya ``config.add_cli_args``, y la precedencia defaults < entorno < CLI se
+    mantiene."""
+    assert pipeline.correr(argv=["--camera", "3", "--broker", "10.0.0.5:1999"], frames=1) == 0
+    assert pipeline.cfg_camara.index == 3
+    assert (pipeline.cfg.mqtt.host, pipeline.cfg.mqtt.port) == ("10.0.0.5", 1999)

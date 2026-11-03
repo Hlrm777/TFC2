@@ -22,7 +22,7 @@ herramientas de siempre (``analizar_registro.py``,
 Uso::
 
     python tools/analizar_sesion.py p7_movimiento.csv
-    python tools/analizar_sesion.py p7_movimiento.csv --comparar p7_sin_emocion.csv --etiqueta 5
+    python tools/analizar_sesion.py p7_movimiento.csv --comparar p7_sin_emocion.csv --etiqueta 7 --etiqueta-sin 1
 """
 
 from __future__ import annotations
@@ -46,6 +46,12 @@ MS_INFERENCIA_MAXIMO = 66.0
 
 #: Por debajo de esto, ni sin emoción cabe el bucle: primero
 #: ``TELMEOW_ARM_MODEL_COMPLEXITY=0`` (la reserva del P5).
+#:
+#: Se compara con la CAPACIDAD del bucle (1000 / mediana de ``ms_bucle`` sin
+#: inferencia), no con los fps de la cámara. Corregido el 2026-11-02: con poca
+#: luz la cámara da 15 fps aunque el bucle termine en 38 ms, y comparar sus fps
+#: atribuía al cómputo un límite que era de la exposición (H27). «Con buena
+#: luz», en el criterio, quería decir justo eso: que la cámara no limite.
 FPS_MINIMO_SIN_EMOCION = 25.0
 
 _NUMERICAS = (
@@ -160,6 +166,7 @@ class CriterioP71:
     fps_sin: float | None
     fraccion: float | None
     ms_inferencia: float | None
+    capacidad_sin: float | None    # fps que daría el bucle sin emoción si la cámara no limitara
     hilo: bool                     # el criterio pide el hilo de emoción
     reserva_brazos: bool           # ni sin emoción cabe: model_complexity 0 primero
     motivos: tuple[str, ...]
@@ -182,11 +189,13 @@ def criterio_p71(con_emocion: Resumen, sin_emocion: Resumen) -> CriterioP71:
     if ms_inferencia is not None and ms_inferencia > MS_INFERENCIA_MAXIMO:
         motivos.append(f"los frames con inferencia duran {ms_inferencia:.0f} ms de mediana "
                        f"(> {MS_INFERENCIA_MAXIMO:.0f})")
-    reserva = fps_sin is not None and fps_sin < FPS_MINIMO_SIN_EMOCION
+    ms_sin = sin_emocion.ms_bucle_sin[0]
+    capacidad = 1000.0 / ms_sin if ms_sin else None
+    reserva = capacidad is not None and capacidad < FPS_MINIMO_SIN_EMOCION
     if reserva:
-        motivos.append(f"sin emocion solo llega a {fps_sin:.1f} fps (< {FPS_MINIMO_SIN_EMOCION:.0f}): "
-                       f"primero TELMEOW_ARM_MODEL_COMPLEXITY=0")
-    return CriterioP71(fps_con, fps_sin, fraccion, ms_inferencia,
+        motivos.append(f"sin emocion el bucle solo da para {capacidad:.1f} fps "
+                       f"(< {FPS_MINIMO_SIN_EMOCION:.0f}): primero TELMEOW_ARM_MODEL_COMPLEXITY=0")
+    return CriterioP71(fps_con, fps_sin, fraccion, ms_inferencia, capacidad,
                        hilo=bool(motivos) and not reserva, reserva_brazos=reserva,
                        motivos=tuple(motivos))
 
@@ -225,6 +234,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Sesion grabada con --no-emotion: aplica el criterio del P7.1.")
     parser.add_argument("--etiqueta", type=int,
                         help="Tramo con que comparar (p. ej. el de narrar). Sin ella, la sesion entera.")
+    parser.add_argument("--etiqueta-sin", type=int,
+                        help="Tramo de la sesion sin emocion, si no lleva el mismo numero "
+                             "(p. ej. narrar fue la 7 en una y la 1 en la otra).")
     args = parser.parse_args(argv)
 
     filas = cargar(args.csv)
@@ -235,13 +247,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.comparar is not None:
         otra = cargar(args.comparar)
         con = resumir(filas, args.etiqueta)
-        etiqueta_sin = args.etiqueta if any(f["etiqueta"] == args.etiqueta for f in otra) else None
+        if args.etiqueta_sin is not None:
+            etiqueta_sin = args.etiqueta_sin
+        else:
+            etiqueta_sin = args.etiqueta if any(f["etiqueta"] == args.etiqueta for f in otra) else None
         sin = resumir(otra, etiqueta_sin)
         c = criterio_p71(con, sin)
         print("\nCriterio del P7.1 (fijado el 2026-10-26, antes de medir):")
         print(f"  fps medios con emocion {_num(c.fps_con)}   sin emocion {_num(c.fps_sin)}   "
               f"fraccion {_num(c.fraccion, '.2f')}")
-        print(f"  frames con inferencia: mediana {_num(c.ms_inferencia)} ms")
+        print(f"  frames con inferencia: mediana {_num(c.ms_inferencia)} ms   "
+              f"capacidad del bucle sin emocion {_num(c.capacidad_sin)} fps")
         for motivo in c.motivos:
             print(f"  - {motivo}")
         if c.reserva_brazos:

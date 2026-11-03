@@ -81,3 +81,37 @@ def test_un_cambio_sin_frames_alrededor_se_descarta():
     frames, cambios = _camara_sintetica(0.1)
     cambios = cambios + [(100.0, 1)]
     assert len(mlc.latencias_de_destellos(frames, cambios)) == len(cambios) - 1
+
+
+def test_apagar_la_luz_no_cuenta_como_destello():
+    """La sesión del 2026-11-02: tras un cambio a blanco, la sala se quedó a
+    oscuras y el brillo BAJÓ de 140 a 92. Con solo el contraste, contaba como
+    un destello de 587 ms."""
+    frames = [(k / 30.0, 140.0 if k / 30.0 < 1.3 else 92.0) for k in range(60)]
+    latencia, motivo = mlc.medir_cambio(frames, 1.0, 1)
+    assert latencia is None
+    assert "sentido contrario" in motivo
+
+
+def test_un_nivel_de_partida_que_esta_cambiando_no_cuenta():
+    """La luz bajando todavía cuando llega el cambio: el nivel de antes no es un
+    nivel."""
+    frames = [(k / 30.0, max(20.0, 60.0 - 40.0 * k / 30.0)) for k in range(90)]
+    frames = [(t, b - (8.0 if t > 1.15 else 0.0)) for t, b in frames]
+    latencia, motivo = mlc.medir_cambio(frames, 1.0, 0)
+    assert latencia is None
+    assert "inestable" in motivo
+
+
+def test_analizar_un_csv_grabado_da_lo_mismo_que_en_vivo(tmp_path, capsys):
+    frames, cambios = _camara_sintetica(0.1)
+    ruta = tmp_path / "medida.csv"
+    with open(ruta, "w", encoding="utf-8") as f:
+        f.write("tipo,t,valor\n")
+        f.writelines(f"frame,{t:.5f},{b:.2f}\n" for t, b in frames)
+        f.writelines(f"cambio,{t:.5f},{n}\n" for t, n in cambios)
+    leidos = mlc.leer_csv(ruta)
+    assert mlc.latencias_de_destellos(*leidos) == pytest.approx(
+        mlc.latencias_de_destellos(frames, cambios), abs=0.02)
+    assert mlc.main(["--analizar", str(ruta)]) == 0
+    assert "Latencia pantalla + camara" in capsys.readouterr().out

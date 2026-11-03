@@ -22,6 +22,7 @@ Uso::
 
     python tools/medir_latencia_camara.py --csv latencia_camara.csv
     python tools/medir_latencia_camara.py --segundos 60 --ventana
+    python tools/medir_latencia_camara.py --analizar latencia_camara.csv   # sin camara
 
 ``q`` sale antes de tiempo. La cámara se abre con la configuración de siempre
 (``TELMEOW_CAMERA_*``), la misma con la que corre el pipeline.
@@ -58,35 +59,96 @@ CONTRASTE_MINIMO = 3.0
 VENTANA = "Telmeow - latencia de la camara"
 
 
-def latencias_de_destellos(frames: list[tuple[float, float]], cambios: list[tuple[float, int]],
-                           contraste_minimo: float = CONTRASTE_MINIMO) -> list[float]:
-    """Latencia de cada cambio de pantalla, en ms.
+def medir_cambio(frames: list[tuple[float, float]], hora: float, nivel: int,
+                 contraste_minimo: float = CONTRASTE_MINIMO) -> tuple[float | None, str]:
+    """``(latencia en ms, motivo)`` de un cambio de pantalla; latencia ``None``
+    si se descarta, y el motivo dice por qué.
 
-    ``frames``: ``(hora de lectura, brillo)``, en orden. ``cambios``: ``(hora,
-    nivel)`` con nivel 0 = negro y 1 = blanco. Las horas, del mismo reloj
-    (``perf_counter``). Los cambios sin contraste suficiente o sin frames
-    alrededor se descartan.
+    Tres condiciones, y las dos últimas existen porque la sesión del
+    2026-11-02 contó como destello el momento de apagar la luz de la sala
+    (brillo de 140 a 92 justo tras un cambio a blanco, «587 ms»):
+
+    - **contraste**: los niveles de antes y de después difieren al menos
+      ``contraste_minimo``;
+    - **sentido**: a blanco el brillo sube y a negro baja;
+    - **nivel de partida estable**: en la ventana de antes el brillo no varía
+      más de la mitad del contraste (si la sala está cambiando de luz, no).
     """
     tiempos = np.array([t for t, _ in frames], dtype=float)
     brillos = np.array([b for _, b in frames], dtype=float)
+    antes = brillos[(tiempos >= hora - ANTES_S) & (tiempos < hora)]
+    despues = brillos[(tiempos >= hora + DESPUES_S[0]) & (tiempos <= hora + DESPUES_S[1])]
+    if not len(antes) or not len(despues):
+        return None, "sin frames alrededor"
+    a, d = float(np.median(antes)), float(np.median(despues))
+    contraste = abs(d - a)
+    if contraste < contraste_minimo:
+        return None, f"sin contraste ({contraste:.1f})"
+    if (d > a) != bool(nivel):
+        return None, f"sentido contrario ({a:.0f} -> {d:.0f}): cambio la luz de la sala"
+    if float(antes.max() - antes.min()) > contraste / 2.0:
+        return None, "nivel de partida inestable"
+    umbral = (a + d) / 2.0
+    for i in np.nonzero(tiempos > hora)[0]:
+        if tiempos[i] > hora + DESPUES_S[1]:
+            break
+        if (brillos[i] >= umbral) if d > a else (brillos[i] <= umbral):
+            return 1000.0 * (tiempos[i] - hora), f"contraste {contraste:.1f}"
+    return None, "no cruza el umbral"
+
+
+def latencias_de_destellos(frames: list[tuple[float, float]], cambios: list[tuple[float, int]],
+                           contraste_minimo: float = CONTRASTE_MINIMO) -> list[float]:
+    """Latencia de cada cambio de pantalla que pasa ``medir_cambio``, en ms.
+
+    ``frames``: ``(hora de lectura, brillo)``, en orden. ``cambios``: ``(hora,
+    nivel)`` con nivel 0 = negro y 1 = blanco. Las horas, del mismo reloj
+    (``perf_counter``).
+    """
     resultado = []
-    for hora, _nivel in cambios:
-        antes = brillos[(tiempos >= hora - ANTES_S) & (tiempos < hora)]
-        despues = brillos[(tiempos >= hora + DESPUES_S[0]) & (tiempos <= hora + DESPUES_S[1])]
-        if not len(antes) or not len(despues):
-            continue
-        a, d = float(np.median(antes)), float(np.median(despues))
-        if abs(d - a) < contraste_minimo:
-            continue
-        umbral = (a + d) / 2.0
-        posteriores = np.nonzero(tiempos > hora)[0]
-        for i in posteriores:
-            if tiempos[i] > hora + DESPUES_S[1]:
-                break
-            if (brillos[i] >= umbral) if d > a else (brillos[i] <= umbral):
-                resultado.append(1000.0 * (tiempos[i] - hora))
-                break
+    for hora, nivel in cambios:
+        latencia, _motivo = medir_cambio(frames, hora, nivel, contraste_minimo)
+        if latencia is not None:
+            resultado.append(latencia)
     return resultado
+
+
+def leer_csv(ruta: Path) -> tuple[list[tuple[float, float]], list[tuple[float, int]]]:
+    """Los frames y los cambios de una medida grabada con ``--csv``."""
+    frames, cambios = [], []
+    with open(ruta, newline="", encoding="utf-8") as f:
+        for fila in csv.DictReader(f):
+            if fila["tipo"] == "frame":
+                frames.append((float(fila["t"]), float(fila["valor"])))
+            else:
+                cambios.append((float(fila["t"]), int(fila["valor"])))
+    frames.sort()
+    return frames, cambios
+
+
+def informe(frames, cambios) -> list[float]:
+    """Imprime cada cambio con su veredicto y el resumen. Devuelve las latencias."""
+    if frames:
+        t0 = frames[0][0]
+        duracion = frames[-1][0] - t0
+        print(f"{len(frames)} frames en {duracion:.1f} s "
+              f"({(len(frames) - 1) / duracion:.1f} fps), {len(cambios)} cambios.")
+    latencias = []
+    for hora, nivel in cambios:
+        latencia, motivo = medir_cambio(frames, hora, nivel)
+        texto = f"{latencia:6.0f} ms" if latencia is not None else "   descartado"
+        print(f"  t={hora - frames[0][0]:5.1f} s  a {'blanco' if nivel else 'negro '}  {texto}  ({motivo})")
+        if latencia is not None:
+            latencias.append(latencia)
+    if not latencias:
+        print("Ningun cambio valido: prueba con la sala en penumbra.")
+        return latencias
+    ordenadas = sorted(latencias)
+    p95 = ordenadas[min(len(ordenadas) - 1, int(round(0.95 * (len(ordenadas) - 1))))]
+    print(f"Latencia pantalla + camara ({len(ordenadas)} cambios): mediana "
+          f"{statistics.median(ordenadas):.0f} ms, p95 {p95:.0f}, min {ordenadas[0]:.0f}, "
+          f"max {ordenadas[-1]:.0f}")
+    return latencias
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -100,7 +162,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--csv", type=Path, help="Graba los frames y los cambios.")
     parser.add_argument("--ventana", action="store_true",
                         help="Ventana normal en vez de pantalla completa (para probar).")
+    parser.add_argument("--analizar", type=Path, metavar="CSV",
+                        help="No mide: rehace la cifra desde un CSV grabado con --csv.")
     args = parser.parse_args(argv)
+
+    if args.analizar is not None:
+        return 0 if informe(*leer_csv(args.analizar)) else 1
+
+    if args.csv is not None:
+        # Antes de abrir la cámara: el 2026-11-02 la segunda toma pisó a la
+        # primera, la de la luz encendida, porque esto no apartaba nada.
+        from telmeow_teleop.head_tracker import apartar_si_existe
+
+        apartado = apartar_si_existe(args.csv)
+        if apartado is not None:
+            print(f"AVISO: {args.csv.name} ya existia. Se conserva como {apartado.name}.")
 
     import cv2
 
@@ -153,16 +229,7 @@ def main(argv: list[str] | None = None) -> int:
             escritor.writerows(("cambio", f"{t:.5f}", n) for t, n in cambios)
         print(f"Grabado en {args.csv}")
 
-    latencias = latencias_de_destellos(frames, cambios)
-    print(f"{len(frames)} frames, {len(cambios)} cambios, {len(latencias)} medidos.")
-    if not latencias:
-        print("Ningun cambio con contraste suficiente: prueba con la sala en penumbra.")
-        return 1
-    ordenadas = sorted(latencias)
-    p95 = ordenadas[min(len(ordenadas) - 1, int(round(0.95 * (len(ordenadas) - 1))))]
-    print(f"Latencia pantalla + camara: mediana {statistics.median(ordenadas):.0f} ms, "
-          f"p95 {p95:.0f}, min {ordenadas[0]:.0f}, max {ordenadas[-1]:.0f}")
-    return 0
+    return 0 if informe(frames, cambios) else 1
 
 
 if __name__ == "__main__":

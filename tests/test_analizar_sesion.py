@@ -21,7 +21,7 @@ sys.path.insert(0, str(RAIZ / "tools"))
 import analizar_sesion as asn  # noqa: E402
 
 
-def _sesion(ruta, frames, *, periodo_ms=1000 / 30, cada=6, extra_ms=0.0, etiqueta=0,
+def _sesion(ruta, frames, *, periodo_ms=1000 / 30, cada=6, extra_ms=0.0, etiqueta=0, bucle_ms=29.0,
             fallidos=0, pausa=()):
     """Una sesión a ``periodo_ms`` en que cada ``cada`` frames se infiere la
     emoción, y ese frame tarda ``extra_ms`` más (y retrasa el siguiente)."""
@@ -40,7 +40,7 @@ def _sesion(ruta, frames, *, periodo_ms=1000 / 30, cada=6, extra_ms=0.0, etiquet
                 "dt_ms": "" if dt is None else f"{dt:.2f}", "duplicado": int(i == 7),
                 "ms_cabeza": "6.0", "ms_brazos": "22.0",
                 "ms_emocion": f"{20 + extra_ms:.2f}" if infiere else "",
-                "ms_bucle": f"{29 + (extra_ms if infiere else 0):.2f}",
+                "ms_bucle": f"{bucle_ms + (extra_ms if infiere else 0):.2f}",
                 "pan": "1.0", "tilt": "2.0", "armL": "-55", "armLtw": "0", "armR": "-55",
                 "armRtw": "0", "emo": "neutral", "gesto": "", "pausa": int(i in pausa),
                 "mqtt_enviados": i, "mqtt_descartados": 0,
@@ -101,13 +101,26 @@ def test_el_criterio_del_p7_1(tmp_path, extra_ms, hilo):
     assert bool(c.motivos) is hilo
 
 
-def test_si_ni_sin_emocion_cabe_se_prueba_antes_blazepose_ligero(tmp_path):
-    con = asn.resumir(asn.cargar(_sesion(tmp_path / "con.csv", 41, periodo_ms=50.0)))
-    sin = asn.resumir(asn.cargar(_sesion(tmp_path / "sin.csv", 41, periodo_ms=50.0)))
+def test_si_ni_sin_emocion_cabe_el_bucle_se_prueba_antes_blazepose_ligero(tmp_path):
+    """El bucle sin emoción tarda 45 ms: aunque la cámara diera más, no pasaría
+    de 22 fps. Primero el BlazePose ligero."""
+    con = asn.resumir(asn.cargar(_sesion(tmp_path / "con.csv", 41, periodo_ms=50.0, bucle_ms=45.0)))
+    sin = asn.resumir(asn.cargar(_sesion(tmp_path / "sin.csv", 41, periodo_ms=50.0, bucle_ms=45.0)))
     c = asn.criterio_p71(con, sin)
     assert c.reserva_brazos
     assert not c.hilo
 
+
+def test_una_camara_lenta_por_la_luz_no_es_un_bucle_lento(tmp_path):
+    """La sesión del 2026-11-02: la cámara a 15 fps por la poca luz y el bucle
+    sin emoción en 38 ms. La reserva de BlazePose no aplica: el límite es la
+    exposición (H27), no el cómputo."""
+    con = asn.resumir(asn.cargar(_sesion(tmp_path / "con.csv", 41, periodo_ms=64.0, bucle_ms=38.0)))
+    sin = asn.resumir(asn.cargar(_sesion(tmp_path / "sin.csv", 41, periodo_ms=64.0, bucle_ms=38.0)))
+    c = asn.criterio_p71(con, sin)
+    assert c.fps_sin < asn.FPS_MINIMO_SIN_EMOCION
+    assert c.capacidad_sin == pytest.approx(1000 / 38.0)
+    assert not c.reserva_brazos
 
 def test_un_csv_de_brazos_se_rechaza_con_un_mensaje_que_dice_que_hacer(tmp_path):
     ruta = tmp_path / "s_brazos.csv"

@@ -870,9 +870,12 @@ class EmotionClassifier:
     operador el 2026-10-24.
 
     CON LAS MANOS SOBRE LA CARA (``process(..., manos=...)``), la inferencia se
-    hace pero NO VOTA: la expresión se mantiene. Una mano junto a la oreja no
-    es una expresión, y el modelo no sabe distinguirla. Tapada del todo, el
-    Haar deja de ver la cara y manda la regla anterior.
+    hace pero NO VOTA: una mano junto a la oreja no es una expresión, y el
+    modelo no sabe distinguirla. Y cuenta como cara TAPADA para la regla
+    anterior: ``retorno_neutral_s`` seguidos sin una cara utilizable —sin cara,
+    o con una mano encima— y la expresión pasa a neutral. Desde el 2026-11-02
+    (H56): el Haar sigue encontrando una cara detrás de las manos, y antes eso
+    reiniciaba la cuenta y dejaba al robot 11 s con la última expresión.
 
     CON UN BACKEND RELATIVO (el combinado, que mide la cara respecto a la
     neutra del operador), las caras de los primeros ``calibracion_s`` segundos
@@ -896,8 +899,9 @@ class EmotionClassifier:
         detector: sustituye al Haar por otra función ``frame -> (x, y, w, h) |
             None``. Solo para las pruebas.
         clock: fuente de tiempo de la planificación. ``perf_counter`` (§0.7).
-        retorno_neutral_s: segundos sin cara tras los que se vuelve a neutral.
-            0 lo desactiva: la expresión se mantiene sin límite.
+        retorno_neutral_s: segundos sin una cara utilizable (sin cara, o con una
+            mano encima) tras los que se vuelve a neutral. 0 lo desactiva: la
+            expresión se mantiene sin límite.
         margen_manos: ver ``mano_sobre_rostro``.
         calibracion_s: segundos de cara neutra con que se calibra un backend
             relativo. Los demás backends lo ignoran.
@@ -1034,7 +1038,7 @@ class EmotionClassifier:
     @property
     def retorno_en_ultima(self) -> bool:
         """Si en la última inferencia la expresión volvió a neutral por llevar
-        ``retorno_neutral_s`` sin cara. Va al CSV para que la reproducción
+        ``retorno_neutral_s`` sin una cara utilizable. Va al CSV para que la reproducción
         offline lo aplique en la misma fila, sin depender del redondeo de los
         tiempos."""
         return self._retorno
@@ -1206,20 +1210,10 @@ class EmotionClassifier:
             self._rostro = None
             self._rostro_sin_espejo = None
             self._sin_rostro += 1
-            if self._sin_cara_desde is None:
-                self._sin_cara_desde = ahora
-            elif (self.retorno_neutral_s > 0.0
-                  and ahora - self._sin_cara_desde >= self.retorno_neutral_s
-                  and (self._histeresis.current != NEUTRAL or self._histeresis.window)):
-                # Una sola vez por ausencia: tras el reset la expresión es neutral
-                # y la ventana está vacía, así que esto no se repite hasta que
-                # vuelva la cara y vuelva a perderse.
-                self._histeresis.reset(initial=NEUTRAL)
-                self._retorno = True
+            self._cara_no_utilizable(ahora)
         else:
             x, y, w, h = rectangulo
             self._sin_rostro = 0
-            self._sin_cara_desde = None
             self._rostro_sin_espejo = (x, y, w, h)
             self._rostro = (
                 (frame.shape[1] - x - w, y, w, h) if self.frame_espejado else (x, y, w, h)
@@ -1227,6 +1221,10 @@ class EmotionClassifier:
             puntos = manos() if callable(manos) else manos
             self._manos = bool(puntos) and mano_sobre_rostro(
                 puntos, self._rostro, self.margen_manos)
+            if self._manos:
+                self._cara_no_utilizable(ahora)
+            else:
+                self._sin_cara_desde = None
             if self.calibracion_pendiente:
                 self._ultima = None
                 self._calibrando = True
@@ -1238,6 +1236,22 @@ class EmotionClassifier:
                 if distribucion.etiqueta is not None and not self._manos:
                     self._histeresis.update(distribucion.etiqueta, distribucion.confianza)
         self._latencia_ms = (time.perf_counter() - inicio) * 1000.0
+
+    def _cara_no_utilizable(self, ahora: float) -> None:
+        """Una inferencia sin cara, o con una mano encima: cuenta para volver a
+        neutral tras ``retorno_neutral_s``. Solo una cara utilizable reinicia la
+        cuenta, así que alternar entre «no se ve» y «se ve tapada» no la frena
+        (H56)."""
+        if self._sin_cara_desde is None:
+            self._sin_cara_desde = ahora
+        elif (self.retorno_neutral_s > 0.0
+              and ahora - self._sin_cara_desde >= self.retorno_neutral_s
+              and (self._histeresis.current != NEUTRAL or self._histeresis.window)):
+            # Una sola vez por ausencia: tras el reset la expresión es neutral
+            # y la ventana está vacía, así que esto no se repite hasta que
+            # vuelva una cara utilizable y vuelva a perderse.
+            self._histeresis.reset(initial=NEUTRAL)
+            self._retorno = True
 
 
 # --------------------------------------------------------------------------

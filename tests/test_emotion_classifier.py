@@ -814,6 +814,52 @@ def test_una_mano_sobre_la_cara_no_vota():
     assert not c.manos_en_cara
 
 
+def test_con_la_cara_tapada_por_las_manos_vuelve_a_neutral_a_los_2_s():
+    """H56 (2026-11-02): el Haar sigue viendo una cara detrás de las manos. Antes
+    eso reiniciaba la cuenta y el robot siguió feliz 11 s con la cara tapada."""
+    c = _clasificador([("feliz", 0.9)])
+    for i in range(3):                                # feliz, con la cara a la vista
+        c.process(FRAME, timestamp=0.2 * i)
+    assert c.emocion.etiqueta == "feliz"
+    encima = [(25, 40)]                               # dentro de la caja (10, 20, 30, 40)
+    emociones, marcas = [], []
+    for i in range(3, 16):
+        emociones.append(c.process(FRAME, timestamp=0.2 * i, manos=encima).etiqueta)
+        marcas.append(c.retorno_en_ultima)
+    # Tapada desde t = 0.6: feliz hasta t = 2.6, y ahí neutral, marcado una vez.
+    assert emociones[:10] == ["feliz"] * 10
+    assert emociones[10:] == ["neutral"] * 3
+    assert marcas.count(True) == 1 and marcas.index(True) == 10
+
+
+def test_alternar_sin_cara_y_cara_tapada_no_frena_la_cuenta():
+    """Lo que pasó en la etiqueta 8: el Haar perdía la cara a ratos detrás de
+    las manos. Ninguna de las dos es una cara utilizable."""
+    # Tres inferencias con la cara a la vista; luego, una sí y otra no.
+    ve_cara = iter([True] * 3 + [False, True] * 10)
+    c = _clasificador([("feliz", 0.9)],
+                      detector=lambda f: (10, 20, 30, 40) if next(ve_cara) else None)
+    for i in range(3):
+        c.process(FRAME, timestamp=0.2 * i)
+    encima = [(25, 40)]
+    emociones = [c.process(FRAME, timestamp=0.2 * i, manos=encima).etiqueta for i in range(3, 16)]
+    assert emociones[:10] == ["feliz"] * 10           # hasta t = 2.4
+    assert emociones[10:] == ["neutral"] * 3          # t = 2.6 = 0.6 + 2.0
+
+
+def test_una_cara_a_la_vista_reinicia_la_cuenta():
+    c = _clasificador([("feliz", 0.9)])
+    for i in range(3):
+        c.process(FRAME, timestamp=0.2 * i)
+    encima = [(25, 40)]
+    for i in range(3, 10):                            # 1.2 s tapada
+        c.process(FRAME, timestamp=0.2 * i, manos=encima)
+    c.process(FRAME, timestamp=2.0)                   # destapada: reinicia
+    for i in range(11, 19):                           # otros 1.4 s tapada
+        c.process(FRAME, timestamp=0.2 * i, manos=encima)
+    assert c.emocion.etiqueta == "feliz"
+
+
 def test_las_manos_se_piden_solo_cuando_toca_inferir():
     llamadas = []
 

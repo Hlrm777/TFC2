@@ -235,6 +235,10 @@ class RateConfig:
     capture_fps: float = 30.0
     publish_hz: float = 20.0
     emotion_hz: float = 5.0
+    #: Segundos con que la publicación vuelve de una pausa: el robot pasa de la
+    #: pose en que se quedó a la del operador con un arranque y un frenado
+    #: suaves, en vez de saltar (pedido del operador, 2026-11-02). 0 = salto.
+    resume_ramp_s: float = 1.0
 
     @property
     def capture_period(self) -> float:
@@ -254,6 +258,7 @@ class RateConfig:
             capture_fps=_env_float(env, "CAPTURE_FPS", cls.capture_fps),
             publish_hz=_env_float(env, "PUBLISH_HZ", cls.publish_hz),
             emotion_hz=_env_float(env, "EMOTION_HZ", cls.emotion_hz),
+            resume_ramp_s=_env_float(env, "RESUME_RAMP_S", cls.resume_ramp_s),
         )
 
 

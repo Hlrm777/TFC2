@@ -74,6 +74,9 @@ from .limits import Side
 
 __all__ = [
     "PublicadorPeriodico",
+    "HiloEmocion",
+    "EstadoEmocion",
+    "paso_suave",
     "Grabacion",
     "EstadoPanel",
     "manos_de_blazepose",
@@ -110,6 +113,10 @@ COLUMNAS_SESION = (
     "pan", "tilt", "armL", "armLtw", "armR", "armRtw", "emo", "gesto", "pausa",
     "mqtt_enviados", "mqtt_descartados", "mqtt_fallidos", "mqtt_hz",
     "brillo", "ancho", "alto",
+    # Desde el P7.1 (2026-11-02): 1 si la emoción corría en su hilo, 0 en el
+    # bucle (--emocion-en-bucle). En las filas con inferencia, 'ms_emocion' es
+    # lo que costó inferir, en el hilo que lo hizo.
+    "emocion_hilo",
 )
 
 TECLA_SALIR = ord("q")
@@ -141,18 +148,31 @@ class PublicadorPeriodico:
     Los gestos de página se encolan y salen en el siguiente tick con la pose
     vigente; el publisher nunca descarta un mensaje con ``gesture``. En pausa no
     sale nada, tampoco un gesto.
+
+    Al reanudar, los ángulos no saltan: durante ``rampa_s`` segundos se mezclan
+    la última pose enviada y la del operador, con un paso suave (arranque y
+    frenado), y si el operador se mueve mientras tanto la rampa lo sigue. Lo
+    pidió el operador el 2026-11-02: el salto de golpe a la pose actual se veía
+    raro. La expresión no se mezcla; el visor ya la funde en 350 ms.
     """
 
-    def __init__(self, publicador, periodo: float, *, reloj=time.perf_counter,
-                 dormir=time.sleep) -> None:
+    #: Los campos que se mezclan en la rampa: los ángulos.
+    ANGULOS = ("pan", "tilt", "armL", "armLtw", "armR", "armRtw")
+
+    def __init__(self, publicador, periodo: float, *, rampa_s: float = 1.0,
+                 reloj=time.perf_counter, dormir=time.sleep) -> None:
         self.publicador = publicador
         self.periodo = float(periodo)
+        self.rampa_s = max(0.0, float(rampa_s))
         self._reloj = reloj
         self._dormir = dormir
         self._lock = threading.Lock()
         self._pose: dict = {}
         self._gestos: deque[str] = deque()
         self._pausado = False
+        self._enviada: dict[str, float] = {}       # últimos ángulos que salieron
+        self._rampa_desde: dict[str, float] | None = None
+        self._rampa_inicio = 0.0
         self._parar = threading.Event()
         self._hilo: threading.Thread | None = None
         #: Envíos que lanzaron una excepción. El hilo no muere por uno: un hilo
@@ -171,6 +191,9 @@ class PublicadorPeriodico:
             self._pausado = not self._pausado
             if self._pausado:
                 self._gestos.clear()
+            elif self.rampa_s > 0.0 and self._enviada:
+                self._rampa_desde = dict(self._enviada)
+                self._rampa_inicio = self._reloj()
             return self._pausado
 
     def actualizar(self, **campos) -> None:
@@ -193,7 +216,27 @@ class PublicadorPeriodico:
                 return False
             pose = dict(self._pose)
             gesto = self._gestos.popleft() if self._gestos else None
-        return bool(self.publicador.publish(**pose, gesture=gesto))
+            if self._rampa_desde is not None:
+                pose = self._mezclar(pose)
+        salio = bool(self.publicador.publish(**pose, gesture=gesto))
+        with self._lock:
+            self._enviada.update(
+                {k: pose[k] for k in self.ANGULOS if isinstance(pose.get(k), (int, float))})
+        return salio
+
+    def _mezclar(self, pose: dict) -> dict:
+        """La pose del operador mezclada con la de antes de la pausa (con el lock)."""
+        avance = (self._reloj() - self._rampa_inicio) / self.rampa_s
+        if avance >= 1.0:
+            self._rampa_desde = None
+            return pose
+        peso = paso_suave(max(0.0, avance))
+        mezclada = dict(pose)
+        for clave in self.ANGULOS:
+            desde, hacia = self._rampa_desde.get(clave), pose.get(clave)
+            if isinstance(desde, (int, float)) and isinstance(hacia, (int, float)):
+                mezclada[clave] = desde + (hacia - desde) * peso
+        return mezclada
 
     def bucle(self) -> None:
         siguiente = self._reloj()
@@ -216,6 +259,13 @@ class PublicadorPeriodico:
         if self._hilo is not None:
             self._hilo.join(timeout=2.0)
             self._hilo = None
+
+
+def paso_suave(x: float) -> float:
+    """Smoothstep, 3x² − 2x³: de 0 a 1 con velocidad nula en los dos extremos.
+    El mismo que usa el visor en las transiciones del saludo."""
+    x = min(1.0, max(0.0, x))
+    return x * x * (3.0 - 2.0 * x)
 
 
 # --------------------------------------------------------------------------
@@ -245,6 +295,147 @@ def manos_de_blazepose(landmarks, ancho: int, alto: int) -> list[tuple[float, fl
         if math.isfinite(u) and math.isfinite(v) and 0.0 <= u <= ancho and 0.0 <= v <= alto:
             puntos.append((u, v))
     return puntos
+
+
+# --------------------------------------------------------------------------
+# La emoción, en su propio hilo (P7.1)
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EstadoEmocion:
+    """Lo que el bucle necesita de la emoción, leído de una vez tras cada paso
+    del clasificador. El bucle lo lee sin tocar el clasificador, que puede
+    estar a mitad de una inferencia en el otro hilo."""
+
+    etiqueta: str
+    confianza: float | None = None
+    cruda: str | None = None
+    confianza_cruda: float | None = None
+    manual: str | None = None
+    manos_en_cara: bool = False
+    calibrando: bool = False
+    latencia_ms: float | None = None
+    rostro: tuple[int, int, int, int] | None = None
+    inferencias: int = 0
+    calibraciones: int = 0
+
+
+class HiloEmocion:
+    """El ``EmotionClassifier`` fuera del bucle de visión (P7.1).
+
+    Lo pidió el criterio fijado antes de medir: en la sesión del 2026-11-02 los
+    frames con inferencia duraban 92 ms (> 66) y el bucle procesaba el 88 % de
+    los fps (< 90 %). Aquí el bucle entrega cada frame y sigue; el hilo pasa el
+    más reciente por ``process``, que infiere a 5 Hz por su fecha límite como
+    siempre. Si llega un frame nuevo mientras infiere, el anterior se descarta:
+    interesa la cara de ahora, no una cola. Se lleva también el parón de
+    ~0.3 s al terminar cada calibración de la cara.
+
+    Las teclas (forzar expresión, calibrar) se encolan y las aplica el hilo
+    antes de su siguiente paso, para no tocar el clasificador a mitad de una
+    inferencia: tardan como mucho un frame en verse.
+
+    Con ``en_hilo=False`` hace lo mismo en el bucle, como antes del P7.1
+    (``--emocion-en-bucle``): sirve para medir la diferencia.
+
+    ``al_inferir(t, etiqueta, frame)`` se llama tras cada inferencia, en el
+    hilo que la hizo; es donde se graba la fila del CSV de emoción.
+    """
+
+    def __init__(self, clasificador: EmotionClassifier, *, en_hilo: bool = True,
+                 al_inferir=None) -> None:
+        self.clasificador = clasificador
+        self.en_hilo = en_hilo
+        self._al_inferir = al_inferir
+        self._cond = threading.Condition()
+        self._pendiente = None
+        self._ordenes: deque = deque()
+        self._parar = False
+        self._hilo: threading.Thread | None = None
+        self._inferencias = clasificador.inferencias
+        self._estado = self._leer()
+        self.errores = 0
+        self.ultimo_error: str = ""
+
+    @property
+    def estado(self) -> EstadoEmocion:
+        return self._estado
+
+    def _leer(self) -> EstadoEmocion:
+        c = self.clasificador
+        emocion = c.emocion
+        cruda = c.ultima
+        return EstadoEmocion(
+            etiqueta=emocion.etiqueta, confianza=emocion.confianza,
+            cruda=cruda.etiqueta if cruda is not None else None,
+            confianza_cruda=cruda.confianza if cruda is not None else None,
+            manual=c.manual, manos_en_cara=c.manos_en_cara,
+            calibrando=c.calibrando or c.calibracion_pendiente,
+            latencia_ms=c.latencia_ms, rostro=c.rostro,
+            inferencias=c.inferencias, calibraciones=c.calibraciones,
+        )
+
+    def entregar(self, frame, ahora: float, t: float, etiqueta: int, manos) -> None:
+        """El frame (BGR volteado, sin dibujar) y los puntos de las manos."""
+        trabajo = (frame, ahora, t, etiqueta, manos)
+        if not self.en_hilo:
+            self._paso(trabajo)
+            return
+        with self._cond:
+            self._pendiente = trabajo
+            self._cond.notify()
+
+    def ordenar(self, metodo: str, *argumentos) -> None:
+        """``toggle_manual``, ``clear_manual`` o ``calibrar_neutro``."""
+        if not self.en_hilo:
+            getattr(self.clasificador, metodo)(*argumentos)
+            self._estado = self._leer()
+            return
+        with self._cond:
+            self._ordenes.append((metodo, argumentos))
+            self._cond.notify()
+
+    def _paso(self, trabajo) -> None:
+        while self._ordenes:
+            metodo, argumentos = self._ordenes.popleft()
+            getattr(self.clasificador, metodo)(*argumentos)
+        if trabajo is not None:
+            frame, ahora, t, etiqueta, manos = trabajo
+            self.clasificador.process(frame, ahora, manos=manos)
+            if self.clasificador.inferencias != self._inferencias:
+                self._inferencias = self.clasificador.inferencias
+                if self._al_inferir is not None:
+                    self._al_inferir(t, etiqueta, frame)
+        self._estado = self._leer()
+
+    def _bucle(self) -> None:
+        while True:
+            with self._cond:
+                while self._pendiente is None and not self._ordenes and not self._parar:
+                    self._cond.wait()
+                if self._parar:
+                    return
+                trabajo, self._pendiente = self._pendiente, None
+            try:
+                self._paso(trabajo)
+            except Exception as exc:  # noqa: BLE001 -- como en PublicadorPeriodico
+                self.errores += 1
+                self.ultimo_error = f"{type(exc).__name__}: {exc}"
+
+    def arrancar(self) -> None:
+        if self.en_hilo:
+            self._parar = False
+            self._hilo = threading.Thread(target=self._bucle, name="emocion", daemon=True)
+            self._hilo.start()
+
+    def parar(self) -> None:
+        with self._cond:
+            self._parar = True
+            self._cond.notify()
+        if self._hilo is not None:
+            self._hilo.join(timeout=5.0)
+            self._hilo = None
 
 
 # --------------------------------------------------------------------------
@@ -363,6 +554,7 @@ class EstadoPanel:
     fallidos: int = 0
     hz: float = 0.0
     errores_publicacion: int = 0
+    errores_emocion: int = 0
     pausa: bool = False
     brillo: float | None = None
     grabando: bool = False
@@ -470,6 +662,9 @@ def dibujar_panel(lienzo: np.ndarray, x0: int, estado: EstadoPanel) -> None:
         if not estado.brazos_activos:
             _texto(lienzo, x, y, "manos: sin BlazePose (--no-arms)", _GRIS)
             y += 18
+        if estado.errores_emocion:
+            _texto(lienzo, x, y, f"ERRORES de emocion {estado.errores_emocion}", _ROJO, 0.45, 2)
+            y += 18
     y += 8
 
     # -- tasas y costes ------------------------------------------------------
@@ -533,6 +728,11 @@ def _parser() -> argparse.ArgumentParser:
     propios.add_argument(
         "--no-arms", action="store_true",
         help="Sin brazos: no corre BlazePose (y la emoción se queda sin manos).",
+    )
+    propios.add_argument(
+        "--emocion-en-bucle", action="store_true",
+        help="La emocion en el bucle de vision, como antes del P7.1, en vez de en "
+             "su hilo. Solo para medir la diferencia.",
     )
     propios.add_argument(
         "--record", metavar="CSV", type=Path,
@@ -626,6 +826,7 @@ def main(argv: list[str] | None = None) -> int:
     publicador = None
     periodico = None
     grabacion = None
+    hilo = None
     try:
         print(describir(cap, cfg.camera) + "\n")
         cabeza = HeadTracker.desde_config(cfg)
@@ -654,16 +855,25 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"AVISO: sin enlace con {cfg.mqtt.host}:{cfg.mqtt.port}. Se sigue "
                   f"reintentando; mira 'perdidos' en el panel.\n")
-        periodico = PublicadorPeriodico(publicador, cfg.rates.publish_period)
+        periodico = PublicadorPeriodico(publicador, cfg.rates.publish_period,
+                                        rampa_s=cfg.rates.resume_ramp_s)
         periodico.arrancar()
 
-        _bucle(cfg, cap, cabeza, brazos, clasificador, periodico, publicador, grabacion)
+        if clasificador is not None:
+            hilo = HiloEmocion(clasificador, en_hilo=not args.emocion_en_bucle,
+                               al_inferir=_grabar_inferencia(clasificador, grabacion))
+            hilo.arrancar()
+
+        _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion)
     except KeyboardInterrupt:
         print("\nInterrumpido.")
     finally:
         # Cierre limpio en cualquier caso (punto 7): q, Ctrl-C o excepción.
         if periodico is not None:
             periodico.parar()
+        if hilo is not None:
+            # Antes de cerrar los CSV: el hilo escribe el de emoción.
+            hilo.parar()
         if publicador is not None:
             print(f"MQTT: {publicador.message_count} enviados, "
                   f"{publicador.dropped_count} descartados, "
@@ -680,7 +890,20 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _bucle(cfg, cap, cabeza, brazos, clasificador, periodico, publicador, grabacion) -> None:
+def _grabar_inferencia(clasificador, grabacion):
+    """La función que graba cada inferencia en el CSV de emoción (y su recorte)."""
+    if grabacion is None or "emocion" not in grabacion.escritores:
+        return None
+
+    def grabar(t, etiqueta, frame):
+        # El frame que recibió process: volteado y sin dibujar.
+        registrar_inferencia(grabacion.escritores["emocion"], t, etiqueta, clasificador,
+                             frame, brillo_medio(frame), grabacion.recortes)
+
+    return grabar
+
+
+def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> None:
     import mediapipe as mp
 
     dibujo = mp.solutions.drawing_utils
@@ -733,24 +956,21 @@ def _bucle(cfg, cap, cabeza, brazos, clasificador, periodico, publicador, grabac
             mando = brazos.comando(brazos.process(rgb))
             ms_brazos = 1000.0 * (time.perf_counter() - inicio)
 
+        t = ahora - t0
         emocion = None
         ms_emocion = None
-        infirio = False
-        if clasificador is not None:
-            inicio = time.perf_counter()
-            manos = (
-                (lambda: manos_de_blazepose(brazos.landmarks_imagen, ancho, alto))
-                if brazos is not None else None
-            )
+        if hilo is not None:
+            manos = (manos_de_blazepose(brazos.landmarks_imagen, ancho, alto)
+                     if brazos is not None else None)
             # El BGR volteado y SIN dibujar (punto 14): es el convenio del
             # entrenamiento, y el recorte que se graba tiene que ser lo que vio.
-            emocion = clasificador.process(frame, ahora, manos=manos)
-            if clasificador.inferencias != inferencias_vistas:
-                inferencias_vistas = clasificador.inferencias
-                infirio = True
-                ms_emocion = 1000.0 * (time.perf_counter() - inicio)
-                if clasificador.calibraciones != calibraciones_vistas:
-                    calibraciones_vistas = clasificador.calibraciones
+            hilo.entregar(frame, ahora, t, etiqueta, manos)
+            emocion = hilo.estado
+            if emocion.inferencias != inferencias_vistas:
+                inferencias_vistas = emocion.inferencias
+                ms_emocion = emocion.latencia_ms
+                if emocion.calibraciones != calibraciones_vistas:
+                    calibraciones_vistas = emocion.calibraciones
                     print("cara neutra calibrada")
 
         pan, tilt = pose_cabeza if pose_cabeza is not None else (None, None)
@@ -763,16 +983,11 @@ def _bucle(cfg, cap, cabeza, brazos, clasificador, periodico, publicador, grabac
         periodico.actualizar(**campos)
 
         brillo = brillo_medio(muestra)
-        t = ahora - t0
         if grabacion is not None:
             if pose_cabeza is not None:
                 grabacion.escribir("cabeza", fila_cabeza(cabeza, t, etiqueta, pose_cabeza, ancho, alto))
             if brazos is not None:
                 grabacion.escribir("brazos", fila_brazos(brazos, mando, t, etiqueta, ancho, alto))
-            if infirio:
-                registrar_inferencia(grabacion.escritores.get("emocion"), t, etiqueta,
-                                     clasificador, frame, brillo_medio(frame),
-                                     grabacion.recortes)
 
         # -- dibujo: video limpio a la izquierda, panel a la derecha --------
         if lienzo is None or lienzo.shape[:2] != (alto, ancho + ANCHO_PANEL):
@@ -780,13 +995,12 @@ def _bucle(cfg, cap, cabeza, brazos, clasificador, periodico, publicador, grabac
         video = frame.copy()
         if brazos is not None and brazos.landmarks_imagen is not None:
             dibujo.draw_landmarks(video, brazos.landmarks_imagen, conexiones)
-        if clasificador is not None and clasificador.rostro is not None:
-            x, y, w, h = clasificador.rostro
+        if emocion is not None and emocion.rostro is not None:
+            x, y, w, h = emocion.rostro
             cv2.rectangle(video, (x, y), (x + w, y + h),
-                          (0, 190, 255) if clasificador.manos_en_cara else (230, 220, 90), 2)
+                          (0, 190, 255) if emocion.manos_en_cara else (230, 220, 90), 2)
         lienzo[:, :ancho] = video
 
-        cruda = clasificador.ultima if clasificador is not None else None
         if time.perf_counter() > aviso_hasta:
             aviso = ""
         hz = _hz(muestras_hz, ahora, publicador.message_count)
@@ -798,16 +1012,16 @@ def _bucle(cfg, cap, cabeza, brazos, clasificador, periodico, publicador, grabac
             estimado=brazos.estimado if brazos is not None else {},
             saludo=brazos.pesos_saludo if brazos is not None else {},
             brazos_activos=brazos is not None,
-            emocion_activa=clasificador is not None,
+            emocion_activa=emocion is not None,
             emocion=emocion.etiqueta if emocion is not None else None,
             confianza=emocion.confianza if emocion is not None else None,
-            cruda=cruda.etiqueta if cruda is not None else None,
-            confianza_cruda=cruda.confianza if cruda is not None else None,
-            manual=clasificador.manual if clasificador is not None else None,
-            manos_en_cara=bool(clasificador and clasificador.manos_en_cara),
-            calibrando=bool(clasificador and (clasificador.calibrando
-                                              or clasificador.calibracion_pendiente)),
-            latencia_emocion_ms=clasificador.latencia_ms if clasificador is not None else None,
+            cruda=emocion.cruda if emocion is not None else None,
+            confianza_cruda=emocion.confianza_cruda if emocion is not None else None,
+            manual=emocion.manual if emocion is not None else None,
+            manos_en_cara=bool(emocion and emocion.manos_en_cara),
+            calibrando=bool(emocion and emocion.calibrando),
+            latencia_emocion_ms=emocion.latencia_ms if emocion is not None else None,
+            errores_emocion=hilo.errores if hilo is not None else 0,
             fps=_fps(marcas),
             duplicados=duplicados,
             ms_cabeza=ms_cabeza,
@@ -845,6 +1059,7 @@ def _bucle(cfg, cap, cabeza, brazos, clasificador, periodico, publicador, grabac
                 publicador.message_count, publicador.dropped_count,
                 publicador.failed_count, f"{hz:.1f}",
                 f"{brillo:.1f}", ancho, alto,
+                int(hilo.en_hilo) if hilo is not None else "",
             ])
         gesto_registrado = ""
 
@@ -859,18 +1074,24 @@ def _bucle(cfg, cap, cabeza, brazos, clasificador, periodico, publicador, grabac
             # Las dos piden lo mismo al operador —mirar la pantalla con la cara
             # relajada—, así que una tecla calibra las dos (punto 19).
             de_cabeza = cabeza.set_neutral()
-            de_emocion = clasificador.calibrar_neutro() if clasificador is not None else False
+            de_emocion = (hilo is not None
+                          and getattr(hilo.clasificador.backend, "relativo", False))
+            if de_emocion:
+                hilo.ordenar("calibrar_neutro")
             print(f"calibrar: cabeza {'si' if de_cabeza else 'sin rostro'}, "
                   f"emocion {'en curso' if de_emocion else 'no aplica'}")
         elif tecla in TECLAS_MANUAL:
-            if clasificador is None:
+            if hilo is None:
                 aviso, aviso_hasta = "sin emocion: tecla ignorada", time.perf_counter() + 2.0
             else:
-                vigente = clasificador.toggle_manual(TECLAS_MANUAL[tecla])
+                pedida = TECLAS_MANUAL[tecla]
+                hilo.ordenar("toggle_manual", pedida)
+                # La misma tecla otra vez la suelta (toggle_manual).
+                vigente = None if hilo.estado.manual == pedida else pedida
                 print(f"expresion forzada: {vigente or 'ninguna (automatico)'}")
         elif tecla == TECLA_AUTOMATICO:
-            if clasificador is not None:
-                clasificador.clear_manual()
+            if hilo is not None:
+                hilo.ordenar("clear_manual")
                 print("expresion: automatico")
         elif tecla == TECLA_PAUSA:
             print("publicacion en PAUSA" if periodico.alternar_pausa() else "publicacion reanudada")

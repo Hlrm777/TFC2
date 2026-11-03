@@ -34,7 +34,8 @@ from telmeow_teleop.arm_tracker import COLUMNAS_CSV as COLUMNAS_BRAZOS
 from telmeow_teleop.limits import AxisClamp, Side
 from telmeow_teleop.publisher import PosePublisher
 from test_confianza_mano import CODO, MANO_COLGANDO, MANO_DOBLADA, escena, tracker_con_escenas
-from test_emotion_classifier import _BackendFalso
+from test_emotion_classifier import FRAME as FRAME_EMOCION
+from test_emotion_classifier import _BackendFalso, _clasificador
 from test_publisher import ClienteFalso, RelojFalso
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -56,14 +57,19 @@ class CamaraFalsa:
     """Frames distintos y deterministas, con los canales B y R distintos para
     que un RGB no pase por un BGR."""
 
-    def __init__(self, n):
+    def __init__(self, n, pausa_s=0.0):
         self.n = n
+        self.pausa_s = pausa_s
         self.leidos = []
         self.liberada = False
 
     def read(self):
         if len(self.leidos) >= self.n:
             return False, None
+        if self.pausa_s:
+            import time
+
+            time.sleep(self.pausa_s)
         rng = np.random.default_rng(len(self.leidos))
         frame = rng.integers(0, 256, size=(ALTO, ANCHO, 3), dtype=np.uint8)
         frame[..., 0] //= 2          # azul más oscuro que el rojo
@@ -153,6 +159,25 @@ class PeriodicoSincrono(principal.PublicadorPeriodico):
         self.tick()
 
 
+class EmocionSincrona(principal.HiloEmocion):
+    """El de verdad, en el modo del bucle (``--emocion-en-bucle``): lo que se
+    publica y se graba es determinista. El modo con hilo se prueba aparte."""
+
+    def __init__(self, clasificador, **kw):
+        kw["en_hilo"] = False
+        super().__init__(clasificador, **kw)
+
+
+class BackendRelativo(_BackendFalso):
+    """Un backend que se calibra con la cara neutra, como el combinado."""
+
+    relativo = True
+    calibrado = True
+
+    def calibrar(self, caras):
+        self.calibrado = True
+
+
 @pytest.fixture
 def pipeline(monkeypatch, tmp_path):
     """``correr(argv, frames, teclas)`` ejecuta ``main`` con todo simulado."""
@@ -223,8 +248,8 @@ def pipeline(monkeypatch, tmp_path):
             r.rgb += 1
         return original_cvt(imagen, codigo, *a, **k)
 
-    def correr(argv=(), frames=8, teclas=(), backend=None):
-        camara = CamaraFalsa(frames)
+    def correr(argv=(), frames=8, teclas=(), backend=None, hilo_real=False, pausa_s=0.0):
+        camara = CamaraFalsa(frames, pausa_s)
         estado["camara"] = camara
         pulsadas = iter(list(teclas))
         backend = backend or _BackendFalso([("feliz", 0.9), ("feliz", 0.9), ("triste", 0.8)])
@@ -246,6 +271,8 @@ def pipeline(monkeypatch, tmp_path):
         monkeypatch.setattr(principal, "crear_backend_o_reserva", crear)
         monkeypatch.setattr(principal, "EmotionClassifier", Emocion)
         monkeypatch.setattr(principal, "PublicadorPeriodico", PeriodicoSincrono)
+        if not hilo_real:
+            monkeypatch.setattr(principal, "HiloEmocion", EmocionSincrona)
         estado["publicador"] = PublicadorFalso(r)
         monkeypatch.setattr(principal, "_crear_publicador", crear_publicador)
         monkeypatch.setattr(ht.mp.solutions.face_mesh, "FaceMesh", Malla)
@@ -322,9 +349,16 @@ def test_sin_rostro_se_omiten_pan_y_tilt(pipeline, monkeypatch):
 
 
 def test_c_calibra_la_cabeza_y_la_emocion_a_la_vez(pipeline):
-    assert pipeline.correr(frames=6, teclas=[-1, -1, ord("c")]) == 0
+    backend = BackendRelativo([("feliz", 0.9)])
+    assert pipeline.correr(frames=6, teclas=[-1, -1, ord("c")], backend=backend) == 0
     assert pipeline.neutros == 1
     assert pipeline.calibraciones == 1
+
+
+def test_con_un_backend_que_no_se_calibra_c_solo_calibra_la_cabeza(pipeline):
+    assert pipeline.correr(frames=6, teclas=[-1, -1, ord("c")]) == 0
+    assert pipeline.neutros == 1
+    assert pipeline.calibraciones == 0
 
 
 @pytest.mark.parametrize("indice", range(6))
@@ -415,8 +449,7 @@ def test_sin_brazos_no_corre_blazepose_y_la_emocion_no_recibe_manos(pipeline, mo
 def test_con_brazos_la_emocion_recibe_las_manos_de_blazepose(pipeline):
     assert pipeline.correr(frames=3) == 0
     _frame, manos = pipeline.emocion[-1]
-    assert callable(manos)
-    assert len(manos()) > 0
+    assert len(manos) > 0
 
 
 # --------------------------------------------------------------------------
@@ -776,3 +809,221 @@ def test_los_argumentos_de_configuracion_llegan_a_la_configuracion(pipeline):
     assert pipeline.correr(argv=["--camera", "3", "--broker", "10.0.0.5:1999"], frames=1) == 0
     assert pipeline.cfg_camara.index == 3
     assert (pipeline.cfg.mqtt.host, pipeline.cfg.mqtt.port) == ("10.0.0.5", 1999)
+
+
+# --------------------------------------------------------------------------
+# 11. Reanudar la pausa sin salto (pedido del operador, 2026-11-02)
+# --------------------------------------------------------------------------
+
+
+def _periodico_con_rampa(rampa_s=1.0):
+    reloj = RelojFalso()
+    pub = _PubContador(reloj)
+    return principal.PublicadorPeriodico(pub, 0.05, rampa_s=rampa_s, reloj=reloj), pub, reloj
+
+
+def test_al_reanudar_los_angulos_van_suaves_de_la_pose_congelada_a_la_actual():
+    periodico, pub, reloj = _periodico_con_rampa(1.0)
+    periodico.actualizar(pan=0.0, armL=-55.0, emo="neutral")
+    periodico.tick()
+    periodico.alternar_pausa()
+    periodico.actualizar(pan=40.0, armL=-5.0, emo="feliz")   # el operador se movió
+    reloj.avanzar(5.0)
+    periodico.alternar_pausa()                               # reanuda
+    pans = []
+    for _ in range(25):
+        periodico.tick()
+        pans.append(pub.campos[-1]["pan"])
+        reloj.avanzar(0.05)
+    assert pans[0] == pytest.approx(0.0)                     # arranca donde se quedó
+    assert all(b >= a for a, b in zip(pans, pans[1:]))       # sin retroceder
+    assert pans[10] == pytest.approx(20.0, abs=1e-9)         # a mitad, la mitad (simétrico)
+    assert pans[3] - pans[2] < pans[10] - pans[9]            # arranca despacio
+    assert pans[-1] == 40.0                                  # y llega, pasado 1 s
+    assert pub.campos[0]["emo"] == "neutral" and pub.campos[1]["emo"] == "feliz"  # la emoción no se mezcla
+
+
+def test_si_el_operador_se_mueve_durante_la_rampa_la_rampa_lo_sigue():
+    periodico, pub, reloj = _periodico_con_rampa(1.0)
+    periodico.actualizar(pan=0.0)
+    periodico.tick()
+    periodico.alternar_pausa()
+    periodico.alternar_pausa()
+    for k in range(25):
+        periodico.actualizar(pan=2.0 * k)                    # va girando
+        periodico.tick()
+        reloj.avanzar(0.05)
+    assert pub.campos[-1]["pan"] == pytest.approx(48.0)      # al final, donde está él
+
+
+def test_sin_rampa_salta_y_sin_nada_enviado_no_hay_rampa():
+    periodico, pub, reloj = _periodico_con_rampa(0.0)
+    periodico.actualizar(pan=0.0)
+    periodico.tick()
+    periodico.alternar_pausa()
+    periodico.actualizar(pan=40.0)
+    periodico.alternar_pausa()
+    periodico.tick()
+    assert pub.campos[-1]["pan"] == 40.0
+
+    periodico, pub, reloj = _periodico_con_rampa(1.0)
+    periodico.alternar_pausa()
+    periodico.actualizar(pan=40.0)
+    periodico.alternar_pausa()
+    periodico.tick()
+    assert pub.campos[-1]["pan"] == 40.0
+
+
+def test_la_cabeza_sin_rostro_no_entra_en_la_rampa():
+    periodico, pub, reloj = _periodico_con_rampa(1.0)
+    periodico.actualizar(pan=10.0, armL=-55.0)
+    periodico.tick()
+    periodico.alternar_pausa()
+    periodico.actualizar(pan=None, armL=-5.0)
+    periodico.alternar_pausa()
+    periodico.tick()
+    assert pub.campos[-1]["pan"] is None                     # se omite, como siempre
+    assert pub.campos[-1]["armL"] == pytest.approx(-55.0)
+
+
+def test_paso_suave():
+    assert principal.paso_suave(0.0) == 0.0 and principal.paso_suave(1.0) == 1.0
+    assert principal.paso_suave(0.5) == pytest.approx(0.5)
+    assert principal.paso_suave(-1.0) == 0.0 and principal.paso_suave(2.0) == 1.0
+
+
+def test_la_rampa_sale_de_la_configuracion():
+    assert AppConfig().rates.resume_ramp_s == 1.0
+    assert AppConfig.from_env({"TELMEOW_RESUME_RAMP_S": "0.5"}).rates.resume_ramp_s == 0.5
+
+
+# --------------------------------------------------------------------------
+# 12. La emoción en su hilo (P7.1)
+# --------------------------------------------------------------------------
+
+
+def _esperar(condicion, segundos=5.0):
+    import time
+
+    limite = time.perf_counter() + segundos
+    while time.perf_counter() < limite:
+        if condicion():
+            return True
+        time.sleep(0.005)
+    return False
+
+
+def test_el_hilo_infiere_y_el_estado_se_lee_sin_tocar_el_clasificador():
+    clasificador = _clasificador([("feliz", 0.9)], emotion_hz=1000.0)
+    grabadas = []
+    hilo = principal.HiloEmocion(clasificador, al_inferir=lambda t, e, f: grabadas.append((t, e)))
+    hilo.arrancar()
+    try:
+        for k in range(5):
+            hilo.entregar(FRAME_EMOCION, k * 0.2, k * 0.2, 3, None)
+            assert _esperar(lambda: hilo.estado.inferencias > k)
+        assert _esperar(lambda: hilo.estado.etiqueta == "feliz")
+        assert hilo.estado.rostro == (10, 20, 30, 40)
+        assert grabadas and all(e == 3 for _t, e in grabadas)
+    finally:
+        hilo.parar()
+    assert hilo._hilo is None
+
+
+def test_si_llegan_frames_mientras_infiere_se_queda_con_el_ultimo():
+    import threading
+    import time
+
+    soltar = threading.Event()
+
+    class Lento(_BackendFalso):
+        def distribucion(self, rostro):
+            soltar.wait(2.0)
+            return super().distribucion(rostro)
+
+    clasificador = principal.EmotionClassifier(
+        Lento([("feliz", 0.9)]), detector=lambda f: (10, 20, 30, 40),
+        frame_espejado=False, emotion_hz=1000.0)
+    vistos = []
+    original = clasificador.process
+
+    def process(frame, ts=None, manos=None):
+        vistos.append(ts)
+        return original(frame, ts, manos=manos)
+
+    clasificador.process = process
+    hilo = principal.HiloEmocion(clasificador)
+    hilo.arrancar()
+    try:
+        hilo.entregar(FRAME_EMOCION, 0.0, 0.0, 0, None)
+        assert _esperar(lambda: len(vistos) == 1)
+        for k in range(1, 10):                               # llegan mientras infiere
+            hilo.entregar(FRAME_EMOCION, float(k), float(k), 0, None)
+        time.sleep(0.05)
+        soltar.set()
+        assert _esperar(lambda: vistos[-1] == 9.0)
+    finally:
+        hilo.parar()
+    assert vistos == [0.0, 9.0]                              # los de en medio, descartados
+
+
+def test_las_teclas_se_aplican_en_el_hilo():
+    clasificador = _clasificador([("feliz", 0.9)], emotion_hz=1000.0)
+    hilo = principal.HiloEmocion(clasificador)
+    hilo.arrancar()
+    try:
+        hilo.ordenar("toggle_manual", "concentrado")
+        assert _esperar(lambda: hilo.estado.manual == "concentrado")
+        assert hilo.estado.etiqueta == "concentrado"
+        hilo.ordenar("clear_manual")
+        assert _esperar(lambda: hilo.estado.manual is None)
+    finally:
+        hilo.parar()
+
+
+def test_un_error_en_el_hilo_se_cuenta_y_el_hilo_sigue():
+    class Roto(_BackendFalso):
+        fallos = 0
+
+        def distribucion(self, rostro):
+            if Roto.fallos == 0:
+                Roto.fallos += 1
+                raise RuntimeError("onnx se quejó")
+            return super().distribucion(rostro)
+
+    clasificador = principal.EmotionClassifier(
+        Roto([("feliz", 0.9)]), detector=lambda f: (10, 20, 30, 40),
+        frame_espejado=False, emotion_hz=1000.0)
+    hilo = principal.HiloEmocion(clasificador)
+    hilo.arrancar()
+    try:
+        hilo.entregar(FRAME_EMOCION, 0.0, 0.0, 0, None)
+        assert _esperar(lambda: hilo.errores == 1)
+        assert "onnx" in hilo.ultimo_error
+        hilo.entregar(FRAME_EMOCION, 0.5, 0.5, 0, None)
+        assert _esperar(lambda: hilo.estado.inferencias >= 2)
+    finally:
+        hilo.parar()
+
+
+def test_el_pipeline_con_el_hilo_de_verdad_graba_y_cierra(pipeline):
+    """Sin el modo síncrono del fixture: el hilo de verdad, de punta a punta. Lo
+    publicado no es determinista (depende de cuándo acaba cada inferencia), así
+    que se comprueba lo que sí: que infiere, que graba, que la sesión lo marca
+    y que al salir no queda el hilo vivo."""
+    import csv
+    import threading
+
+    ruta = pipeline.tmp / "sesion.csv"
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=20, hilo_real=True,
+                           pausa_s=0.02) == 0
+    assert not any(h.name == "emocion" for h in threading.enumerate())
+    rutas = principal.rutas_de_grabacion(ruta)
+    with open(rutas["emocion"], newline="", encoding="utf-8") as f:
+        inferencias = list(csv.DictReader(f))
+    with open(rutas["sesion"], newline="", encoding="utf-8") as f:
+        sesion = list(csv.DictReader(f))
+    assert len(inferencias) >= 3
+    assert {fila["emocion_hilo"] for fila in sesion} == {"1"}
+    assert sum(1 for fila in sesion if fila["ms_emocion"]) >= 3
+

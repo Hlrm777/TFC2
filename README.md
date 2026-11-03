@@ -48,10 +48,11 @@ en el documento.
 ```
 
 Tres cadencias, cada una con su reloj: la visión corre a lo que dé la cámara,
-la emoción a 5 Hz dentro del mismo bucle, y la publicación a 20 Hz en un hilo
-propio que solo envía la última pose. Publicar en cada frame no da 20 Hz: el
-publisher descarta lo que llega a menos de 45 ms del anterior, y a 30 fps
-pasaría uno sí y otro no (15 Hz).
+la emoción a 5 Hz en su propio hilo (P7.1: dentro del bucle, cada inferencia
+retrasaba un frame), y la publicación a 20 Hz en otro hilo que solo envía la
+última pose. Publicar en cada frame no da 20 Hz: el publisher descarta lo que
+llega a menos de 45 ms del anterior, y a 30 fps pasaría uno sí y otro no
+(15 Hz).
 
 El recorte de poses tiene **dos capas**: `limits.py` recorta en Python contra
 las tablas del barrido BVH antes de publicar, y el visor vuelve a verificar la
@@ -342,7 +343,7 @@ esa postura como neutra y la emoción, esa cara.
 | `c` | calibrar a la vez la postura neutra de la cabeza y la cara neutra |
 | `1`..`6` | forzar neutral, feliz, triste, sorprendido, enojado, concentrado; la misma otra vez la suelta |
 | `0` | expresión automática |
-| `k` | pausar / reanudar la publicación |
+| `k` | pausar / reanudar la publicación; al reanudar, el robot va en 1 s de la pose en que se quedó a la tuya (`TELMEOW_RESUME_RAMP_S`) |
 | `j` / `l` | gesto de página anterior / siguiente |
 | ESPACIO | cambiar de etiqueta (con `--record`) |
 
@@ -352,6 +353,7 @@ Opciones:
 python -m telmeow_teleop.main --record sesion.csv --guardar-recortes sesion_caras
 python -m telmeow_teleop.main --no-emotion        # sin backend de emoción
 python -m telmeow_teleop.main --no-arms           # sin BlazePose
+python -m telmeow_teleop.main --emocion-en-bucle  # la emoción en el bucle, para comparar
 python -m telmeow_teleop.main --camera 1 --broker 192.168.1.50:1883
 ```
 

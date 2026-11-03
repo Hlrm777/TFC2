@@ -138,7 +138,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1257 pruebas en verde** (desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1272 pruebas en verde** (desde el 2026-11-03: 1257 + 15 del análisis del P6.5; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -202,6 +202,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 ├── tools/
 │   ├── mqtt_monitor.py       ✅ · --latencia: la latencia desde la captura (P7.3)
 │   ├── analizar_sesion.py    ✅ P7: fps, frames perdidos, ms por etapa, criterio del P7.1
+│   ├── analizar_p65.py       ✅ P6.5: gafas y reentrenamiento de los blendshapes, por sesiones
 │   ├── medir_latencia_camara.py ✅ P7.3: pantalla + cámara, con destellos
 │   ├── dev_broker.py         ✅ broker sin privilegios de administrador
 │   ├── list_cameras.py       ✅ qué cámara y qué backend usar, con fps REALES
@@ -216,7 +217,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── train_fer2013.py      ✅ P8: FER-2013 verificado, partición oficial,
 │   │                            entrenamiento determinista, --evaluar
 │   └── eval_emotion.py       ⬜ P9
-├── tests/                    ✅ 1257 pruebas
+├── tests/                    ✅ 1272 pruebas
 ├── mosquitto.conf            ✅ los dos listeners
 ├── emotion_model.meta.json   ✅ orden de clases del modelo propio (el .keras no va en git)
 ├── emotion_model_fer2013.meta.json, .historial.csv   ✅ el de FER-2013 (P8), y el
@@ -2562,14 +2563,16 @@ su confianza, latencia y brillo.
    | `mbf_va_mtl.onnx` | ídem | 8 251 681 | `0323ace52ea6dbe9aa4a909d20933f7b8629c3fb41249e338f4316abf2a4828c` |
 
 5. **P6.5 — Tristeza, enojo y gafas** (decidido por el operador el
-   2026-11-02, tras el H57; **protocolo propuesto, a confirmar con él**). Dos
+   2026-11-02, tras el H57; **protocolo aprobado por él el 2026-11-03**). Dos
    preguntas: si el combinado distingue su tristeza de su enojo cuando la
    tristeza lleva el ceño fruncido, y si las gafas meten error. Para que la
    segunda tenga respuesta, lo único que cambia entre condiciones son las
    gafas: mismo día, misma luz, misma silla.
 
    **Cuatro grabaciones cortas** con el pipeline (`--record --guardar-recortes`),
-   dos con gafas (G1, G2) y dos sin ellas (S1, S2), con el mismo protocolo:
+   dos con gafas (G1, G2) y dos sin ellas (S1, S2), con el mismo protocolo, y
+   **alternando: G1, S1, G2, S2**, para que el cansancio o la luz que cambie a
+   lo largo de la sesión no se confundan con las gafas:
 
    | Etiqueta | Qué hacer | Tiempo |
    |---|---|---|
@@ -2594,9 +2597,33 @@ su confianza, latencia y brillo.
      (G1→G2, S1→S2, y cruzado). Vale si la tristeza con ceño sube y el enojo
      no baja más de 5 puntos, y la lectura sigue sin falsas alarmas; si el
      enojo cae, la tristeza con ceño se queda como convención declarada.
-   - Hace falta extender `tools/entrenar_blendshapes.py` para leer los
-     recortes de una sesión con sus etiquetas, en vez de solo las fotos del
-     dataset propio.
+   - **La herramienta ya está** (2026-11-03): `tools/analizar_p65.py`, con dos
+     órdenes. `gafas` compara las condiciones con la predicción grabada en
+     vivo, sin volver a inferir. `reentrenar` extrae los blendshapes de los
+     recortes (relativos a la neutra de la última calibración de cada fila,
+     como en vivo), los junta con los del dataset propio, entrena y evalúa el
+     combinado sobre la sesión que no entrenó, frente al de operación, con
+     `evaluar_backends.evaluar` (que rehace las calibraciones donde ocurrieron).
+     Probada de punta a punta con dos sesiones del protocolo v3 reetiquetadas:
+     el ancla da exacto (914 de 914 caras). Esa prueba **no es un resultado**.
+
+   **Comandos de la sesión** (el broker y el visor no hacen falta para esto):
+
+   ```
+   .venv\Scripts\python.exe -m telmeow_teleop.main --record p65_g1.csv --guardar-recortes p65_g1_recortes
+   .venv\Scripts\python.exe -m telmeow_teleop.main --record p65_s1.csv --guardar-recortes p65_s1_recortes
+   .venv\Scripts\python.exe -m telmeow_teleop.main --record p65_g2.csv --guardar-recortes p65_g2_recortes
+   .venv\Scripts\python.exe -m telmeow_teleop.main --record p65_s2.csv --guardar-recortes p65_s2_recortes
+   ```
+
+   **Después, sin el operador:**
+
+   ```
+   python tools/analizar_p65.py gafas --con p65_g1_emocion.csv p65_g2_emocion.csv --sin p65_s1_emocion.csv p65_s2_emocion.csv
+   python tools/analizar_p65.py reentrenar --entrenar p65_g1_emocion.csv --evaluar p65_g2_emocion.csv
+   python tools/analizar_p65.py reentrenar --entrenar p65_s1_emocion.csv --evaluar p65_s2_emocion.csv
+   python tools/analizar_p65.py reentrenar --entrenar p65_g1_emocion.csv p65_s1_emocion.csv --evaluar p65_g2_emocion.csv p65_s2_emocion.csv
+   ```
 
 ### Enunciado original
 
@@ -2945,9 +2972,26 @@ actual: pide una transición suave.
 
 ### Lo que falta
 
-1. **Verificarlo con el operador**: una sesión corta con el hilo de emoción
-   (fps frente a `p7_sin_emocion`, que el criterio del P7.1 vuelva a mirar), la
-   pausa y la cara tapada. Se puede hacer en la misma sesión del P6.5.
+1. **Verificarlo con el operador**, en la misma sesión del P6.5. Los fps con
+   el hilo salen de las propias grabaciones del P6.5 (`p65_*.csv`, columna
+   `emocion_hilo`; la etiqueta 10, leyendo, frente a `p7_sin_emocion`). La
+   pausa y la cara tapada, con una grabación de un minuto, con el broker y el
+   visor:
+
+   ```
+   .venv\Scripts\python.exe -m telmeow_teleop.main --record p7_verificacion.csv
+   ```
+
+   | Etiqueta | Qué hacer | Tiempo | Qué debe hacer el robot |
+   |---|---|---|---|
+   | 0 | Cara relajada mirando la pantalla, quieto | 10 s | calibra; neutral |
+   | 1 | Girar la cabeza a tu izquierda y quedarse así; pulsar `k`; girar a tu derecha y quedarse; pulsar `k` otra vez | 15 s | quieto en la pausa; al reanudar va **en 1 s, sin salto**, hacia tu derecha |
+   | 2 | Sonreír 5 s y, sin dejar de sonreír, taparse la cara con las dos manos | 15 s | feliz, y **neutral ~2 s después** de taparse |
+   | 3 | Leer en voz alta sin actuar | 30 s | neutral; mide los fps con el hilo |
+
+   Después: `python tools/analizar_sesion.py p7_verificacion.csv --comparar
+   p7_sin_emocion.csv --etiqueta 3 --etiqueta-sin 1` y
+   `python tools/analizar_registro_emocion.py p7_verificacion_emocion.csv`.
 2. **P6.5 — tristeza, enojo y gafas** (ver el P6).
 3. **Medir la latencia de la cámara con luz de operación** (con la herramienta
    ya corregida), para saber la latencia total en el puesto real.

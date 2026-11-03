@@ -133,7 +133,7 @@ cambia respecto al plan original.
 | **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral | `1e3b6c1` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
-| P7 — Integración | 🟡 **código hecho el 2026-10-26** · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · **falta la sesión con el operador** y, según lo que mida, el P7.1 (hilo de emoción) y el P7.2 (una red de cara) | `1cbaa35`, `6ca0f01` |
+| P7 — Integración | 🟡 **código hecho el 2026-10-26, sesión con el operador el 2026-11-02** · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · **falta**: el P7.1 (hilo de emoción, lo pide el criterio), la pausa suave y decidir H56 y H57 | `1cbaa35`, `6ca0f01`, `b4cce10` |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
@@ -2755,7 +2755,7 @@ pipeline, `analizar_registro_emocion.py` reproduce exacta su histéresis, y
   (leyendo, manos abajo) en ≤ 5 %. Si no, se evalúa offline sobre la columna
   `manos` sostener la marca un tiempo tras perderla.
 
-### Lo que falta — la sesión con el operador
+### La sesión con el operador — el protocolo (hecha el 2026-10-31 y el 2026-11-02)
 
 Todo con el broker único (§4.1), el visor servido y conectado a
 `ws://localhost:9001` (§4.2) y buena luz. Cuatro grabaciones:
@@ -2812,6 +2812,82 @@ python tools/analizar_registro.py p7_movimiento_cabeza.csv
 De ahí salen la decisión del P7.1 (y quizá del P7.2), el H52, la tasa
 publicada (`analizar_sesion` y lo recibido por `mqtt_monitor`) y la latencia
 total = la de la cámara + la de captura a suscriptor.
+
+### Lo medido (sesiones del 2026-10-31 y del 2026-11-02)
+
+**Las grabaciones**, en git (los recortes, fuera, como siempre):
+`p7_sin_emocion*.csv` (2026-10-31); `p7_movimiento*.csv` y `p7_latencia.csv`
+(2026-11-02; los `_anterior` son un primer intento del 2026-11-01 y no
+cuentan); `p7_emocion*.csv`; `p7_latencia_camara.csv`. De la latencia de
+cámara solo queda la **segunda** toma: la primera, con la luz encendida, la
+pisó la herramienta, que no apartaba el archivo anterior (corregido en
+`b4cce10`).
+
+**Lo que hizo el operador, comprobado en los datos** y no en el protocolo: en
+`p7_movimiento` las etiquetas 0-7 son las del protocolo; en la 8 probó los dos
+gestos (`j` a 276 s, `l` a 290 s), en la 9 otros dos `j` y la pausa (316-327 s),
+y en la 10 y la 11 recalibró con `c`. En `p7_emocion`, las nueve etiquetas tal
+cual, más una pausa accidental de 1 s en la 5. El operador **no pudo mirar el
+visor ni el panel mientras hacía cada postura**: lo verificado es lo que dicen
+los datos, salvo los comentarios suyos que se citan.
+
+| Qué | Medido | Herramienta |
+|---|---|---|
+| Publicación | **19.9 Hz** en las tres sesiones, **0 perdidos**; lo recibido por el monitor llega cada 48/50/52 ms (p5/p50/p95). El H54 queda resuelto, visto por dos caminos | `analizar_sesion.py`, `mqtt_monitor.py --latencia` |
+| Cámara | **~15 fps** (intervalo mediano 64-72 ms) con brillo 140-150: poca luz y exposición larga (H27). Sin emoción el bucle acaba en **38 ms** (daría 26 fps): limitaba la cámara | `analizar_sesion.py` |
+| Coste por frame (narrando) | cabeza 7.4 ms, **brazos 34.5 ms** (22 en el P5.1, medido solo), bucle sin inferencia 45 ms; inferencia de emoción 43 ms; **frame con inferencia 92 ms** | ídem |
+| **P7.1** | con emoción procesa el **88 %** de los fps sin ella (< 90 %) y los frames con inferencia duran **92 ms** (> 66): **los dos disparadores → la emoción pasa a un hilo**. La reserva de BlazePose no aplica: el bucle sin emoción da para 26 fps | `analizar_sesion.py --comparar p7_sin_emocion.csv --etiqueta 7 --etiqueta-sin 1` |
+| **P7.2 (b)** | el Haar pierde la cara en el **5.1 %** de las inferencias de las etiquetas de giro (< 10 %): no se dispara. Con el pan del robot a más de 25°, en el 16.6 % | sobre `p7_movimiento_emocion.csv` |
+| Latencia captura → suscriptor | **mediana 96 ms, p95 167** sin los 5 s del arranque; contando solo la primera llegada de cada frame, 81 / 146 | `mqtt_monitor.py --latencia` |
+| Latencia pantalla + cámara | **mediana 203 ms** (187-205, 15 destellos, a oscuras, 12.4 fps). Dos grupos separados 16.7 ms: un refresco del monitor, señal de que la medida es real. Es una cota superior, y con la exposición más larga posible: con luz no hubo contraste | `medir_latencia_camara.py --analizar p7_latencia_camara.csv` |
+| Parones del bucle | 2.4 s al arrancar (carga de modelos); **~0.3 s al terminar cada calibración de la cara** (el backend procesa de golpe las caras neutras: el robot se congela al pulsar `c`); dos de 0.7-0.8 s fuera del bucle (cámara o ventana), sin explicar | `sesion.csv`: `dt_ms` frente a `ms_bucle` |
+| Cabeza | pan −42° hacia la izquierda del operador (etiqueta 1) y +32° hacia la derecha (2), sin recortes; tilt +20 / −24° (3) | `p7_movimiento_cabeza.csv` |
+| Brazos | sube **solo `armL`** al levantar el brazo izquierdo (4, hasta −5°) y **solo `armR`** con el derecho (5); el saludo del derecho **reconocido** en la 6 (45 % de la etiqueta) | `p7_movimiento_brazos.csv`, `analizar_registro_brazos.py` |
+| Emoción, protocolo v3 | **7 de 9**. Leyendo en voz alta, **0 cambios en 36 s** (el mejor resultado hasta ahora); la tristeza falla (neutral 86 %; el modelo, triste 5 % y enojado 5 %) y la sorpresa queda en 41 %. Reproducción de la histéresis **exacta** en las 957 inferencias fuera de manual | `analizar_registro_emocion.py p7_emocion_emocion.csv` |
+| **H52** con las manos de BlazePose | mano sobre la cara en el **32 %** de las inferencias de la etiqueta 7 (criterio ≥ 90 %): **no cumple**. Retener la marca no basta: con 5 s llega al 83 %, y en la sorpresa las inferencias anuladas suben del 4.5 al 26 %. El robot acierta igual (neutral 93 %) porque el modelo no se deja engañar por las manos | sobre la columna `manos` |
+
+**La latencia total, en estas condiciones, es de ~300 ms** (203 + 96), el
+doble de los 150 ms del documento. La parte del sistema (captura → mensaje)
+cumple; lo que domina es la cámara con poca luz. Hace falta una medida con luz
+de operación para saber cuánto baja (ver «Lo que falta»).
+
+**Tres hallazgos nuevos** (§7.21):
+
+- **H55** — BlazePose no ve las manos pegadas a las orejas: las pone **por debajo
+  del cuadro** (y = 580-596 px en una imagen de 480, visibilidad 0.2-0.3). La
+  regla del H40 hace lo correcto y no se fía de ellas, así que el brazo del
+  robot se queda en reposo —lo que notó el operador: «el robot no levanta las
+  manos, pero los palitos fluctúan bastante»— y la regla de las manos de la
+  emoción solo actúa el 32 % del tiempo. Es el límite del H52 con otro
+  detector: una mano plana contra la cabeza no la ve ninguno de los dos.
+- **H56** — Con las manos **tapando** la cara, el Haar sigue encontrando una cara
+  detrás y la expresión **se congela**: las manos impiden votar, que es
+  correcto, pero con eso tampoco corren ni la regla de los 2 s sin cara ni la
+  de neutral sin apoyo. En la etiqueta 8 el robot siguió feliz 11 s con la cara
+  tapada y volvió a neutral 2 s después de que el Haar la dejara de ver. En el
+  P6, con MediaPipe Hands, volvía a los 2 s porque el Haar perdía la cara.
+- **H57** — La tristeza **con el ceño fruncido** se lee como enojo, como notó el
+  operador. Con el puchero solo, triste 0.68 (recorte 161); con puchero y ceño,
+  enojado 0.72 (recorte 209). Fruncir el ceño (AU4) es lo que más pesa en el
+  enojo; la tristeza de manual levanta las cejas internas (AU1). El dataset de
+  los blendshapes tenía la tristeza sin cejas (P6.4).
+
+**Lo que comentó el operador**, además de lo de arriba: le cuesta mirar el
+robot y el panel mientras sostiene cada postura (le pasa en todas las
+sesiones), y **al reanudar la pausa el robot salta** de golpe a la pose
+actual: pide una transición suave.
+
+### Lo que falta
+
+1. **P7.1, el hilo de emoción**: lo pide el criterio. Quita además el parón de
+   ~0.3 s de cada calibración.
+2. **Reanudar la pausa con transición suave** (pedido del operador).
+3. **Decidir qué hacer con el H56** (la cara tapada) y con el H57 (la tristeza
+   con ceño), con el operador.
+4. **Medir la latencia de la cámara con luz de operación** (con la herramienta
+   ya corregida), para saber la latencia total en el puesto real.
+5. Los signos en el visor quedan comprobados en los datos, no a la vista del
+   operador: si en alguna sesión futura el robot va al revés, se vuelve aquí.
 
 ### Enunciado original
 
@@ -5517,6 +5593,40 @@ Es una deducción del código atada por una prueba, no una medición en vivo: la
 sesiones del P5 no grababan la tasa publicada. Si hace falta citarla de una de
 ellas, se mide.
 
+## 7.21 La sesión del operador del P7 (H55-H57)
+
+**H55 — BlazePose pone fuera del cuadro las manos pegadas a las orejas.** En la
+etiqueta 7 de `p7_emocion` (manos junto a las orejas, 303 frames), la mediana
+de `img_mano_y` fue **580 px (canal L) y 596 px (R)** en una imagen de 480, con
+visibilidad del destino 0.3 y 0.2, y confianza en la mano 0: BlazePose las
+supuso colgando por debajo, como en el H40. La regla del P5.6 no se fía de una
+mano fuera de cuadro, así que el comando quedó en el reposo (−55°, 0°) todo el
+tramo, y `manos_de_blazepose` las descartó: la regla de «mano sobre la cara»
+actuó en el 32 % de las inferencias. En la etiqueta 8 (taparse la cara) sí las
+vio dentro (y ≈ 364-400 px, confianza 1.0) y el robot movió los brazos. Junto
+al H52, que medía MediaPipe Hands (57 %), queda establecido que **ninguno de los
+dos detectores ve con fiabilidad una mano plana contra la cabeza**.
+
+**H56 — Con la cara tapada por las manos, la expresión se congela.** En la
+etiqueta 8 (sonreír y taparse la cara), desde los 3 s de la etiqueta el Haar
+siguió encontrando una cara en 59 de cada 100 inferencias y BlazePose marcó
+las manos encima: esas inferencias no votan, que es lo previsto. Pero con
+eso tampoco avanzan ni la regla de los 2 s sin cara (hay «cara») ni la de
+neutral sin apoyo (diseñada para no avanzar con las manos), así que el robot
+siguió **feliz 11 s** con la cara tapada, y volvió a neutral 2 s después de la
+última detección del Haar. La decisión 9 del P6 pedía lo contrario: que si el
+operador se tapa la cara el robot no se quede con una expresión vieja.
+
+**H57 — La tristeza con el ceño fruncido se lee como enojo.** Lo notó el
+operador y lo confirman los recortes de la etiqueta 2: con el puchero solo, el
+combinado dio triste 0.68 (recorte 000161); con el puchero y el ceño, enojado
+0.72 (000209). En la etiqueta, medianas de neutral 0.55, enojado 0.25 y triste
+0.10. Fruncir el ceño es la unidad de acción 4, la que más pesa en el enojo;
+la tristeza prototípica la acompaña de las cejas internas arriba (AU1), que el
+operador no hace, y la regresión de los blendshapes se entrenó con su
+tristeza de puchero, sin cejas (P6.4). ⚠️ Verificar la referencia FACS antes de
+citarla.
+
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
@@ -5572,6 +5682,9 @@ ellas, se mide.
 | **H53** | **El modelo propio aprendió atajos del dataset**: boca abierta = sorprendido, cabeza ladeada, gafas. Con la misma luz pasó de 4 de 5 a 3 de 5 entre el 24 y el 25, y de 97 % a 24 % neutral leyendo; los blendshapes y `mbf_va_mtl` aguantan | P6.1, P6.4, §7.19 |
 | **H52** | **El detector de manos no ve una mano pegada a la oreja**: 57 % en vivo, 58 % con el modelo mayor. La regla de las manos es correcta, la entrada no; en el P7 se prueban las muñecas de BlazePose | P6.1, P7, §7.19 |
 | **H54** | **Los demos publicaban a 15 Hz, no a 20**: el publisher descarta lo que llega a menos de 45 ms del anterior y a 30 fps pasa un frame sí y otro no. El pipeline publica desde un hilo con reloj propio | §0.4, P7, Parte 6, §7.20 |
+| **H55** | **BlazePose pone fuera del cuadro las manos pegadas a las orejas** (y ≈ 590 px de 480): el brazo del robot se queda en reposo y la regla de las manos actúa el 32 %. Con el H52, ninguno de los dos detectores ve una mano plana contra la cabeza | P7, §7.21 |
+| **H56** | **Con la cara tapada, la expresión se congela**: el Haar sigue viendo una cara, las manos impiden votar y con eso no corre ninguna regla de retorno a neutral (feliz 11 s) | P7, §7.21 |
+| **H57** | **La tristeza con el ceño fruncido se lee como enojo** (triste 0.68 con puchero, enojado 0.72 con puchero y ceño) | P7, §7.21 |
 | **H51** | **El modelo propio no reconoce la tristeza, ni con buena luz**: en la grabación del 2026-10-24 acierta 4 de 5, pero con la tristeza el robot pone neutral el 88 % y el modelo crudo nunca dice triste. Los modelos abiertos que podrían mejorarlo, y los descartados, en §7.19 | P6.1, P6.4, §7.19 |
 | **H50** | **Las etiquetas del operador no bastan para verificar el orden de clases de un modelo que confunde sus caras**: con el de FER-2013, de 120 permutaciones, una equivocada cuadró mejor que la buena con 183 caras. Fijan `feliz` y descartan las rotaciones; el resto lo atan las cifras canónicas | P8, §7.18 |
 | **H37** | **La simetría aproximaba la zona extendida, pero no la medía**: el reflejo `(a, f) ≡ (−a, f ± 180)` falló por un paso de 5° en 6-9 de 18 filas, y en el límite usado prometía 5° de más. Barrida con los detectores del visor (tras reproducir 37/37 filas de agosto); manda lo medido. Unión y motor: 0 choques. El cable, sin CAD, pasa a supuesto declarado | P5.3, §0.5, §3.3.11 |

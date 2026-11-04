@@ -371,6 +371,17 @@ python tools/analizar_registro_emocion.py sesion_emocion.csv
 
 Nada se pisa: lo que ya existiera se conserva con el sufijo `_anterior`.
 
+**Una sesión de verificación entera, guiada:**
+
+```bash
+.venv/Scripts/python.exe tools/sesion_verificacion.py
+```
+
+Comprueba el broker (y avisa si es el servicio de Mosquitto sin WebSocket),
+levanta el visor si hace falta, enseña el protocolo en la consola, graba con el
+monitor de latencia a la vez, mide la cámara y deja el informe en
+`p7_final_informe.txt`.
+
 **Latencia.** Cada mensaje lleva en `t` la hora de captura de su frame. El
 visor muestra «Latencia» (llegada menos `t`) y «Periodo cmd» (el intervalo
 entre mensajes, que no es la latencia). La cifra para citar sale de

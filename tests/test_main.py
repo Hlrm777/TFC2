@@ -1148,3 +1148,27 @@ def test_en_el_pipeline_con_las_manos_en_la_cara_la_cabeza_no_sigue_a_face_mesh(
     with open(principal.rutas_de_grabacion(ruta)["sesion"], newline="", encoding="utf-8") as f:
         marcas = [fila["cabeza_tapada"] for fila in csv.DictReader(f)]
     assert marcas[:4] == ["0"] * 4 and set(marcas[5:]) == {"1"}
+
+
+def test_el_informe_de_la_sesion_de_verificacion(pipeline, monkeypatch):
+    """De punta a punta con el pipeline: se llega a la etiqueta 11 con ESPACIO,
+    las manos tapan la cara, y el informe de tools/sesion_verificacion.py lo
+    cuenta."""
+    sys.path.insert(0, str(RAIZ / "tools"))
+    import sesion_verificacion as sv
+
+    llamadas = {"n": 0}
+
+    def manos(landmarks, ancho, alto):
+        llamadas["n"] += 1
+        return [(ancho * 0.5, alto * 0.45)] if llamadas["n"] > 14 else []
+
+    monkeypatch.setattr(principal, "manos_de_blazepose", manos)
+    monkeypatch.setattr(sv, "PROJECT_ROOT", pipeline.tmp)    # sin las sesiones del P6.5
+    base = pipeline.tmp / "p7_final"
+    teclas = [ord(" ")] * 11 + [-1] * 8                       # del 0 al 11, y ahí se queda
+    assert pipeline.correr(argv=["--record", str(base) + ".csv"], frames=24, teclas=teclas) == 0
+    informe = sv.analizar(base)
+    assert "Cara tapada (etiqueta 11)" in informe
+    assert "la guarda actuo en" in informe
+    assert "Tasas:" in informe

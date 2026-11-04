@@ -114,6 +114,10 @@ def _on_message(client, userdata, message):
         if valor is not None:
             latencias.append(valor)
             userdata["escritor"].writerow([f"{ahora_ms:.1f}", f"{cuerpo['t']}", f"{valor:.1f}"])
+            # Al disco en cada fila: tools/sesion_verificacion.py cierra el
+            # monitor de golpe al acabar la grabación, y lo que quedara en el
+            # búfer se perdería.
+            userdata["registro"].flush()
         if now - userdata["ultimo_aviso"] >= 1.0:
             userdata["ultimo_aviso"] = now
             recientes = latencias[-20:]
@@ -163,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         registro = open(args.latencia, "w", newline="", encoding="utf-8")
         escritor = csv.writer(registro)
         escritor.writerow(["recibido_ms", "t_captura_ms", "latencia_ms"])
-        datos.update(latencias=[], escritor=escritor, ultimo_aviso=0.0)
+        datos.update(latencias=[], escritor=escritor, registro=registro, ultimo_aviso=0.0)
 
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2, client_id="telmeow-monitor"

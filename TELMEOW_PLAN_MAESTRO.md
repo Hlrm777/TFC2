@@ -138,7 +138,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1291 pruebas en verde** (desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza—; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1303 pruebas en verde** (desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -203,6 +203,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── mqtt_monitor.py       ✅ · --latencia: la latencia desde la captura (P7.3)
 │   ├── analizar_sesion.py    ✅ P7: fps, frames perdidos, ms por etapa, criterio del P7.1
 │   ├── analizar_p65.py       ✅ P6.5: gafas y reentrenamiento de los blendshapes, por sesiones
+│   ├── sesion_verificacion.py ✅ la sesión de verificación tras el P6.5, entera: broker, visor, grabación, latencias, informe
 │   ├── medir_latencia_camara.py ✅ P7.3: pantalla + cámara, con destellos
 │   ├── dev_broker.py         ✅ broker sin privilegios de administrador
 │   ├── list_cameras.py       ✅ qué cámara y qué backend usar, con fps REALES
@@ -217,7 +218,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── train_fer2013.py      ✅ P8: FER-2013 verificado, partición oficial,
 │   │                            entrenamiento determinista, --evaluar
 │   └── eval_emotion.py       ⬜ P9
-├── tests/                    ✅ 1291 pruebas
+├── tests/                    ✅ 1303 pruebas
 ├── mosquitto.conf            ✅ los dos listeners
 ├── emotion_model.meta.json   ✅ orden de clases del modelo propio (el .keras no va en git)
 ├── emotion_model_fer2013.meta.json, .historial.csv   ✅ el de FER-2013 (P8), y el
@@ -3103,10 +3104,39 @@ actual: pide una transición suave.
 
 2. ~~**P6.5 — tristeza, enojo y gafas**~~ — hecho (ver el P6): gafas sin peso,
    pesos reentrenados adoptados y regla de las cejas encendida.
-3. **Una sesión corta de verificación** con lo nuevo: los pesos del P6.5, la
-   regla de las cejas y la cabeza con la cara tapada (en el visor).
-4. **Medir la latencia de la cámara con luz de operación** (con la herramienta
-   ya corregida), para saber la latencia total en el puesto real.
+3. **Una sesión corta de verificación** con lo nuevo —los pesos del P6.5, la
+   regla de las cejas y la cabeza con la cara tapada— y **4. la latencia de
+   la cámara con la luz de trabajo**, juntas. Preparadas el 2026-11-03 en
+   `tools/sesion_verificacion.py`, que lleva la sesión entera:
+
+   ```
+   .venv\Scripts\python.exe tools\sesion_verificacion.py
+   ```
+
+   Comprueba el broker (y se para con las instrucciones si es la trampa del
+   §4.1), levanta el visor si hace falta, enseña el protocolo en la consola,
+   graba `p7_final.csv` con sus recortes y el monitor de latencia a la vez,
+   mide la cámara con la luz de trabajo (y ofrece repetir con menos luz si no
+   hay contraste), analiza y deja `p7_final_informe.txt`. `--analizar` rehace
+   el informe sin grabar. Al acabar para lo que arrancó él.
+
+   | Etiqueta | Qué hacer | Tiempo | Qué debe hacer el robot |
+   |---|---|---|---|
+   | 0 | Cara relajada mirando la pantalla, quieto. **No pulsar `c`** (H59) | 10 s | calibra 3 s; neutral |
+   | 1 | Triste con puchero, sin fruncir el ceño | 10 s | TRISTE |
+   | 2 | Triste con puchero y el ceño fruncido | 10 s | TRISTE (antes, enojado) |
+   | 3 | Enojado: ceño fruncido, como al regañar | 10 s | ENOJADO |
+   | 4 | Cara relajada | 10 s | NEUTRAL |
+   | 5-7 | Otra vez 1, 2 y 3 | 30 s | |
+   | 8 | Sonrisa amplia | 10 s | FELIZ |
+   | 9 | Sorpresa: cejas arriba y boca abierta | 10 s | SORPRENDIDO |
+   | 10 | Leer en voz alta sin actuar | 30 s | NEUTRAL: la boca abierta ya no cuenta |
+   | 11 | Sonreír 5 s y taparse la cara con las dos manos, quieto | 15 s | feliz → neutral ~2 s; la cabeza no tiembla y a los 2 s va al frente |
+   | 12 | Destaparse con la cabeza girada a un lado, y quedarse así | 10 s | la cabeza va a su pose en ~1 s, sin salto |
+
+   Las etiquetas 0-10 son las del P6.5, para que el informe las compare con
+   aquellas sesiones (grabadas con los pesos anteriores y sin la regla) con
+   las mismas cuentas.
 5. Los signos en el visor quedan comprobados en los datos, no a la vista del
    operador: si en alguna sesión futura el robot va al revés, se vuelve aquí.
 

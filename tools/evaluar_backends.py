@@ -70,7 +70,11 @@ def crear(spec: str, cfg=None):
     tipo, _, resto = spec.partition(":")
     if tipo == "combinado" and resto:
         from telmeow_teleop.emotion_backends import CombinadoBackend
-        return CombinadoBackend([crear(s, cfg) for s in resto.split("+")])
+        # 'cejas:U' no es un backend: es la regla de las cejas con umbral U.
+        partes = resto.split("+")
+        umbral = [float(s.partition(":")[2]) for s in partes if s.startswith("cejas:")]
+        return CombinadoBackend([crear(s, cfg) for s in partes if not s.startswith("cejas:")],
+                                umbral_cejas=umbral[0] if umbral else 0.0)
     ruta = Path(resto) if resto else None
     if ruta is not None and not ruta.is_absolute():
         ruta = PROJECT_ROOT / ruta
@@ -102,7 +106,15 @@ def episodios_de_calibracion(filas: list[dict], segundos: float = CALIBRACION_S
     Hace falta separarlas porque el operador puede volver a calibrar (tecla
     ``c``): el 2026-10-25 lo hizo a los 12 s, y juntar las dos daría otra cara
     neutra que la que usó el robot.
+
+    Con la columna ``inicio_calibracion`` (desde el 2026-11-03) no se deduce:
+    se lee. Es lo que hace falta cuando el operador pulsa ``c`` A MITAD de una
+    calibración: el clasificador tira las caras recogidas y empieza otra, y
+    las filas siguen todas ``calibrando``, sin nada que separe los dos tramos.
+    Sin la columna, ver ``reconstruir_episodios``.
     """
+    if filas and filas[0].get("inicio_calibracion") is not None:
+        return _episodios_marcados(filas)
     episodios: list[tuple[list[int], int]] = []
     actual: list[int] = []
     inicio = None
@@ -116,6 +128,80 @@ def episodios_de_calibracion(filas: list[dict], segundos: float = CALIBRACION_S
         if f["t"] - inicio >= segundos - 1e-4:
             episodios.append((actual, i))
             actual, inicio = [], None
+    return episodios
+
+
+def _episodios_marcados(filas: list[dict]) -> list[tuple[list[int], int]]:
+    """Las calibraciones según la columna ``inicio_calibracion``.
+
+    Cada una empieza en una fila marcada y termina en la última fila
+    ``calibrando`` antes de la primera cara que ya no calibra. Un inicio con
+    otra a medias la descarta: el clasificador tiró esas caras. Las filas sin
+    cara no cierran nada (la recogida sigue pendiente).
+    """
+    episodios: list[tuple[list[int], int]] = []
+    actual: list[int] | None = None
+    ultima = None
+    for i, f in enumerate(filas):
+        if not f["rostro"]:
+            continue
+        if f["calibrando"]:
+            if f.get("inicio_calibracion"):
+                actual = []
+            if actual is not None and not f["manos"]:
+                actual.append(i)
+            ultima = i
+        elif actual is not None:
+            if actual:
+                episodios.append((actual, ultima))
+            actual = None
+    return episodios
+
+
+def reconstruir_episodios(filas: list[dict], carpeta: Path, backend,
+                          segundos: float = CALIBRACION_S) -> list[tuple[list[int], int]]:
+    """Las calibraciones de una grabación SIN ``inicio_calibracion``, cuando el
+    operador pudo reiniciar alguna a mitad (P6.5, 2026-11-03).
+
+    Por cada tramo seguido de filas que calibran, prueba como inicio cada una
+    de sus filas y se queda con la que, calibrando ``backend`` con las caras
+    desde ella hasta el final del tramo, reproduce EXACTA la predicción de la
+    primera cara ya calibrada. Si varias lo hacen, la más cercana a
+    ``segundos`` antes del final, que es la regla del clasificador. Si
+    ninguna, lanza ``ValueError``: no hay forma honesta de saberlo.
+    """
+    tramos: list[list[int]] = []
+    actual: list[int] = []
+    for i, f in enumerate(filas):
+        if not f["rostro"]:
+            continue
+        if f["calibrando"]:
+            actual.append(i)
+        elif actual:
+            tramos.append(actual + [i])        # el último, la primera ya calibrada
+            actual = []
+    episodios = []
+    for tramo in tramos:
+        objetivo = filas[tramo[-1]]
+        filas_cal = tramo[:-1]
+        fin = filas_cal[-1]
+        candidatos = []
+        for k in filas_cal:
+            caras = [cara_de(filas[j], carpeta) for j in filas_cal
+                     if j >= k and not filas[j]["manos"]]
+            if not caras:
+                continue
+            backend.calibrar(caras)
+            d = backend.distribucion(cara_de(objetivo, carpeta))
+            if (d.etiqueta == objetivo["prediccion"] and objetivo["confianza_pred"] is not None
+                    and abs(float(d.confianza) - objetivo["confianza_pred"]) <= TOLERANCIA):
+                candidatos.append(k)
+        if not candidatos:
+            raise ValueError(
+                f"ningun inicio de la calibracion que acaba en la fila {fin} reproduce "
+                f"la fila {tramo[-1]}: no se puede saber con que caras se calibro")
+        k = min(candidatos, key=lambda c: abs((filas[fin]["t"] - filas[c]["t"]) - segundos))
+        episodios.append(([j for j in filas_cal if j >= k and not filas[j]["manos"]], fin))
     return episodios
 
 
@@ -196,7 +282,8 @@ class Evaluacion:
 def evaluar(filas: list[dict], carpeta: Path, backend, reloj=time.perf_counter,
             calibracion_s: float = CALIBRACION_S,
             histeresis: tuple[int, float] | None = None,
-            sin_apoyo: int | None = None) -> Evaluacion:
+            sin_apoyo: int | None = None,
+            episodios: list[tuple[list[int], int]] | None = None) -> Evaluacion:
     """Reclasifica cada cara con ``backend`` y rehace lo que habría hecho el robot.
 
     Sin cara, con la mano sobre la cara o con retorno a neutral, la fila se
@@ -206,6 +293,8 @@ def evaluar(filas: list[dict], carpeta: Path, backend, reloj=time.perf_counter,
     ``histeresis`` = ``(n_frames, min_confidence)`` rehace lo del robot con
     otros parámetros; por defecto, los de la grabación. ``sin_apoyo``, igual
     con los votos sin apoyo tras los que se pasa a neutral (0 lo desactiva).
+    ``episodios``: las calibraciones, si se conocen de otra forma
+    (``reconstruir_episodios``); por defecto, ``episodios_de_calibracion``.
     """
     nombre = nombre_de(backend)
     grabado = filas[0].get("backend") + (
@@ -217,7 +306,8 @@ def evaluar(filas: list[dict], carpeta: Path, backend, reloj=time.perf_counter,
     # posteriores se clasifican con la neutra que tenía el robot.
     fin_de_episodio: dict[int, list[int]] = {}
     if getattr(backend, "relativo", False):
-        episodios = episodios_de_calibracion(filas, calibracion_s)
+        if episodios is None:
+            episodios = episodios_de_calibracion(filas, calibracion_s)
         fin_de_episodio = {fin: caras for caras, fin in episodios}
         if episodios:
             tamanos = [len(caras) for caras, _ in episodios]

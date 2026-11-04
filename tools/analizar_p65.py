@@ -85,6 +85,11 @@ CAIDA_MAXIMA = 5.0
 #: Cambios de expresión por minuto que se admiten leyendo en voz alta.
 CAMBIOS_MAXIMOS = 1.0
 
+#: Los pesos con que se grabaron las sesiones del P6.5 (los del P6.4): con
+#: ellos se rehace lo que hizo el robot (el ancla) y se compara el candidato.
+#: Desde el 2026-11-03 el robot usa los reentrenados aquí
+#: (``emotion_blendshapes_facs_relativo_p65.json``), pero esto no cambia: es
+#: la referencia de esas grabaciones.
 PESOS_OPERACION = PROJECT_ROOT / "emotion_blendshapes_facs_relativo.json"
 
 
@@ -280,13 +285,30 @@ def _vectores(filas, carpeta, backend_bs) -> dict[int, np.ndarray]:
     return vectores
 
 
-def _evaluar(filas, carpeta, pesos: Path, cfg) -> tuple[dict[str, Tramo], object]:
+def _combinado(pesos: Path, cfg):
+    import evaluar_backends as eb
+
+    return eb.crear(f"combinado:onnx:{cfg.paths.emotion_onnx}+blendshapes:{pesos}", cfg)
+
+
+def episodios_de(filas, carpeta, cfg) -> list[tuple[list[int], int]]:
+    """Con qué caras se calibró cada vez: leído de ``inicio_calibracion`` o,
+    en las grabaciones sin esa columna —las del P6.5, en las que el operador
+    pulsó ``c`` con la calibración del arranque en curso—, reconstruido con el
+    combinado de operación como el único inicio que reproduce lo grabado."""
+    import evaluar_backends as eb
+
+    if filas and filas[0].get("inicio_calibracion") is not None:
+        return eb.episodios_de_calibracion(filas)
+    return eb.reconstruir_episodios(filas, carpeta, _combinado(PESOS_OPERACION, cfg))
+
+
+def _evaluar(filas, carpeta, pesos: Path, cfg, episodios) -> tuple[dict[str, Tramo], object]:
     """El combinado con ``pesos`` sobre una sesión, rehaciendo sus calibraciones
     donde ocurrieron (``evaluar_backends.evaluar``)."""
     import evaluar_backends as eb
 
-    spec = f"combinado:onnx:{cfg.paths.emotion_onnx}+blendshapes:{pesos}"
-    ev = eb.evaluar(filas, carpeta, eb.crear(spec, cfg))
+    ev = eb.evaluar(filas, carpeta, _combinado(pesos, cfg), episodios=episodios)
     return resumir(ev.filas), ev
 
 
@@ -331,7 +353,9 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--sin", type=Path, nargs="+", required=True)
     r = sub.add_parser("reentrenar", help="pesos nuevos, evaluados sobre otra sesion")
     r.add_argument("--entrenar", type=Path, nargs="+", required=True)
-    r.add_argument("--evaluar", type=Path, nargs="+", required=True)
+    r.add_argument("--evaluar", type=Path, nargs="*", default=[],
+                   help="sesiones que NO entrenan. Sin ninguna, solo entrena: es como se "
+                        "hacen los pesos finales, con todas, despues de validar")
     r.add_argument("--salida", type=Path, help="donde guardar los pesos candidatos")
     r.add_argument("--recortes", type=Path, help="carpeta de recortes, si hay una sola sesion")
     args = parser.parse_args(argv)
@@ -349,7 +373,6 @@ def main(argv: list[str] | None = None) -> int:
                   else "  => las gafas no pesan segun el criterio")
         return 0
 
-    import evaluar_backends as eb
     from entrenar_blendshapes import CACHE, sha256
     from telmeow_teleop.emotion_backends import BlendshapesBackend
 
@@ -366,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     for csv in args.entrenar:
         filas, carpeta = _cargar(csv, args.recortes)
         Xs, ys = muestras_de_sesion(filas, _vectores(filas, carpeta, base_bs),
-                                    eb.episodios_de_calibracion(filas))
+                                    episodios_de(filas, carpeta, cfg))
         X, y = np.vstack([X, Xs]), np.concatenate([y, ys])
         partes.append(f"{csv.name}: {len(ys)} caras")
     print("Entrenando con " + "; ".join(partes))
@@ -380,12 +403,17 @@ def main(argv: list[str] | None = None) -> int:
         if csv in args.entrenar:
             parser.error(f"{csv.name} esta en las dos listas: seria evaluar con lo entrenado")
         filas, carpeta = _cargar(csv, args.recortes)
-        base, ev_base = _evaluar(filas, carpeta, PESOS_OPERACION, cfg)
-        cand, _ = _evaluar(filas, carpeta, salida, cfg)
+        episodios = episodios_de(filas, carpeta, cfg)
+        base, ev_base = _evaluar(filas, carpeta, PESOS_OPERACION, cfg, episodios)
+        cand, _ = _evaluar(filas, carpeta, salida, cfg, episodios)
         print(f"\nEVALUACION sobre {csv.name}")
+        print("  calibraciones: " + ", ".join(
+            f"{len(caras)} caras hasta t={filas[fin]['t']:.2f} s" for caras, fin in episodios))
         if ev_base.coinciden is not None:
+            exacta = ev_base.coinciden == ev_base.comparables
             print(f"  ancla: el combinado de operacion reproduce lo grabado en "
-                  f"{ev_base.coinciden} de {ev_base.comparables} caras")
+                  f"{ev_base.coinciden} de {ev_base.comparables} caras"
+                  + ("" if exacta else "   <-- NO CUADRA: estas tablas no valen"))
         imprimir_tabla({"operacion": base, "reentrenado": cand})
         v = criterio_reentreno(base, cand)
         for motivo in v.motivos:

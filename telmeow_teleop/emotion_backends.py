@@ -144,6 +144,9 @@ class BlendshapesBackend(EmotionBackend):
         self._W = np.asarray(pesos["W"], dtype=np.float64)
         self._b = np.asarray(pesos["b"], dtype=np.float64)
         self.neutro: np.ndarray | None = None
+        #: Los rasgos de la última cara, ya relativos a la neutra si el modelo
+        #: lo es: los mira la regla de las cejas del combinado.
+        self.ultimo: np.ndarray | None = None
         self._landmarker = Landmarker(ruta_task)
 
     @property
@@ -183,10 +186,22 @@ class BlendshapesBackend(EmotionBackend):
     def distribucion(self, rostro_bgr: np.ndarray) -> Distribucion:
         v = self.vector(rostro_bgr)
         if v is None:
+            self.ultimo = None
             return Distribucion(None, 0.0, dict.fromkeys(EMOTION_LABELS, 0.0), "sin cara")
+        self.ultimo = v - self.neutro if self.relativo and self.neutro is not None else v
         p = dict(zip(self.clases, map(float, self.probabilidades(v))))
         etiqueta = max(p, key=p.get)
         return Distribucion(etiqueta, p[etiqueta], p, etiqueta)
+
+    def cejas(self) -> float | None:
+        """Cuánto subieron las cejas en la última cara (la mayor de
+        ``browOuterUp`` y ``browInnerUp``, relativa a la neutra), o ``None`` si
+        no se sabe: sin cara o sin esos rasgos en el modelo."""
+        if self.ultimo is None:
+            return None
+        valores = [self.ultimo[self.rasgos.index(k)] for k in ("browOuterUp", "browInnerUp")
+                   if k in self.rasgos]
+        return float(max(valores)) if valores else None
 
 
 class OnnxHSEmotionBackend(EmotionBackend):
@@ -248,11 +263,15 @@ class CombinadoBackend(EmotionBackend):
 
     nombre = "combinado"
 
-    def __init__(self, backends: list[EmotionBackend]) -> None:
+    def __init__(self, backends: list[EmotionBackend], *, umbral_cejas: float = 0.0) -> None:
         if len(backends) < 2:
             raise ValueError("un combinado necesita al menos dos backends")
         self.backends = list(backends)
+        self.umbral_cejas = float(umbral_cejas)
         self.modelo = "+".join(getattr(b, "modelo", "") or b.nombre for b in self.backends)
+        if self.umbral_cejas > 0.0:
+            # En la columna 'modelo' del CSV: con la regla, la predicción es otra.
+            self.modelo += f"+cejas{self.umbral_cejas:g}"
         self.relativo = any(getattr(b, "relativo", False) for b in self.backends)
 
     @property
@@ -270,13 +289,30 @@ class CombinadoBackend(EmotionBackend):
             return Distribucion(None, 0.0, dict.fromkeys(EMOTION_LABELS, 0.0), "sin cara")
         p = {e: sum(d.probabilidades[e] for d in validas) / len(validas) for e in EMOTION_LABELS}
         etiqueta = max(p, key=p.get)
-        return Distribucion(etiqueta, p[etiqueta], p, etiqueta)
+        nativa = etiqueta
+        if etiqueta == "sorprendido" and self._sin_cejas():
+            # Una sorpresa sin las cejas arriba es la boca abierta al hablar
+            # (P6.5, 2026-11-03): su probabilidad pasa a neutral.
+            p["neutral"] += p["sorprendido"]
+            p["sorprendido"] = 0.0
+            etiqueta, nativa = max(p, key=p.get), "sorprendido sin cejas"
+        return Distribucion(etiqueta, p[etiqueta], p, nativa)
+
+    def _sin_cejas(self) -> bool:
+        """Si la regla de las cejas está puesta y las cejas no subieron."""
+        if self.umbral_cejas <= 0.0:
+            return False
+        for b in self.backends:
+            cejas = b.cejas() if hasattr(b, "cejas") else None
+            if cejas is not None:
+                return cejas < self.umbral_cejas
+        return False
 
 
 def crear_combinado(ruta_onnx: Path, ruta_pesos: Path, ruta_task: Path,
-                    *, colapso: str = "cercana") -> CombinadoBackend:
+                    *, colapso: str = "cercana", umbral_cejas: float = 0.0) -> CombinadoBackend:
     """El de operación: ``mbf_va_mtl`` + blendshapes FACS relativos."""
     return CombinadoBackend([
         OnnxHSEmotionBackend(ruta_onnx, colapso=colapso),
         BlendshapesBackend(ruta_pesos, ruta_task),
-    ])
+    ], umbral_cejas=umbral_cejas)

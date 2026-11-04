@@ -1027,3 +1027,124 @@ def test_el_pipeline_con_el_hilo_de_verdad_graba_y_cierra(pipeline):
     assert {fila["emocion_hilo"] for fila in sesion} == {"1"}
     assert sum(1 for fila in sesion if fila["ms_emocion"]) >= 3
 
+
+
+# --------------------------------------------------------------------------
+# 13. La cabeza con la cara tapada (H58, decidido por el operador el 2026-11-03)
+# --------------------------------------------------------------------------
+
+
+def _guardar(guarda, desde, hasta, paso, pose, encima):
+    """Avanza la guarda de ``desde`` a ``hasta``; devuelve las salidas."""
+    salidas, t = [], desde
+    while t < hasta - 1e-9:
+        salidas.append((round(t, 3), guarda.paso(t, pose(t) if callable(pose) else pose, encima(t) if callable(encima) else encima)))
+        t += paso
+    return salidas
+
+
+def test_sin_manos_encima_publica_lo_medido():
+    g = principal.GuardaCabeza()
+    assert g.paso(0.0, (10.0, -5.0), False) == (10.0, -5.0)
+    assert g.paso(0.1, None, False) is None             # sin cara: se omite, como siempre
+    assert not g.tapada
+
+
+def test_tapada_se_queda_en_la_pose_de_antes_de_que_face_mesh_empezara_a_inventar():
+    """Las manos llegan a la cara un poco antes de que BlazePose las vea encima:
+    las últimas poses antes de detectarlas ya son inventadas. Se guarda la de
+    0.3 s antes."""
+    g = principal.GuardaCabeza()
+    _guardar(g, 0.0, 1.0, 0.05, (12.0, 3.0), False)       # quieto mirando así
+    _guardar(g, 1.0, 1.2, 0.05, (35.0, 40.0), False)      # empieza a inventar
+    salidas = _guardar(g, 1.2, 2.0, 0.05, (-20.0, 25.0), True)
+    assert g.tapada
+    assert {s for _t, s in salidas} == {(12.0, 3.0)}
+
+
+def test_tapada_dos_segundos_va_al_frente_con_paso_suave():
+    g = principal.GuardaCabeza()
+    _guardar(g, 0.0, 1.0, 0.05, (20.0, 10.0), False)
+    salidas = dict(_guardar(g, 1.0, 5.0, 0.05, (99.0, 99.0), True))
+    assert salidas[2.9] == (20.0, 10.0)                  # hasta los 2 s, quieta
+    assert salidas[3.5][0] == pytest.approx(10.0)        # a mitad de la rampa, la mitad
+    assert salidas[4.0] == pytest.approx((0.0, 0.0))     # al frente
+    pans = [s[0] for t, s in sorted(salidas.items()) if 3.0 <= t <= 4.0]
+    assert all(b <= a for a, b in zip(pans, pans[1:]))
+
+
+def test_al_destaparse_vuelve_a_la_pose_del_operador_en_un_segundo():
+    g = principal.GuardaCabeza()
+    _guardar(g, 0.0, 1.0, 0.05, (0.0, 0.0), False)
+    _guardar(g, 1.0, 2.0, 0.05, None, True)               # tapada 1 s
+    # Las manos se van en t = 2: siguen contando 0.5 s, y en 2.5 se destapa.
+    salidas = dict(_guardar(g, 2.0, 4.0, 0.05, (30.0, 0.0), False))
+    assert salidas[2.45] == (0.0, 0.0)                    # aún retenida
+    assert salidas[2.5] == (0.0, 0.0)                     # empieza la vuelta
+    assert salidas[3.0][0] == pytest.approx(15.0)         # a mitad, la mitad
+    assert salidas[3.55] == (30.0, 0.0)                   # ya con el operador
+
+
+def test_un_hueco_corto_de_las_manos_no_la_destapa():
+    g = principal.GuardaCabeza()
+    _guardar(g, 0.0, 1.0, 0.05, (5.0, 5.0), False)
+    encima = lambda t: not (1.5 <= t < 1.8)               # BlazePose las pierde 0.3 s
+    salidas = _guardar(g, 1.0, 2.5, 0.05, (60.0, 60.0), encima)
+    assert all(s == (5.0, 5.0) for _t, s in salidas)
+
+
+def test_tapada_desde_el_arranque_mira_al_frente():
+    g = principal.GuardaCabeza()
+    assert g.paso(0.0, (40.0, 40.0), True) == (0.0, 0.0)
+
+
+def test_la_caja_de_la_cara_es_la_de_la_malla(monkeypatch):
+    import telmeow_teleop.head_tracker as ht
+
+    caras = iter([_cara(1), None])
+
+    class Malla:
+        def __init__(self, **_kw):
+            pass
+
+        def process(self, rgb):
+            lms = next(caras)
+            return SimpleNamespace(multi_face_landmarks=None if lms is None
+                                   else [SimpleNamespace(landmark=lms)])
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ht.mp.solutions.face_mesh, "FaceMesh", Malla)
+    tracker = ht.HeadTracker()
+    tracker.process(np.zeros((ALTO, ANCHO, 3), dtype=np.uint8))
+    x, y, w, h = tracker.caja
+    xs = [lm.x * ANCHO for lm in _cara(1)]
+    ys = [lm.y * ALTO for lm in _cara(1)]
+    assert (x, y) == (int(min(xs)), int(min(ys)))
+    assert w == int(max(xs) - min(xs)) and h == int(max(ys) - min(ys))
+    tracker.process(np.zeros((ALTO, ANCHO, 3), dtype=np.uint8))
+    assert tracker.caja is None
+
+
+def test_en_el_pipeline_con_las_manos_en_la_cara_la_cabeza_no_sigue_a_face_mesh(pipeline, monkeypatch):
+    """De punta a punta: a partir del frame 4, las manos de BlazePose caen en
+    el centro de la caja de la cara. Lo publicado deja de seguir a la malla
+    (que sigue girando) y la sesión lo marca."""
+    import csv
+
+    llamadas = {"n": 0}
+
+    def manos(landmarks, ancho, alto):
+        llamadas["n"] += 1
+        return [(ancho * 0.5, alto * 0.45)] if llamadas["n"] > 4 else []
+
+    monkeypatch.setattr(principal, "manos_de_blazepose", manos)
+    ruta = pipeline.tmp / "sesion.csv"
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=14) == 0
+    pans = [m["pan"] for m in pipeline.publicados]
+    assert len(set(pans[5:])) == 1                       # quieta mientras está tapada
+    assert len(set(pans[:5])) > 1                         # antes seguía a la malla
+    with open(principal.rutas_de_grabacion(ruta)["sesion"], newline="", encoding="utf-8") as f:
+        marcas = [fila["cabeza_tapada"] for fila in csv.DictReader(f)]
+    assert marcas[:4] == ["0"] * 4 and set(marcas[5:]) == {"1"}

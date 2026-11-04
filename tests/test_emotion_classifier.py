@@ -1203,6 +1203,24 @@ def test_la_tecla_c_vuelve_a_tomar_la_neutra():
     assert backend.calibraciones == [3, 3]
 
 
+def test_el_inicio_de_cada_calibracion_queda_marcado():
+    """Arranque, tecla c a mitad (P6.5, 2026-11-03) y un intento fallido: cada
+    vez que la recogida empieza de cero, la fila lo dice."""
+    backend = _BackendRelativo([("feliz", 0.9)], fallar=1)
+    c = EmotionClassifier(backend, detector=lambda frame: (10, 20, 30, 40),
+                          frame_espejado=False, calibracion_s=0.4)
+    inicios = []
+    for i in range(14):
+        if i == 1:
+            c.calibrar_neutro()                          # c a mitad de la del arranque
+        c.process(FRAME, timestamp=0.2 * i)
+        inicios.append(c.inicio_calibracion)
+    # 0: arranque; 1: la c; 1-3 recogen y la ronda falla en 3; 4: vuelve a empezar;
+    # 4-6 calibran; luego ya no.
+    assert [i for i, x in enumerate(inicios) if x] == [0, 1, 4]
+    assert backend.calibraciones == [3]
+
+
 def test_un_backend_que_no_es_relativo_no_se_calibra():
     c = _clasificador([("feliz", 0.9)])
     assert not c.calibracion_pendiente and not c.calibrar_neutro()

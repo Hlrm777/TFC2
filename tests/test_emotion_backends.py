@@ -211,7 +211,7 @@ def test_el_combinado_de_operacion_de_punta_a_punta():
 
     cfg = AppConfig()
     backend = crear_backend("combinado", cfg)
-    assert backend.modelo == "mbf_va_mtl.onnx+emotion_blendshapes_facs_relativo.json"
+    assert backend.modelo == "mbf_va_mtl.onnx+emotion_blendshapes_facs_relativo_p65.json+cejas0.15"
     c = EmotionClassifier.desde_config(cfg, backend=backend)
     neutras = sorted(DATASET.glob("neutral_*.jpg"))[:20]
     felices = sorted(DATASET.glob("feliz_*.jpg"))[:10]
@@ -221,3 +221,91 @@ def test_el_combinado_de_operacion_de_punta_a_punta():
         t += 0.2
     assert c.calibraciones == 1 and not c.calibracion_pendiente
     assert c.emocion.etiqueta == "feliz"
+
+
+# --------------------------------------------------------------------------
+# La regla de las cejas (P6.5, 2026-11-03)
+# --------------------------------------------------------------------------
+
+
+class _ConCejas(_Fijo):
+    """Como los blendshapes: dice cuánto subieron las cejas en la última cara."""
+
+    def __init__(self, probabilidades, cejas):
+        super().__init__(probabilidades)
+        self._cejas = cejas
+
+    def cejas(self):
+        return self._cejas
+
+
+SORPRESA = {"sorprendido": 0.7, "neutral": 0.3}
+
+
+@pytest.mark.parametrize("cejas, esperada", [(0.02, "neutral"), (0.40, "sorprendido"), (None, "sorprendido")])
+def test_una_sorpresa_sin_cejas_pasa_a_neutral(cejas, esperada):
+    """La boca abierta al hablar no es sorpresa: sin las cejas arriba, la
+    probabilidad de sorprendido pasa a neutral. Sin dato de cejas (el Face
+    Landmarker no vio la cara), no se toca."""
+    combinado = bc.CombinadoBackend([_Fijo(SORPRESA), _ConCejas(SORPRESA, cejas)], umbral_cejas=0.15)
+    d = combinado.distribucion(_cara(100))
+    assert d.etiqueta == esperada
+    assert sum(d.probabilidades.values()) == pytest.approx(1.0)
+    if esperada == "neutral":
+        assert d.probabilidades["sorprendido"] == 0.0 and d.confianza == pytest.approx(1.0)
+        assert d.nativa == "sorprendido sin cejas"
+
+
+def test_sin_umbral_la_regla_no_existe():
+    combinado = bc.CombinadoBackend([_Fijo(SORPRESA), _ConCejas(SORPRESA, 0.0)])
+    assert combinado.distribucion(_cara(100)).etiqueta == "sorprendido"
+    assert "cejas" not in combinado.modelo
+
+
+def test_la_regla_solo_toca_la_sorpresa_y_queda_en_el_modelo():
+    feliz = {"feliz": 0.8, "neutral": 0.2}
+    combinado = bc.CombinadoBackend([_Fijo(feliz), _ConCejas(feliz, 0.0)], umbral_cejas=0.15)
+    assert combinado.distribucion(_cara(100)).etiqueta == "feliz"
+    assert combinado.modelo.endswith("+cejas0.15")
+
+
+def test_los_blendshapes_dicen_las_cejas_relativas_a_la_neutra(tmp_path, monkeypatch):
+    class Cejas:
+        def __init__(self, *_):
+            pass
+
+        def blendshapes(self, imagen):
+            nivel = float(imagen.mean()) / 255
+            return {"browOuterUpLeft": nivel, "browOuterUpRight": nivel,
+                    "browInnerUp": nivel / 2, "mouthSmileLeft": 0.1, "mouthSmileRight": 0.1}
+
+    monkeypatch.setattr(bc, "Landmarker", Cejas)
+    clases = list(EMOTION_LABELS)
+    ruta = tmp_path / "p.json"
+    ruta.write_text(json.dumps({
+        "rasgos": ["browInnerUp", "browOuterUp", "mouthSmile"], "clases": clases, "relativo": True,
+        "media": [0, 0, 0], "desviacion": [1, 1, 1], "W": np.zeros((3, 5)).tolist(), "b": [0] * 5,
+    }), encoding="utf-8")
+    b = bc.BlendshapesBackend(ruta, TASK_FALSO)
+    assert b.cejas() is None                          # aún no vio ninguna cara
+    b.calibrar([_cara(51)])                           # neutra: browOuterUp 0.2
+    b.distribucion(_cara(153))                        # browOuterUp 0.6
+    assert b.cejas() == pytest.approx(0.4)            # la mayor de las dos, relativa
+
+
+def test_la_regla_de_las_cejas_sale_de_la_configuracion(monkeypatch):
+    from telmeow_teleop.config import AppConfig
+    from telmeow_teleop import emotion_classifier as ec
+
+    assert AppConfig().emotion.umbral_cejas == 0.15         # encendida (2026-11-03)
+    assert AppConfig.from_env({"TELMEOW_EMOTION_UMBRAL_CEJAS": "0"}).emotion.umbral_cejas == 0.0
+    cfg = AppConfig.from_env({"TELMEOW_EMOTION_UMBRAL_CEJAS": "0.15"})
+    recibido = {}
+
+    def crear_combinado(*_a, umbral_cejas=0.0, **_k):
+        recibido["umbral"] = umbral_cejas
+        return "combinado"
+
+    monkeypatch.setattr(bc, "crear_combinado", crear_combinado)
+    assert ec.crear_backend("combinado", cfg) == "combinado"
+    assert recibido["umbral"] == 0.15

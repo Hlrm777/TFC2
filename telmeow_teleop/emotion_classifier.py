@@ -803,7 +803,8 @@ def crear_backend(nombre: str, cfg: AppConfig | None = None) -> EmotionBackend:
         from .emotion_backends import crear_combinado
 
         return crear_combinado(cfg.paths.emotion_onnx, cfg.paths.emotion_blendshapes,
-                               cfg.paths.face_landmarker, colapso=cfg.emotion.colapso)
+                               cfg.paths.face_landmarker, colapso=cfg.emotion.colapso,
+                               umbral_cejas=cfg.emotion.umbral_cejas)
     if nombre == "keras":
         return KerasBackend(cfg.paths.emotion_model)
     if nombre == "deepface":
@@ -974,6 +975,7 @@ class EmotionClassifier:
         self._neutras: list[np.ndarray] | None = None
         self._calibrar_hasta: float | None = None
         self._calibrando = False
+        self._inicio_calibracion = False
         self._calibraciones = 0
 
     @classmethod
@@ -1049,6 +1051,16 @@ class EmotionClassifier:
         votó). Va al CSV para que el evaluador offline calibre con las mismas
         caras."""
         return self._calibrando
+
+    @property
+    def inicio_calibracion(self) -> bool:
+        """Si con la cara de la última inferencia EMPEZÓ a recogerse una cara
+        neutra: la primera de una calibración, o la primera tras reiniciarla
+        (tecla ``c`` a mitad de una, o un intento sin cara para el Face
+        Landmarker). Va al CSV desde el 2026-11-03: en las sesiones del P6.5 el
+        operador pulsó ``c`` con la calibración del arranque en curso, y sin
+        esta marca la reproducción offline no podía saber qué caras se usaron."""
+        return self._inicio_calibracion
 
     @property
     def calibracion_pendiente(self) -> bool:
@@ -1156,6 +1168,7 @@ class EmotionClassifier:
             self._neutras = []
         if self._calibrar_hasta is None:
             self._calibrar_hasta = ahora + self.calibracion_s
+            self._inicio_calibracion = True
         self._neutras.append(rostro.copy())
         if ahora < self._calibrar_hasta - _HOLGURA_S:
             return
@@ -1205,6 +1218,7 @@ class EmotionClassifier:
         self._retorno = False
         self._manos = False
         self._calibrando = False
+        self._inicio_calibracion = False
         if rectangulo is None:
             self._ultima = None
             self._rostro = None
@@ -1279,7 +1293,11 @@ _COLUMNAS_CSV = (
        "calibrando",
        # Desde el 2026-10-26: votos sin apoyo tras los que se pasa a neutral,
        # para que la reproducción offline aplique la misma regla.
-       "sin_apoyo"]
+       "sin_apoyo",
+       # Desde el 2026-11-03: en esta fila empezó (o se reinició) la recogida
+       # de la cara neutra. Con ella la reproducción offline calibra con las
+       # mismas caras que en vivo aunque el operador pulse c a mitad.
+       "inicio_calibracion"]
 )
 #: Las mismas columnas, con nombre público para el pipeline integrado (P7).
 COLUMNAS_CSV = _COLUMNAS_CSV
@@ -1319,7 +1337,8 @@ def _fila_csv(t, etiqueta, clasificador: EmotionClassifier, brillo: float,
            int(clasificador.manos_en_cara), int(clasificador.retorno_en_ultima),
            f"{clasificador.retorno_neutral_s:g}",
            *(recorte if recorte else ("", "", "")),
-           int(clasificador.calibrando), clasificador.max_sin_apoyo]
+           int(clasificador.calibrando), clasificador.max_sin_apoyo,
+           int(clasificador.inicio_calibracion)]
     )
 
 

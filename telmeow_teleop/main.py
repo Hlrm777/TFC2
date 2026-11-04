@@ -62,9 +62,11 @@ from .camera import abrir_camara, brillo_medio, describir
 from .config import AppConfig, add_cli_args, from_args
 from .emotion_classifier import COLUMNAS_CSV as COLUMNAS_EMOCION
 from .emotion_classifier import (
+    MARGEN_MANOS,
     TECLAS_MANUAL,
     EmotionClassifier,
     crear_backend_o_reserva,
+    mano_sobre_rostro,
     registrar_inferencia,
 )
 from .head_tracker import COLUMNAS_CSV as COLUMNAS_CABEZA
@@ -74,6 +76,7 @@ from .limits import Side
 
 __all__ = [
     "PublicadorPeriodico",
+    "GuardaCabeza",
     "HiloEmocion",
     "EstadoEmocion",
     "paso_suave",
@@ -117,6 +120,10 @@ COLUMNAS_SESION = (
     # bucle (--emocion-en-bucle). En las filas con inferencia, 'ms_emocion' es
     # lo que costó inferir, en el hilo que lo hizo.
     "emocion_hilo",
+    # Desde el 2026-11-03 (H58): 1 si las manos tapaban la cara y la cabeza
+    # publicada era la guardada, no la medida. 'pan' y 'tilt' son SIEMPRE lo
+    # publicado; la medida está en el CSV de cabeza.
+    "cabeza_tapada",
 )
 
 TECLA_SALIR = ord("q")
@@ -266,6 +273,89 @@ def paso_suave(x: float) -> float:
     El mismo que usa el visor en las transiciones del saludo."""
     x = min(1.0, max(0.0, x))
     return x * x * (3.0 - 2.0 * x)
+
+
+def _mezcla(desde, hacia, peso: float) -> tuple[float, float]:
+    return tuple(a + (b - a) * peso for a, b in zip(desde, hacia))
+
+
+class GuardaCabeza:
+    """Lo que se publica de la cabeza cuando las manos tapan la cara (H58).
+
+    Face Mesh no avisa de una cara tapada: se inventa una detrás de las manos,
+    y su pose salta 6-13° por frame (verificación del 2026-11-03; sin tapar,
+    menos de 1°). Lo decidió el operador ese día. Con la cara tapada:
+
+    - la cabeza se queda en la última pose buena: la de ``antes_s`` antes de
+      que se vieran las manos encima, porque las primeras poses inventadas
+      llegan antes de que BlazePose las vea;
+    - si sigue tapada ``espera_s``, va al frente (0, 0) con un paso suave de
+      ``rampa_s``, como los brazos van al reposo y la emoción a neutral;
+    - al destaparse, vuelve a la pose del operador mezclando durante
+      ``rampa_s``, como al reanudar la pausa.
+
+    Las manos cuentan como encima hasta ``retencion_s`` después de la última
+    vez que se vieron: BlazePose las pierde a ratos (H52, H55).
+    """
+
+    def __init__(self, *, espera_s: float = 2.0, rampa_s: float = 1.0,
+                 retencion_s: float = 0.5, antes_s: float = 0.3) -> None:
+        self.espera_s = espera_s
+        self.rampa_s = rampa_s
+        self.retencion_s = retencion_s
+        self.antes_s = antes_s
+        self._historial: deque[tuple[float, tuple[float, float]]] = deque()
+        self._ultima_mano: float | None = None
+        self._tapada_desde: float | None = None
+        self._fija: tuple[float, float] = (0.0, 0.0)
+        self._salida: tuple[float, float] | None = None
+        self._volviendo: tuple[tuple[float, float], float] | None = None
+
+    @property
+    def tapada(self) -> bool:
+        return self._tapada_desde is not None
+
+    def _pose_antes(self, ahora: float) -> tuple[float, float] | None:
+        anteriores = [p for t, p in self._historial if t <= ahora - self.antes_s]
+        if anteriores:
+            return anteriores[-1]
+        return self._historial[0][1] if self._historial else None
+
+    def paso(self, ahora: float, pose: tuple[float, float] | None,
+             manos_encima: bool) -> tuple[float, float] | None:
+        """La pose que se publica: ``pose`` medida, o la guardada si está tapada.
+        ``None`` (sin cara y sin manos encima) se omite del JSON, como siempre."""
+        if manos_encima:
+            self._ultima_mano = ahora
+        tapada = self._ultima_mano is not None and ahora - self._ultima_mano <= self.retencion_s
+        if tapada:
+            if self._tapada_desde is None:
+                self._tapada_desde = ahora
+                self._fija = self._pose_antes(ahora) or self._salida or (0.0, 0.0)
+                self._volviendo = None
+            peso = paso_suave((ahora - self._tapada_desde - self.espera_s) / self.rampa_s)
+            self._salida = _mezcla(self._fija, (0.0, 0.0), peso)
+            return self._salida
+        if self._tapada_desde is not None:           # se acaba de destapar
+            self._tapada_desde = None
+            self._historial.clear()
+            if self._salida is not None:
+                self._volviendo = (self._salida, ahora)
+        if pose is None:
+            return None
+        self._historial.append((ahora, pose))
+        while self._historial and ahora - self._historial[0][0] > 1.0:
+            self._historial.popleft()
+        salida = pose
+        if self._volviendo is not None:
+            desde, inicio = self._volviendo
+            peso = paso_suave((ahora - inicio) / self.rampa_s)
+            if peso >= 1.0:
+                self._volviendo = None
+            else:
+                salida = _mezcla(desde, pose, peso)
+        self._salida = salida
+        return salida
 
 
 # --------------------------------------------------------------------------
@@ -527,6 +617,7 @@ class EstadoPanel:
     """
 
     cabeza: tuple[float, float] | None = None
+    cabeza_tapada: bool = False
     recorte_cabeza: object = None              # HeadClamp | None
     mando: ArmAngles | None = None
     recortes_brazos: dict = field(default_factory=dict)   # {Side: ArmClamp}
@@ -611,6 +702,11 @@ def dibujar_panel(lienzo: np.ndarray, x0: int, estado: EstadoPanel) -> None:
     if estado.cabeza is None:
         filas.append(("pan", None, None, False, "sin rostro"))
         filas.append(("tilt", None, None, False, ""))
+    elif estado.cabeza_tapada:
+        # Lo publicado es la pose guardada, no la medida: sin barras, que son
+        # de la medida, y con el aviso (H58).
+        filas.append(("pan", estado.cabeza[0], None, True, ""))
+        filas.append(("tilt", estado.cabeza[1], None, True, "CARA TAPADA"))
     else:
         filas.append(("pan", estado.cabeza[0], rc.pan if rc else None, False, ""))
         filas.append(("tilt", estado.cabeza[1], rc.tilt if rc else None, False, ""))
@@ -632,8 +728,8 @@ def dibujar_panel(lienzo: np.ndarray, x0: int, estado: EstadoPanel) -> None:
             _texto(lienzo, x, y, f"{nombre:<6}   --   {nota}", _GRIS)
         else:
             recortado = bool(eje and eje.clamped)
-            _texto(lienzo, x, y, f"{nombre:<6}{marca}{valor:+7.1f}",
-                   _ROJO if recortado else _BLANCO)
+            _texto(lienzo, x, y, f"{nombre:<6}{marca}{valor:+7.1f}" + (f"  {nota}" if nota else ""),
+                   _ROJO if recortado else (_AMBAR if nota else _BLANCO))
             if eje is not None:
                 dibujar_barra(lienzo, x + 140, y, eje.fraction, recortado)
         y += 18
@@ -922,6 +1018,8 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
     lienzo = None
     muestras_hz: deque[tuple[float, int]] = deque()
     ms_bucle_previo = None
+    guarda = GuardaCabeza()
+    ultima_caja = None
 
     while True:
         ok, frame = cap.read()
@@ -957,11 +1055,19 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
             ms_brazos = 1000.0 * (time.perf_counter() - inicio)
 
         t = ahora - t0
+        manos = (manos_de_blazepose(brazos.landmarks_imagen, ancho, alto)
+                 if brazos is not None else None)
+        # La cara tapada por las manos (H58): con la caja de la malla de este
+        # frame o, si Face Mesh no dio cara, la del último que la dio.
+        if cabeza.caja is not None:
+            ultima_caja = cabeza.caja
+        encima = bool(manos) and ultima_caja is not None and mano_sobre_rostro(
+            manos, ultima_caja, MARGEN_MANOS)
+        pose_publicada = guarda.paso(ahora, pose_cabeza, encima) if brazos is not None else pose_cabeza
+
         emocion = None
         ms_emocion = None
         if hilo is not None:
-            manos = (manos_de_blazepose(brazos.landmarks_imagen, ancho, alto)
-                     if brazos is not None else None)
             # El BGR volteado y SIN dibujar (punto 14): es el convenio del
             # entrenamiento, y el recorte que se graba tiene que ser lo que vio.
             hilo.entregar(frame, ahora, t, etiqueta, manos)
@@ -973,7 +1079,7 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
                     calibraciones_vistas = emocion.calibraciones
                     print("cara neutra calibrada")
 
-        pan, tilt = pose_cabeza if pose_cabeza is not None else (None, None)
+        pan, tilt = pose_publicada if pose_publicada is not None else (None, None)
         campos = {"pan": pan, "tilt": tilt, "t": t_captura_ms}
         if mando is not None:
             campos.update(armL=mando.armL, armLtw=mando.armLtw,
@@ -1005,7 +1111,8 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
             aviso = ""
         hz = _hz(muestras_hz, ahora, publicador.message_count)
         estado = EstadoPanel(
-            cabeza=pose_cabeza,
+            cabeza=pose_publicada,
+            cabeza_tapada=guarda.tapada,
             recorte_cabeza=cabeza.last_clamp,
             mando=mando,
             recortes_brazos=brazos.last_clamp if brazos is not None else {},
@@ -1060,6 +1167,7 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
                 publicador.failed_count, f"{hz:.1f}",
                 f"{brillo:.1f}", ancho, alto,
                 int(hilo.en_hilo) if hilo is not None else "",
+                int(guarda.tapada),
             ])
         gesto_registrado = ""
 

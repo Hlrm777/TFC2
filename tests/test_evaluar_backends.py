@@ -265,3 +265,51 @@ def test_el_ancla_con_una_segunda_calibracion_a_mitad_de_sesion(tmp_path):
     assert [n["emocion"] for n in ev.filas] == [f["emocion"] for f in filas]
     # Y el analizador reproduce la grabación, con la ventana vaciada al calibrar.
     assert eb.are.comparar_con_grabado(filas).exacta
+
+
+def test_la_c_a_mitad_de_la_calibracion_del_arranque(tmp_path):
+    """Las sesiones del P6.5 (2026-11-03): el operador pulsó c con la
+    calibración del arranque en curso. El clasificador tira las caras recogidas
+    y empieza otra, y en el CSV todas las filas siguen 'calibrando': sin la
+    columna inicio_calibracion, la regla de los 3 s calibra con las caras
+    equivocadas y el ancla no cuadra (en G2, 148 de 1171 caras)."""
+    pasos = [(0, 90 + i, False) for i in range(30)] + list(PASOS)
+    csv_ruta, carpeta = _grabar_sesion(tmp_path, _PorBrilloRelativo(), pasos,
+                                       recalibrar_en=(7,))
+    filas = eb.cargar_sesion(csv_ruta, carpeta)
+    assert [i for i, f in enumerate(filas) if f["inicio_calibracion"]] == [0, 7]
+    marcados = eb.episodios_de_calibracion(filas)
+    assert [(caras[0], len(caras), fin) for caras, fin in marcados] == [(7, 16, 22)]
+    ev = eb.evaluar(filas, carpeta, _PorBrilloRelativo())
+    assert ev.coinciden == ev.comparables > 30
+
+    # Una grabación de antes de la columna: lo mismo sin ella.
+    for f in filas:
+        f["inicio_calibracion"] = None
+    malo = eb.evaluar(filas, carpeta, _PorBrilloRelativo())
+    assert malo.coinciden < malo.comparables          # la regla de 3 s se equivoca
+    reconstruidos = eb.reconstruir_episodios(filas, carpeta, _PorBrilloRelativo())
+    assert reconstruidos == marcados
+    bueno = eb.evaluar(filas, carpeta, _PorBrilloRelativo(), episodios=reconstruidos)
+    assert bueno.coinciden == bueno.comparables
+
+
+def test_reconstruir_sin_ningun_inicio_que_cuadre_es_un_error(tmp_path):
+    pasos = [(0, 90 + i, False) for i in range(30)] + list(PASOS)
+    csv_ruta, carpeta = _grabar_sesion(tmp_path, _PorBrilloRelativo(), pasos)
+    filas = eb.cargar_sesion(csv_ruta, carpeta)
+    primera = next(i for i, f in enumerate(filas) if f["rostro"] and not f["calibrando"])
+    filas[primera]["confianza_pred"] += 0.01         # lo grabado ya no se puede reproducir
+    with pytest.raises(ValueError, match="ningun inicio"):
+        eb.reconstruir_episodios(filas, carpeta, _PorBrilloRelativo())
+
+
+def test_una_grabacion_sin_la_columna_la_lee_como_desconocida(tmp_path):
+    csv_ruta, carpeta = _grabar_sesion(tmp_path, _PorBrillo(), PASOS[:5])
+    texto = csv_ruta.read_text(encoding="utf-8").splitlines()
+    cabecera = texto[0].split(",")
+    i = cabecera.index("inicio_calibracion")
+    sin = [",".join(c for k, c in enumerate(linea.split(",")) if k != i) for linea in texto]
+    csv_ruta.write_text("\n".join(sin) + "\n", encoding="utf-8")
+    filas = eb.cargar_sesion(csv_ruta, carpeta)
+    assert all(f["inicio_calibracion"] is None for f in filas)

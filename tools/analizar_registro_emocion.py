@@ -170,6 +170,10 @@ def cargar(ruta: Path) -> list[dict]:
         # 'calibrando' llegó el 2026-10-25: esa cara calibró la neutra de un
         # backend relativo y no votó.
         fila["calibrando"] = int(fila.get("calibrando") or 0)
+        # 'inicio_calibracion' llegó el 2026-11-03; sin la columna, None (no
+        # se sabe), que no es lo mismo que 0 (se sabe que no empezó ahí).
+        valor = fila.get("inicio_calibracion")
+        fila["inicio_calibracion"] = None if valor in (None, "") else int(valor)
         # 'sin_apoyo' llegó el 2026-10-26; antes la regla no existía (0).
         fila["sin_apoyo"] = int(fila.get("sin_apoyo") or 0)
     return filas

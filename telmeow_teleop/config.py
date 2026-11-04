@@ -708,6 +708,13 @@ class EmotionConfig:
     barbilla, en fotos cuya cara (~300 px) el Haar no encontró. En operación la
     cara llega al detector con ~120 px, el doble del mínimo. El legacy no lo
     usaba; 0 lo desactiva y reproduce el detector original.
+
+    ``umbral_cejas``: con el combinado, una «sorpresa» cuyas cejas no subieron
+    al menos esto respecto a la cara neutra (la mayor de ``browOuterUp`` y
+    ``browInnerUp``) pasa a neutral: es la boca abierta al hablar, no una
+    sorpresa (P6.5, 2026-11-03). 0 la desactiva. 0.15, elegido con las
+    sesiones G1 y S1 y comprobado con G2 y S2, y encendido por decisión del
+    operador el 2026-11-03.
     """
 
     backend: str = "combinado"
@@ -719,6 +726,7 @@ class EmotionConfig:
     retorno_neutral_s: float = 2.0
     calibracion_s: float = 3.0
     neutral_sin_apoyo_s: float = 2.0
+    umbral_cejas: float = 0.15
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "EmotionConfig":
@@ -741,6 +749,7 @@ class EmotionConfig:
             calibracion_s=_env_float(env, "EMOTION_CALIBRACION_S", cls.calibracion_s),
             neutral_sin_apoyo_s=_env_float(
                 env, "EMOTION_NEUTRAL_SIN_APOYO_S", cls.neutral_sin_apoyo_s),
+            umbral_cejas=_env_float(env, "EMOTION_UMBRAL_CEJAS", cls.umbral_cejas),
         )
 
 
@@ -780,7 +789,10 @@ class PathConfig:
     face_cascade: Path | None = None
     #: El backend combinado (P6.4): el ONNX de HSEmotion y el Face Landmarker,
     #: descargados a modelos_externos/ (tools/descargar_modelos.py), y los
-    #: pesos de la regresión de los blendshapes, versionados en la raíz.
+    #: pesos de la regresión de los blendshapes, versionados en la raíz. Desde
+    #: el 2026-11-03, los reentrenados en el P6.5 con el dataset propio y las
+    #: cuatro sesiones del operador (tristeza con ceño: 32-38 % -> 61-72 % en
+    #: la validación cruzada); los del P6.4 siguen en el repositorio.
     emotion_onnx: Path = field(
         default_factory=lambda: PROJECT_ROOT / "modelos_externos" / "mbf_va_mtl.onnx"
     )
@@ -788,7 +800,7 @@ class PathConfig:
         default_factory=lambda: PROJECT_ROOT / "modelos_externos" / "face_landmarker.task"
     )
     emotion_blendshapes: Path = field(
-        default_factory=lambda: PROJECT_ROOT / "emotion_blendshapes_facs_relativo.json"
+        default_factory=lambda: PROJECT_ROOT / "emotion_blendshapes_facs_relativo_p65.json"
     )
 
     def __post_init__(self) -> None:

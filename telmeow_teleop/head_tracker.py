@@ -376,6 +376,7 @@ class HeadTracker:
         self._reference_cloud: np.ndarray | None = None
         self._last_cloud: np.ndarray | None = None
         self._last_points_2d: np.ndarray | None = None
+        self._caja: tuple[int, int, int, int] | None = None
 
     @classmethod
     def desde_config(cls, cfg: AppConfig) -> "HeadTracker":
@@ -409,6 +410,17 @@ class HeadTracker:
     def raw_angles(self) -> tuple[float, float] | None:
         """Ángulos crudos del estimador, antes de ganancia y filtro."""
         return self._raw
+
+    @property
+    def caja(self) -> tuple[int, int, int, int] | None:
+        """``(x, y, w, h)`` en píxeles que abarca la malla de la cara en el
+        último frame, o ``None`` si no hubo cara.
+
+        La usa el pipeline para saber si las manos tapan la cara (H58): con la
+        cara tapada, Face Mesh no avisa, sino que se inventa una cara detrás de
+        las manos, y la pose que sale de ella no es la del operador.
+        """
+        return self._caja
 
     @property
     def face_scale(self) -> float | None:
@@ -547,9 +559,14 @@ class HeadTracker:
         resultado = self._face_mesh.process(frame_rgb)
         if not resultado.multi_face_landmarks:
             self._frames_sin_rostro += 1
+            self._caja = None
             return None
 
         landmarks = resultado.multi_face_landmarks[0].landmark
+        xs = [lm.x * width for lm in landmarks]
+        ys = [lm.y * height for lm in landmarks]
+        self._caja = (int(min(xs)), int(min(ys)),
+                      int(max(xs) - min(xs)), int(max(ys) - min(ys)))
         self._last_points_2d = np.array(
             [(landmarks[i].x * width, landmarks[i].y * height) for i in LANDMARK_IDS],
             dtype=np.float64,

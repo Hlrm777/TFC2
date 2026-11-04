@@ -131,14 +131,14 @@ cambia respecto al plan original.
 | **P3** — Filtros temporales | ✅ **hecho** | `fc7a6ec` |
 | **P4** — Head tracker | ✅ **hecho y calibrado** · P4.1 a P4.5 cerrados | `b3813a6`, `47ee616`, `784d144` |
 | **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
-| **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral | `1e3b6c1` |
+| **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral · **2026-11-03 (P6.5)**: las gafas no pesan; los blendshapes, reentrenados con el dataset y cuatro sesiones del operador (tristeza con ceño 32-38 % → 61-72 % en validación cruzada), y la regla «sin cejas arriba no es sorpresa» encendida, por decisión del operador | `1e3b6c1` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | 🟡 **código hecho el 2026-10-26, sesión con el operador el 2026-11-02** · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · **falta**: verlo con el operador y el P6.5 (tristeza, enojo y gafas) | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50` |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1272 pruebas en verde** (desde el 2026-11-03: 1257 + 15 del análisis del P6.5; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1291 pruebas en verde** (desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza—; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -217,7 +217,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── train_fer2013.py      ✅ P8: FER-2013 verificado, partición oficial,
 │   │                            entrenamiento determinista, --evaluar
 │   └── eval_emotion.py       ⬜ P9
-├── tests/                    ✅ 1272 pruebas
+├── tests/                    ✅ 1291 pruebas
 ├── mosquitto.conf            ✅ los dos listeners
 ├── emotion_model.meta.json   ✅ orden de clases del modelo propio (el .keras no va en git)
 ├── emotion_model_fer2013.meta.json, .historial.csv   ✅ el de FER-2013 (P8), y el
@@ -2625,6 +2625,80 @@ su confianza, latencia y brillo.
    python tools/analizar_p65.py reentrenar --entrenar p65_g1_emocion.csv p65_s1_emocion.csv --evaluar p65_g2_emocion.csv p65_s2_emocion.csv
    ```
 
+   **Lo medido (grabado el 2026-11-03, en git; recortes fuera).** Las cuatro
+   sesiones, completas. De la G1 hubo una primera toma con la lectura dentro
+   de la etiqueta 9 (69 s): quedó apartada como `p65_g1_anterior` y **no
+   cuenta**.
+
+   ⚠️ **Antes de nada, un fallo del instrumento (H59).** El operador pulsó `c`
+   con la calibración del arranque en curso, en las cuatro: el clasificador
+   tiró las caras recogidas y empezó otra, y en el CSV todas las filas seguían
+   «calibrando». La regla de 3 s del evaluador calibró entonces con caras
+   equivocadas y **el ancla no cuadraba: 148 de 1171 caras en G2, 70 de 929
+   en S2**; las primeras tablas del reentrenamiento eran falsas y se tiraron.
+   El reinicio se reconstruyó como el único punto que reproduce EXACTA la
+   primera predicción tras calibrar (S2 a 2.35 s, G1 a 3.96, S1 a 7.14, G2 a
+   3.09; cada calibración acaba 3 s después de su reinicio, la regla del
+   clasificador). Con él, **1171 de 1171 y 929 de 929**. Desde ahora el CSV
+   trae `inicio_calibracion` y no hay que deducirlo.
+
+   **Gafas: no pesan.** Sin gafas, tristeza y enojo suben **+2.4 puntos** de
+   media (criterio: más de 10). Feliz y sorprendido suben más (+9 y +18),
+   pero varían mucho entre sesiones de la misma condición (feliz 57 % en G1 y
+   89 % en G2).
+
+   | Tramo (robot) | con gafas | sin gafas |
+   |---|---|---|
+   | triste sin ceño | 39 % | 38 % |
+   | triste con ceño | 16 % | 21 % |
+   | enojado | 90 % | 93 % |
+   | leyendo, cambios/min | 9.2 | 8.5 |
+
+   **Reentrenar: mejora todo lo que pedía, y no pasa el criterio de la
+   lectura.** Entrenado con el dataset y G1 + S1, evaluado sobre G2 y S2
+   (ancla exacta en las dos):
+
+   | Tramo (robot) | G2: operación → reentrenado | S2: operación → reentrenado |
+   |---|---|---|
+   | triste con ceño | 32 → **61 %** | 38 → **72 %** |
+   | triste sin ceño | 64 → 84 % | 36 → 61 % |
+   | enojado | 87 → 89 % | 88 → 88 % |
+   | feliz | 89 → 88 % | 68 → 87 % |
+   | leyendo, cambios/min | 3.8 → 2.6 | 14.5 → 11.3 |
+
+   El criterio pedía ≤ 1 cambio por minuto leyendo, y lo incumple también el
+   modelo de operación en estas sesiones (en la del P7 dio 0): el umbral se
+   fijó suponiendo una lectura sin falsas alarmas, que aquí no hubo.
+   **Decisión del operador (2026-11-03): adoptarlo**, con pesos entrenados
+   con el dataset y las cuatro sesiones (`emotion_blendshapes_facs_relativo_p65.json`,
+   4272 caras suyas), que es lo habitual tras validar; las cifras que se
+   citan son las de la validación cruzada, y se declara el criterio
+   incumplido y por qué.
+
+   **La sorpresa y la boca abierta** (lo notó el operador). Las falsas alarmas
+   leyendo son sobre todo «sorprendido» (14 % del tramo en G1, 10 % en S2). En
+   los blendshapes relativos a su neutra, la separación es clara:
+
+   | | `browOuterUp` | `jawOpen` |
+   |---|---|---|
+   | sorpresa posada (etiqueta 9) | +0.28 a +0.54 | +0.04 a +0.07 |
+   | leyendo, leída como sorpresa | +0.02 a +0.03 | +0.11 a +0.37 |
+
+   Regla: si el combinado dice sorprendido y las cejas (la mayor de
+   `browOuterUp` y `browInnerUp`) no suben 0.15, su probabilidad pasa a
+   neutral. El 0.15 se eligió con G1 y S1 (conserva el 78-80 % de las caras de
+   sorpresa y quita todas las falsas) y se comprobó con G2 y S2 (75-98 % y
+   0-10 %). En el robot aporta poco: leyendo en S2, neutral de 83 a 92 %; en
+   G2, igual; y cuesta sorpresa verdadera (−8 puntos en G2 y en la sesión de
+   control `p7_emocion`), porque las falsas alarmas que quedan al leer son
+   también de feliz y de enojo. **Decisión del operador (2026-11-03):
+   encenderla**, con 0.15 (`EmotionConfig.umbral_cejas`,
+   `TELMEOW_EMOTION_UMBRAL_CEJAS`; 0 la apaga). La columna `modelo` del CSV lo
+   dice (`+cejas0.15`).
+
+   **Falta**: verlo en vivo, con los pesos nuevos y la regla, en la próxima
+   sesión corta.
+
 ### Enunciado original
 
 ```
@@ -2992,10 +3066,48 @@ actual: pide una transición suave.
    Después: `python tools/analizar_sesion.py p7_verificacion.csv --comparar
    p7_sin_emocion.csv --etiqueta 3 --etiqueta-sin 1` y
    `python tools/analizar_registro_emocion.py p7_verificacion_emocion.csv`.
-2. **P6.5 — tristeza, enojo y gafas** (ver el P6).
-3. **Medir la latencia de la cámara con luz de operación** (con la herramienta
+
+   **Hecha el 2026-11-03** (`p7_verificacion*.csv`). Sin ESPACIO: todo quedó
+   en la etiqueta 0, y los tramos se reconstruyeron con los datos (pausa de 30
+   a 45 s; cara tapada de 61 a 90 s; lectura de 98 a 130 s).
+   - **Cara tapada → neutral**: feliz, tapada a 61.2 s, neutral a 63.3 s;
+     y otra vez feliz, tapada a 84.0 s, neutral a 86.0 s: **2.0-2.1 s** (H56).
+   - **La emoción en su hilo**: en las sesiones del P6.5 los frames con
+     inferencia duran lo mismo que los demás (**33-35 ms frente a 33**; con
+     la emoción en el bucle eran 92 frente a 45), con un 1-3 % de frames
+     perdidos y **26 fps** de media (la mediana, 27-28) y 19.9 Hz publicados.
+     La comparación con `p7_sin_emocion` no vale: aquel día la cámara iba a
+     15 fps por la luz.
+   - **La pausa suave** la vio el operador («todo me parece chévere»); no se
+     mide desde los datos, porque `sesion.csv` guarda la pose medida y no la
+     mezclada que sale.
+   - En `p7_verificacion`, la única con el visor abierto, el bucle tardó 45 ms
+     y no 33: probablemente el navegador dibujando el robot en 3D le quita
+     CPU. Sin medir; anotado.
+   - **Lo que vio el operador entre los dedos (H58)**: con la cara tapada, la
+     cabeza del robot «como si me hubiera dado epilepsia», o quieta mirando
+     arriba a la izquierda mientras él miraba al frente. Medido: con la cara
+     tapada, Face Mesh se inventa una cara detrás de las manos y su pose salta
+     **6-13° por frame** (sin tapar, menos de 1°), con el pan entre −35 y +28°
+     y el cabeceo hasta +42°; cuando la pierde, el robot se queda con la
+     última pose inventada. Las manos de BlazePose caen sobre la caja de la
+     cara en el **77-96 % de los frames tapados y en el 0 % de los
+     destapados**. **Decisión del operador (2026-11-03)**: con las manos
+     encima, la cabeza se queda en la última pose buena (la de 0.3 s antes de
+     detectarlas) y, a los 2 s, va al frente con un paso suave; al destaparse,
+     vuelve a la del operador en 1 s. Hecho (`GuardaCabeza`; la columna
+     `cabeza_tapada` de `sesion.csv`, y `pan`/`tilt` son ya lo publicado).
+     Simulado sobre la grabación, con lo que quedó en los CSV: saltos de 6.6
+     a **0.5° por frame** (p95 de 28.8 a 2.4°). Con `--no-arms` no hay manos,
+     y no hay guarda.
+
+2. ~~**P6.5 — tristeza, enojo y gafas**~~ — hecho (ver el P6): gafas sin peso,
+   pesos reentrenados adoptados y regla de las cejas encendida.
+3. **Una sesión corta de verificación** con lo nuevo: los pesos del P6.5, la
+   regla de las cejas y la cabeza con la cara tapada (en el visor).
+4. **Medir la latencia de la cámara con luz de operación** (con la herramienta
    ya corregida), para saber la latencia total en el puesto real.
-4. Los signos en el visor quedan comprobados en los datos, no a la vista del
+5. Los signos en el visor quedan comprobados en los datos, no a la vista del
    operador: si en alguna sesión futura el robot va al revés, se vuelve aquí.
 
 ### Enunciado original
@@ -5746,6 +5858,33 @@ operador no hace, y la regresión de los blendshapes se entrenó con su
 tristeza de puchero, sin cejas (P6.4). ⚠️ Verificar la referencia FACS antes de
 citarla.
 
+## 7.22 Las sesiones del P6.5 (H58, H59)
+
+**H58 — Con la cara tapada, Face Mesh se inventa la pose de la cabeza.** En
+`p7_verificacion` (2026-11-03), con las manos sobre la cara (61-90 s), la
+malla siguió dando una cara en buena parte de los frames, y la pose que sale
+de ella salta 6-13° por frame —con la cara a la vista, menos de 1°—, con el
+pan entre −35 y +28° y el cabeceo hasta +42°. Cuando la pierde, el robot
+conserva la última pose inventada: lo que el operador vio como la cabeza
+«mirando un poco hacia la izquierda, hacia arriba» mientras él miraba al
+frente. Ya se sabía que la malla «completa» una cara tapada en vez de avisar
+(§7.19); esto es su efecto en el robot. Detectable con las manos de BlazePose
+sobre la caja de la cara: 77-96 % de los frames tapados, 0 % de los
+destapados. Resuelto con `GuardaCabeza` (P7).
+
+**H59 — La regla de 3 s del evaluador no ve una calibración reiniciada a
+mitad.** En las cuatro sesiones del P6.5 el operador pulsó `c` con la
+calibración del arranque en curso. El clasificador tiró las caras y empezó
+otra, pero en el CSV todas las filas seguían `calibrando`, y el evaluador,
+que las separa con la regla del clasificador (3 s desde la primera), calibró
+con caras que el robot había tirado. El ancla lo delató: 148 de 1171 caras en
+G2 y 70 de 929 en S2. Se reconstruyó cada reinicio como el único que
+reproduce exacta la primera predicción tras calibrar (y cada uno cae justo 3
+s antes del final, como manda la regla): 1171 de 1171 y 929 de 929. Desde el
+2026-11-03 el CSV trae `inicio_calibracion` y el evaluador lo lee. Es otro
+caso de instrumento que falla sin error, y otro que delató el ancla: sin
+ella, las tablas del reentrenamiento de esa tarde se habrían citado.
+
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
@@ -5803,7 +5942,9 @@ citarla.
 | **H54** | **Los demos publicaban a 15 Hz, no a 20**: el publisher descarta lo que llega a menos de 45 ms del anterior y a 30 fps pasa un frame sí y otro no. El pipeline publica desde un hilo con reloj propio | §0.4, P7, Parte 6, §7.20 |
 | **H55** | **BlazePose pone fuera del cuadro las manos pegadas a las orejas** (y ≈ 590 px de 480): el brazo del robot se queda en reposo y la regla de las manos actúa el 32 %. Con el H52, ninguno de los dos detectores ve una mano plana contra la cabeza | P7, §7.21 |
 | **H56** | **Con la cara tapada, la expresión se congela**: el Haar sigue viendo una cara, las manos impiden votar y con eso no corre ninguna regla de retorno a neutral (feliz 11 s) | P7, §7.21 |
-| **H57** | **La tristeza con el ceño fruncido se lee como enojo** (triste 0.68 con puchero, enojado 0.72 con puchero y ceño) | P7, §7.21 |
+| **H57** | **La tristeza con el ceño fruncido se lee como enojo** (triste 0.68 con puchero, enojado 0.72 con puchero y ceño) | P7, §7.21 · reentrenado en el P6.5: con ceño 32-38 % → 61-72 % |
+| **H58** | **Con la cara tapada, Face Mesh se inventa la pose de la cabeza** (saltos de 6-13° por frame): `GuardaCabeza` la retiene y la lleva al frente | P7, §7.22 |
+| **H59** | **La regla de 3 s no ve una calibración reiniciada a mitad** (tecla `c`): el ancla cayó a 148 de 1171; reconstruida, 1171 de 1171. El CSV trae ahora `inicio_calibracion` | P6.5, §7.22 |
 | **H51** | **El modelo propio no reconoce la tristeza, ni con buena luz**: en la grabación del 2026-10-24 acierta 4 de 5, pero con la tristeza el robot pone neutral el 88 % y el modelo crudo nunca dice triste. Los modelos abiertos que podrían mejorarlo, y los descartados, en §7.19 | P6.1, P6.4, §7.19 |
 | **H50** | **Las etiquetas del operador no bastan para verificar el orden de clases de un modelo que confunde sus caras**: con el de FER-2013, de 120 permutaciones, una equivocada cuadró mejor que la buena con 183 caras. Fijan `feliz` y descartan las rotaciones; el resto lo atan las cifras canónicas | P8, §7.18 |
 | **H37** | **La simetría aproximaba la zona extendida, pero no la medía**: el reflejo `(a, f) ≡ (−a, f ± 180)` falló por un paso de 5° en 6-9 de 18 filas, y en el límite usado prometía 5° de más. Barrida con los detectores del visor (tras reproducir 37/37 filas de agosto); manda lo medido. Unión y motor: 0 choques. El cable, sin CAD, pasa a supuesto declarado | P5.3, §0.5, §3.3.11 |

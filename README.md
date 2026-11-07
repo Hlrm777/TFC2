@@ -376,6 +376,7 @@ Nada se pisa: lo que ya existiera se conserva con el sufijo `_anterior`.
 ```bash
 .venv/Scripts/python.exe tools/sesion_verificacion.py
 .venv/Scripts/python.exe tools/sesion_verificacion.py --gestos   # la cabeza y la mano a la cara, 3 min
+.venv/Scripts/python.exe tools/sesion_verificacion.py --ajustes  # el P7.6: enojo, mejillas, codos y luz
 ```
 
 Comprueba el broker (y avisa si es el servicio de Mosquitto sin WebSocket),

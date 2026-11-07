@@ -1,0 +1,30 @@
+INFORME DE GESTOS DE p75
+============================================================
+
+Cabeza publicada, salto mediano entre frames:
+   0 quieto: 0.000 grados/frame, p95 2.28 (criterio <= 0.2; en p7_final 1.02) OK
+   1 hablando y sonriendo: 0.000 grados/frame, p95 0.99 (criterio <= 0.8; en p7_final 1.56) OK
+   2 girando: pan -29..+48, tilt -39..+29 grados
+
+Temblor crudo de la Face Mesh, quieto (H60): pipeline 0.79, demo solo 0.91, sesion del P4 0.36
+  NO es el pipeline: el demo solo tiembla igual, asi que cambio algo desde septiembre
+
+Mano a la cara, % de la etiqueta con el brazo en la pose (L / R):
+   0   0.0 /   0.0  (esperado ninguno) OK  Cara relajada mirando la pantalla, quieto, m
+   1   0.0 /   0.0  (esperado ninguno) OK  Sin girar la cabeza: habla en voz alta y son
+   2   0.0 /   0.0  (esperado ninguno) OK  Gira despacio: a tu izquierda, centro, a tu 
+   3   0.0 /  80.3  (esperado R, >= 60 %) OK  Mano DERECHA en tu mejilla derecha, codo aba
+   4   0.0 /  32.7  Baja la mano
+   5  83.1 /   0.0  (esperado L, >= 60 %) OK  Mano IZQUIERDA en tu mejilla izquierda, codo
+   6  25.5 /   0.0  Baja la mano
+   7  87.0 /  87.0  (esperado LR, >= 60 %) OK  «El grito»: las dos manos en las mejillas, c
+   8 100.0 / 100.0  Baja las manos
+   9  69.9 /  76.5  (esperado LR, >= 60 %) OK  Tápate la cara con las dos manos, quieto
+  10   4.3 /  13.9  Baja las manos
+  11   0.0 /   0.0  (esperado ninguno) OK  «Yo no fui»: manos abiertas a los lados de l
+  12   0.0 /   0.0  (esperado ninguno) OK  Saluda con la derecha, la izquierda abajo
+  13  10.8 /   8.5  Narra como contando un cuento, con las manos
+  brazo L en la pose: salto mediano 0.00 grados/frame, maximo 0.0 (antes 2.6-5.1)
+  brazo R en la pose: salto mediano 0.00 grados/frame, maximo 0.0 (antes 2.6-5.1)
+
+Saludo (etiqueta 12): el robot saludo en 78 % de la etiqueta

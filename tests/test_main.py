@@ -108,6 +108,7 @@ class Registro:
         self.malla = []          # frames que recibió Face Mesh
         self.pose = []           # frames que recibió BlazePose
         self.emocion = []        # (frame, manos) que recibió EmotionClassifier.process
+        self.cabeceos = []       # el cabeceo que recibió con cada frame (P7.6)
         self.rgb = 0             # conversiones BGR -> RGB
         self.eventos = []        # orden de las llamadas al publicador
         self.publicados = []     # kwargs de cada publish
@@ -227,9 +228,10 @@ def pipeline(monkeypatch, tmp_path):
             k["detector"] = lambda frame: (200, 120, 160, 160)
             super().__init__(*a, **k)
 
-        def process(self, frame_bgr, timestamp=None, manos=None):
+        def process(self, frame_bgr, timestamp=None, manos=None, cabeceo=None):
             r.emocion.append((frame_bgr, manos))
-            return super().process(frame_bgr, timestamp, manos=manos)
+            r.cabeceos.append(cabeceo)
+            return super().process(frame_bgr, timestamp, manos=manos, cabeceo=cabeceo)
 
         def calibrar_neutro(self):
             r.calibraciones += 1
@@ -947,9 +949,9 @@ def test_si_llegan_frames_mientras_infiere_se_queda_con_el_ultimo():
     vistos = []
     original = clasificador.process
 
-    def process(frame, ts=None, manos=None):
+    def process(frame, ts=None, manos=None, cabeceo=None):
         vistos.append(ts)
-        return original(frame, ts, manos=manos)
+        return original(frame, ts, manos=manos, cabeceo=cabeceo)
 
     clasificador.process = process
     hilo = principal.HiloEmocion(clasificador)

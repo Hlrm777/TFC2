@@ -8,6 +8,7 @@ doble broker, el protocolo que se enseña, y las cifras del informe.
 from __future__ import annotations
 
 import csv
+import math
 import socket
 import sys
 from pathlib import Path
@@ -182,6 +183,80 @@ def test_el_informe_de_gestos_compara_con_el_demo_si_lo_hay(tmp_path):
         w.writeheader()
         w.writerows({"t": 0.05 * k, "etiqueta": 0, "raw_pan": 0.3 * (k % 2), "raw_tilt": 0.0} for k in range(200))
     assert "demo solo 0.30" in sv.analizar_gestos(base)
+
+
+def test_el_protocolo_del_p7_6_prueba_lo_que_se_cambio():
+    etiquetas = [e for e, *_ in sv.PROTOCOLO_AJUSTES]
+    assert etiquetas == list(range(13))
+    que = {e: t for e, t, *_ in sv.PROTOCOLO_AJUSTES}
+    assert "teclado" in que[1] and "techo" in que[1]          # el cabeceo del H64
+    assert "mejillas" in que[4] and "gira" in que[4]          # la cabeza tiene que seguir
+    assert "codos" in que[8] and "codos a la vista" in que[9]  # la prueba del H65
+    assert "APAGA LA LUZ" in que[11] and "Prende" in que[12]
+    assert "NO pulses c" in sv.tabla_protocolo(sv.PROTOCOLO_AJUSTES)
+
+
+def _sesion_de_ajustes(tmp_path, *, enojo_en_1=0.0, guarda_en_4=0.0, codo_y=400.0, oscila=False):
+    """Los CSV de sesión, brazos y emoción de una sesión del P7.6 de 2 s por etiqueta."""
+    from telmeow_teleop.arm_tracker import COLUMNAS_CSV as BRAZOS
+    from telmeow_teleop.emotion_classifier import COLUMNAS_CSV as EMOCION
+    from telmeow_teleop.main import COLUMNAS_SESION
+
+    def escribir(ruta, columnas, filas):
+        with open(ruta, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=columnas, restval="")
+            w.writeheader()
+            w.writerows(filas)
+
+    sesion, brazos, emocion = [], [], []
+    t = 0.0
+    for etiqueta in range(13):
+        for k in range(160 if etiqueta == 12 else 40):     # la 12 se mira pasados 6 s
+            t += 0.05
+            tapada = (etiqueta == 5) or (etiqueta == 4 and k < 40 * guarda_en_4)
+            sesion.append({"t": t, "etiqueta": etiqueta, "pan": 15.0 * math.sin(k / 6) if etiqueta == 4 else 0.0,
+                           "tilt": 0.0, "cabeza_tapada": int(tapada),
+                           "ruido_malla": 2.4 if etiqueta == 11 else 0.9,
+                           "zona_muerta": 2.4 if etiqueta == 11 else 1.0, "pausa_luz": 0})
+            abd = -5.0 + (50.0 if oscila and etiqueta == 9 and k % 4 == 0 else 0.0)
+            brazos.append({"t": t, "etiqueta": etiqueta, "alto": 480,
+                           "armL": abd, "armLtw": -137.0, "armR": -5.0, "armRtw": -137.0,
+                           "img_codo_y_L": codo_y, "img_codo_y_R": codo_y})
+            if k % 4 == 0:
+                emo = "enojado" if (etiqueta == 2 or (etiqueta == 1 and k < 40 * enojo_en_1)) else "neutral"
+                emocion.append({"t": t, "etiqueta": etiqueta, "rostro": 1, "emocion": emo})
+    escribir(tmp_path / "a.csv", COLUMNAS_SESION, sesion)
+    escribir(tmp_path / "a_brazos.csv", BRAZOS, brazos)
+    escribir(tmp_path / "a_emocion.csv", EMOCION, emocion)
+    return tmp_path / "a"
+
+
+def test_el_informe_del_p7_6_da_por_buena_una_sesion_que_cumple(tmp_path):
+    informe = sv.analizar_ajustes(_sesion_de_ajustes(tmp_path))
+    assert "NO CUMPLE" not in informe and "NO VALE" not in informe
+    assert informe.count("OK") == 2 + 3 + 1 + 1               # emoción, cabeza, codos, luz
+
+
+@pytest.mark.parametrize("cambio, dice", [
+    ({"enojo_en_1": 0.5}, "   1 enojado"),
+    ({"guarda_en_4": 0.5}, "   4 mejillas"),
+    ({"oscila": True}, "   9 codos a la vista"),
+])
+def test_el_informe_del_p7_6_senala_lo_que_no_cumple(tmp_path, cambio, dice):
+    informe = sv.analizar_ajustes(_sesion_de_ajustes(tmp_path, **cambio))
+    assert any(linea.startswith(dice) and "NO CUMPLE" in linea for linea in informe.splitlines())
+
+
+def test_si_los_codos_no_se_vieron_la_prueba_no_vale(tmp_path):
+    informe = sv.analizar_ajustes(_sesion_de_ajustes(tmp_path, codo_y=560.0))
+    assert "NO VALE: los codos no se vieron" in informe
+
+
+def test_con_ajustes_el_informe_y_la_base_son_los_suyos(monkeypatch, tmp_path):
+    monkeypatch.setattr(sv, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(sv, "analizar_ajustes", lambda base: f"AJUSTES DE {base.name}")
+    assert sv.main(["--analizar", "--ajustes"]) == 0
+    assert (tmp_path / "p76_informe.txt").read_text(encoding="utf-8") == "AJUSTES DE p76"
 
 
 def test_con_gestos_el_informe_y_la_base_son_los_suyos(monkeypatch, tmp_path):

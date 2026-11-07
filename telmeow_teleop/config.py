@@ -403,6 +403,19 @@ class HeadConfig:
     min_cutoff: float = 0.5
     beta: float = 0.2
     zona_muerta: float = 1.0
+    # P7.6, la luz (decidido con Harold el 2026-11-07). En el pipeline la zona
+    # muerta crece con el ruido de la malla: ``zona_por_ruido`` grados por cada
+    # grado de σ (``head_tracker.RuidoMalla``), entre ``zona_muerta`` y
+    # ``zona_muerta_max``. Con la luz de trabajo σ ≈ 1 y se queda en 1°; con la
+    # luz apagada (p75, primera toma) σ ≈ 2.3 y hacen falta 2-2.5° para que la
+    # cabeza no vibre (reproducido: 1.00 °/frame con 1°, 0.04 con 2°). Si haría
+    # falta más que el máximo durante ``pausa_ruido_s``, el robot entero se pausa
+    # y el panel dice POCA LUZ; reanuda solo, con la mezcla de 1 s, cuando el
+    # ruido lleva ``reanuda_ruido_s`` por debajo del 85 % del límite.
+    zona_muerta_max: float = 3.0
+    zona_por_ruido: float = 1.0
+    pausa_ruido_s: float = 1.0
+    reanuda_ruido_s: float = 3.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "HeadConfig":
@@ -416,6 +429,10 @@ class HeadConfig:
             min_cutoff=_env_float(env, "HEAD_MIN_CUTOFF", cls.min_cutoff),
             beta=_env_float(env, "HEAD_BETA", cls.beta),
             zona_muerta=_env_float(env, "HEAD_ZONA_MUERTA", cls.zona_muerta),
+            zona_muerta_max=_env_float(env, "HEAD_ZONA_MUERTA_MAX", cls.zona_muerta_max),
+            zona_por_ruido=_env_float(env, "HEAD_ZONA_POR_RUIDO", cls.zona_por_ruido),
+            pausa_ruido_s=_env_float(env, "HEAD_PAUSA_RUIDO_S", cls.pausa_ruido_s),
+            reanuda_ruido_s=_env_float(env, "HEAD_REANUDA_RUIDO_S", cls.reanuda_ruido_s),
         )
 
 
@@ -731,6 +748,18 @@ class EmotionConfig:
     sorpresa (P6.5, 2026-11-03). 0 la desactiva. 0.15, elegido con las
     sesiones G1 y S1 y comprobado con G2 y S2, y encendido por decisión del
     operador el 2026-11-03.
+
+    ``enojo_por_grado`` y ``enojo_desde`` (P7.6, H64): con la cabeza baja, el
+    neutral se lee como enojo (las cejas se ven más bajas en perspectiva). En
+    ``p7_final`` el modelo dice enojo en el 0 % de las caras a nivel y en el
+    60-100 % con la cabeza más de 6° abajo; en p75, 12 % a nivel y 31 % entre
+    2 y 6° abajo. Así que un voto de enojo pide ``min_confidence`` más
+    ``enojo_por_grado`` por cada grado de cabeceo más allá de ``enojo_desde``
+    hacia abajo, y si no llega vota neutral. Reproducido con las predicciones
+    grabadas: el enojo falso en el neutral de p75 baja de 23 a 8 % y el enojo de
+    verdad de p7_final de 93 a 84 %; el neutral sube de 93 a 99 %. Un umbral fijo
+    no sirve: con 0.6 el falso baja a 2 % pero el de verdad cae a 35 %. Decidido
+    por el operador el 2026-11-07. 0 la desactiva; sin el head tracker no actúa.
     """
 
     backend: str = "combinado"
@@ -743,6 +772,8 @@ class EmotionConfig:
     calibracion_s: float = 3.0
     neutral_sin_apoyo_s: float = 2.0
     umbral_cejas: float = 0.15
+    enojo_por_grado: float = 0.03
+    enojo_desde: float = 2.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "EmotionConfig":
@@ -766,6 +797,8 @@ class EmotionConfig:
             neutral_sin_apoyo_s=_env_float(
                 env, "EMOTION_NEUTRAL_SIN_APOYO_S", cls.neutral_sin_apoyo_s),
             umbral_cejas=_env_float(env, "EMOTION_UMBRAL_CEJAS", cls.umbral_cejas),
+            enojo_por_grado=_env_float(env, "EMOTION_ENOJO_POR_GRADO", cls.enojo_por_grado),
+            enojo_desde=_env_float(env, "EMOTION_ENOJO_DESDE", cls.enojo_desde),
         )
 
 

@@ -387,6 +387,24 @@ def preprocesar_48(rostro: np.ndarray) -> np.ndarray:
     return normalizado.reshape(1, LADO, LADO, 1).astype(np.float32)
 
 
+def voto_con_cabeceo(etiqueta: str, confianza: float, cabeceo: float | None,
+                     min_confidence: float, por_grado: float, desde: float) -> str:
+    """Lo que vota una predicción teniendo en cuenta el cabeceo (P7.6, H64).
+
+    Con la cabeza baja el neutral se lee como enojo: un voto de enojo pide
+    ``min_confidence`` más ``por_grado`` por cada grado de cabeceo más allá de
+    ``desde`` hacia abajo (cabeceo negativo), y si no llega vota neutral con la
+    misma confianza. Sin cabeceo (sin head tracker, o sin cara para la malla) o
+    con ``por_grado`` 0 vota lo que dijo el modelo. Es pública porque la
+    reproducción offline (``tools/analizar_registro_emocion.py``) tiene que votar
+    exactamente igual. Ver ``config.EmotionConfig``.
+    """
+    if etiqueta != "enojado" or cabeceo is None or por_grado <= 0.0:
+        return etiqueta
+    umbral = min_confidence + por_grado * max(0.0, -float(cabeceo) - desde)
+    return NEUTRAL if confianza < umbral else etiqueta
+
+
 def mano_sobre_rostro(puntos, rect, margen: float = MARGEN_MANOS) -> bool:
     """Si algún punto de mano ``(x, y)`` cae en la caja del rostro ampliada.
 
@@ -909,6 +927,9 @@ class EmotionClassifier:
         neutral_sin_apoyo_s: segundos de votos seguidos sin ninguno para la
             expresión actual tras los que se pasa a neutral (a ``emotion_hz``
             se convierten en votos). 0 lo desactiva.
+        enojo_por_grado, enojo_desde: el enojo pide más confianza con la cabeza
+            baja (``voto_con_cabeceo``). Solo actúa si ``process`` recibe el
+            cabeceo; 0 lo desactiva.
     """
 
     def __init__(
@@ -928,6 +949,8 @@ class EmotionClassifier:
         margen_manos: float = MARGEN_MANOS,
         calibracion_s: float = CALIBRACION_S,
         neutral_sin_apoyo_s: float = NEUTRAL_SIN_APOYO_S,
+        enojo_por_grado: float = 0.0,
+        enojo_desde: float = 2.0,
     ) -> None:
         if not emotion_hz > 0.0:
             raise ValueError(f"emotion_hz debe ser positivo, se recibió {emotion_hz!r}")
@@ -935,6 +958,9 @@ class EmotionClassifier:
             raise ValueError("retorno_neutral_s, margen_manos, calibracion_s y "
                              "neutral_sin_apoyo_s no pueden ser negativos")
         self.calibracion_s = float(calibracion_s)
+        self.enojo_por_grado = float(enojo_por_grado)
+        self.enojo_desde = float(enojo_desde)
+        self._cabeceo: float | None = None
         self.retorno_neutral_s = float(retorno_neutral_s)
         self.margen_manos = float(margen_manos)
         self.backend = backend
@@ -994,9 +1020,16 @@ class EmotionClassifier:
             retorno_neutral_s=cfg.emotion.retorno_neutral_s,
             calibracion_s=cfg.emotion.calibracion_s,
             neutral_sin_apoyo_s=cfg.emotion.neutral_sin_apoyo_s,
+            enojo_por_grado=cfg.emotion.enojo_por_grado,
+            enojo_desde=cfg.emotion.enojo_desde,
         )
 
     # -- estado, para el HUD y el registro ---------------------------------
+
+    @property
+    def cabeceo(self) -> float | None:
+        """El cabeceo con que votó la última inferencia (para el CSV)."""
+        return self._cabeceo
 
     @property
     def emocion(self) -> Emocion:
@@ -1187,7 +1220,7 @@ class EmotionClassifier:
     # -- proceso -----------------------------------------------------------
 
     def process(self, frame_bgr: np.ndarray, timestamp: float | None = None,
-                manos=None) -> Emocion:
+                manos=None, cabeceo: float | None = None) -> Emocion:
         """Expresión del robot a partir de un frame de la cámara, **en BGR**.
 
         Se puede llamar en cada frame: solo infiere cuando toca según
@@ -1197,6 +1230,9 @@ class EmotionClassifier:
         pasa (el volteado), o una función sin argumentos que los devuelva. La
         función solo se llama cuando toca inferir y hay cara, así que se puede
         pasar un detector de manos caro sin pagarlo en cada frame.
+
+        ``cabeceo``: el del head tracker en ese frame, en grados crudos respecto
+        a su referencia (negativo = cabeza abajo). Ver ``voto_con_cabeceo``.
         """
         ahora = self._clock() if timestamp is None else float(timestamp)
         if self._proxima is None or ahora >= self._proxima - _HOLGURA_S:
@@ -1206,10 +1242,11 @@ class EmotionClassifier:
             # recuperan en ráfaga: se planifica desde ahora (P7, punto 10).
             siguiente = (ahora if self._proxima is None else self._proxima) + self._periodo
             self._proxima = siguiente if siguiente > ahora else ahora + self._periodo
-            self._inferir(frame_bgr, ahora, manos)
+            self._inferir(frame_bgr, ahora, manos, cabeceo)
         return self.emocion
 
-    def _inferir(self, frame_bgr: np.ndarray, ahora: float, manos=None) -> None:
+    def _inferir(self, frame_bgr: np.ndarray, ahora: float, manos=None,
+                 cabeceo: float | None = None) -> None:
         inicio = time.perf_counter()
         frame = cv2.flip(frame_bgr, 1) if self.frame_espejado else frame_bgr
         rectangulo = self._detector(frame)
@@ -1219,6 +1256,7 @@ class EmotionClassifier:
         self._manos = False
         self._calibrando = False
         self._inicio_calibracion = False
+        self._cabeceo = None if cabeceo is None else float(cabeceo)
         if rectangulo is None:
             self._ultima = None
             self._rostro = None
@@ -1248,7 +1286,10 @@ class EmotionClassifier:
                 distribucion = self.backend.distribucion(frame[y:y + h, x:x + w])
                 self._ultima = distribucion
                 if distribucion.etiqueta is not None and not self._manos:
-                    self._histeresis.update(distribucion.etiqueta, distribucion.confianza)
+                    voto = voto_con_cabeceo(
+                        distribucion.etiqueta, distribucion.confianza, self._cabeceo,
+                        self._histeresis.min_confidence, self.enojo_por_grado, self.enojo_desde)
+                    self._histeresis.update(voto, distribucion.confianza)
         self._latencia_ms = (time.perf_counter() - inicio) * 1000.0
 
     def _cara_no_utilizable(self, ahora: float) -> None:
@@ -1297,7 +1338,10 @@ _COLUMNAS_CSV = (
        # Desde el 2026-11-03: en esta fila empezó (o se reinició) la recogida
        # de la cara neutra. Con ella la reproducción offline calibra con las
        # mismas caras que en vivo aunque el operador pulse c a mitad.
-       "inicio_calibracion"]
+       "inicio_calibracion",
+       # Desde el 2026-11-07 (P7.6): el cabeceo con que votó y la regla del
+       # enojo, para que la reproducción vote igual (voto_con_cabeceo).
+       "cabeceo", "enojo_por_grado", "enojo_desde"]
 )
 #: Las mismas columnas, con nombre público para el pipeline integrado (P7).
 COLUMNAS_CSV = _COLUMNAS_CSV
@@ -1338,7 +1382,9 @@ def _fila_csv(t, etiqueta, clasificador: EmotionClassifier, brillo: float,
            f"{clasificador.retorno_neutral_s:g}",
            *(recorte if recorte else ("", "", "")),
            int(clasificador.calibrando), clasificador.max_sin_apoyo,
-           int(clasificador.inicio_calibracion)]
+           int(clasificador.inicio_calibracion),
+           "" if clasificador.cabeceo is None else f"{clasificador.cabeceo:.2f}",
+           f"{clasificador.enojo_por_grado:g}", f"{clasificador.enojo_desde:g}"]
     )
 
 

@@ -285,6 +285,60 @@ def landmarks_to_cloud(landmarks, width: int, height: int) -> np.ndarray:
     )
 
 
+class RuidoMalla:
+    """Cuánto tiembla la Face Mesh, en grados crudos, sin confundirlo con mover
+    la cabeza (P7.6).
+
+    Usa la segunda diferencia, ``x[t] − 2·x[t−1] + x[t−2]``: un giro de la cabeza
+    es suave de un frame a otro y casi no la mueve, y el ruido sí. Con ruido
+    blanco de desviación σ, la segunda diferencia tiene desviación σ·√6, y la
+    mediana de su valor absoluto es 0.6745 veces eso: de ahí sale σ, con la
+    mediana para que los pocos frames de un movimiento brusco no cuenten. En
+    cada frame se toma el peor de los dos ejes, así que es un índice y no la σ
+    de un eje: con el mismo ruido σ en pan y en tilt da 1.56·σ. Los umbrales
+    (``config.HeadConfig``) se fijaron con este mismo índice, sobre lo grabado.
+
+    Medido (``tools/filtros_cabeza.py`` y las sesiones del P7): con la luz de
+    trabajo, σ ≈ 1.0° de mediana (0.8-1.4 según la sesión); con la luz apagada,
+    2.3° (p75, primera toma, la cámara a 10 fps); en la sesión del P4, 0.4°.
+
+    Quien lo alimenta decide qué frames cuentan: con las manos en la cara la
+    malla se inventa la cara (H58) y su temblor no es el de la luz.
+    """
+
+    def __init__(self, ventana_s: float = 3.0, minimo: int = 10) -> None:
+        self.ventana_s = float(ventana_s)
+        self.minimo = int(minimo)
+        self._previos: deque[tuple[float, float]] = deque(maxlen=2)
+        self._segundas: deque[tuple[float, float]] = deque()
+
+    def reiniciar(self) -> None:
+        self._previos.clear()
+        self._segundas.clear()
+
+    def cortar(self) -> None:
+        """Un frame que no cuenta (sin cara, o con las manos encima): la
+        siguiente segunda diferencia no puede saltárselo."""
+        self._previos.clear()
+
+    def actualizar(self, t: float, crudo: tuple[float, float]) -> None:
+        if len(self._previos) == 2:
+            (p2, q2), (p1, q1) = self._previos
+            d2 = max(abs(crudo[0] - 2.0 * p1 + p2), abs(crudo[1] - 2.0 * q1 + q2))
+            self._segundas.append((t, d2))
+        self._previos.append(crudo)
+        while self._segundas and t - self._segundas[0][0] > self.ventana_s:
+            self._segundas.popleft()
+
+    @property
+    def sigma(self) -> float | None:
+        """σ estimada en la última ventana, o ``None`` si aún no hay muestras."""
+        if len(self._segundas) < self.minimo:
+            return None
+        valores = sorted(d for _, d in self._segundas)
+        return valores[len(valores) // 2] / 0.6745 / math.sqrt(6.0)
+
+
 class HeadTracker:
     """Convierte los frames de la cámara en los ángulos `pan` y `tilt` del robot.
 
@@ -421,6 +475,22 @@ class HeadTracker:
     def raw_angles(self) -> tuple[float, float] | None:
         """Ángulos crudos del estimador, antes de ganancia y filtro."""
         return self._raw
+
+    @property
+    def zona_muerta(self) -> float:
+        """Ancho de la zona muerta en uso, en grados del robot."""
+        return self._zona_pan.ancho
+
+    @zona_muerta.setter
+    def zona_muerta(self, ancho: float) -> None:
+        """Cambiarla en marcha (P7.6: crece con el ruido de la malla). No
+        reinicia nada: la salida sigue donde estaba y la nueva anchura cuenta
+        desde la próxima muestra."""
+        ancho = float(ancho)
+        if not (math.isfinite(ancho) and ancho >= 0.0):
+            raise ValueError(f"ancho debe ser finito y no negativo, se recibió {ancho!r}")
+        self._zona_pan.ancho = ancho
+        self._zona_tilt.ancho = ancho
 
     @property
     def caja(self) -> tuple[int, int, int, int] | None:

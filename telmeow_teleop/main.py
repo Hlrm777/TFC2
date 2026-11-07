@@ -70,7 +70,7 @@ from .emotion_classifier import (
     registrar_inferencia,
 )
 from .head_tracker import COLUMNAS_CSV as COLUMNAS_CABEZA
-from .head_tracker import HeadTracker, apartar_si_existe
+from .head_tracker import HeadTracker, RuidoMalla, apartar_si_existe
 from .head_tracker import fila_csv as fila_cabeza
 from .limits import Side
 
@@ -124,6 +124,9 @@ COLUMNAS_SESION = (
     # publicada era la guardada, no la medida. 'pan' y 'tilt' son SIEMPRE lo
     # publicado; la medida está en el CSV de cabeza.
     "cabeza_tapada",
+    # Desde el 2026-11-07 (P7.6): si la malla fallaba (MallaInestable), su ruido
+    # (RuidoMalla, grados crudos), la zona muerta en uso y la pausa por poca luz.
+    "malla_falla", "ruido_malla", "zona_muerta", "pausa_luz",
 )
 
 TECLA_SALIR = ord("q")
@@ -177,6 +180,7 @@ class PublicadorPeriodico:
         self._pose: dict = {}
         self._gestos: deque[str] = deque()
         self._pausado = False
+        self._pausa_luz = False                    # P7.6: la pone VigiaRuido
         self._enviada: dict[str, float] = {}       # últimos ángulos que salieron
         self._rampa_desde: dict[str, float] | None = None
         self._rampa_inicio = 0.0
@@ -190,18 +194,39 @@ class PublicadorPeriodico:
 
     @property
     def pausado(self) -> bool:
-        return self._pausado
+        """Si no sale nada: por la tecla o por poca luz."""
+        return self._pausado or self._pausa_luz
+
+    @property
+    def pausado_por_luz(self) -> bool:
+        return self._pausa_luz
 
     def alternar_pausa(self) -> bool:
-        """Pausa o reanuda. Devuelve si queda en pausa."""
+        """Pausa o reanuda con la tecla. Devuelve si queda en pausa (por la
+        tecla; la de la luz va aparte y no la quita la tecla)."""
         with self._lock:
+            antes = self._pausado or self._pausa_luz
             self._pausado = not self._pausado
-            if self._pausado:
-                self._gestos.clear()
-            elif self.rampa_s > 0.0 and self._enviada:
-                self._rampa_desde = dict(self._enviada)
-                self._rampa_inicio = self._reloj()
+            self._transicion(antes)
             return self._pausado
+
+    def fijar_pausa_luz(self, activa: bool) -> None:
+        """La pausa por poca luz (P7.6), que pone y quita ``VigiaRuido``.
+        Convive con la de la tecla: solo se publica si no hay ninguna."""
+        with self._lock:
+            antes = self._pausado or self._pausa_luz
+            self._pausa_luz = bool(activa)
+            self._transicion(antes)
+
+    def _transicion(self, antes: bool) -> None:
+        """Con el lock: al entrar en pausa se tiran los gestos; al salir, la
+        rampa desde lo último que salió, sea cual sea la pausa que acabó."""
+        ahora = self._pausado or self._pausa_luz
+        if ahora and not antes:
+            self._gestos.clear()
+        elif antes and not ahora and self.rampa_s > 0.0 and self._enviada:
+            self._rampa_desde = dict(self._enviada)
+            self._rampa_inicio = self._reloj()
 
     def actualizar(self, **campos) -> None:
         """La pose que saldrá en el próximo tick. Los ``None`` se omiten."""
@@ -211,7 +236,7 @@ class PublicadorPeriodico:
     def gesto(self, nombre: str) -> bool:
         """Encola un gesto de página. ``False`` si está en pausa y no saldrá."""
         with self._lock:
-            if self._pausado:
+            if self._pausado or self._pausa_luz:
                 return False
             self._gestos.append(nombre)
             return True
@@ -219,7 +244,7 @@ class PublicadorPeriodico:
     def tick(self) -> bool:
         """Un envío. Devuelve si salió un mensaje."""
         with self._lock:
-            if self._pausado or not (self._pose or self._gestos):
+            if self._pausado or self._pausa_luz or not (self._pose or self._gestos):
                 return False
             pose = dict(self._pose)
             gesto = self._gestos.popleft() if self._gestos else None
@@ -296,16 +321,34 @@ class GuardaCabeza:
 
     Las manos cuentan como encima hasta ``retencion_s`` después de la última
     vez que se vieron: BlazePose las pierde a ratos (H52, H55).
+
+    DESDE EL P7.6 (2026-11-07) LAS MANOS SOLAS NO BASTAN. Con las manos en las
+    mejillas («el grito») la malla sigue viendo la cara —el 100 % de los frames
+    en p75, con saltos crudos de 1.9-2.5° en el p90— y la cabeza tiene que
+    seguir al operador; lo pidió él. Lo que delata la cara tapada es que la
+    malla falla: la pierde (59 % de los frames) o salta (p90 de 13°). Así que la
+    guarda entra con las manos encima Y la malla fallando (``malla_falla``, que
+    da ``MallaInestable``), y sale cuando se van las manos o cuando la malla
+    lleva ``suelta_s`` sin fallar. Mientras las manos están encima y la guarda no
+    actúa, la cabeza va con un límite de velocidad, ``limite_grados_s``: las
+    primeras poses inventadas llegan antes de que se note el fallo, y así no se
+    ven. Con ``malla_falla`` por defecto (``True``) se comporta como antes.
     """
 
     def __init__(self, *, espera_s: float = 2.0, rampa_s: float = 1.0,
-                 retencion_s: float = 0.5, antes_s: float = 0.3) -> None:
+                 retencion_s: float = 0.5, antes_s: float = 0.3,
+                 limite_grados_s: float = 60.0, suelta_s: float = 1.0) -> None:
         self.espera_s = espera_s
         self.rampa_s = rampa_s
         self.retencion_s = retencion_s
         self.antes_s = antes_s
+        self.limite_grados_s = limite_grados_s
+        self.suelta_s = suelta_s
         self._historial: deque[tuple[float, tuple[float, float]]] = deque()
         self._ultima_mano: float | None = None
+        self._ultima_falla: float | None = None
+        self._manos_desde: float | None = None
+        self._t_salida: float | None = None
         self._tapada_desde: float | None = None
         self._fija: tuple[float, float] = (0.0, 0.0)
         self._salida: tuple[float, float] | None = None
@@ -322,19 +365,40 @@ class GuardaCabeza:
         return self._historial[0][1] if self._historial else None
 
     def paso(self, ahora: float, pose: tuple[float, float] | None,
-             manos_encima: bool) -> tuple[float, float] | None:
+             manos_encima: bool, malla_falla: bool = True) -> tuple[float, float] | None:
         """La pose que se publica: ``pose`` medida, o la guardada si está tapada.
         ``None`` (sin cara y sin manos encima) se omite del JSON, como siempre."""
         if manos_encima:
             self._ultima_mano = ahora
-        tapada = self._ultima_mano is not None and ahora - self._ultima_mano <= self.retencion_s
+        manos = self._ultima_mano is not None and ahora - self._ultima_mano <= self.retencion_s
+        if manos and self._manos_desde is None:
+            self._manos_desde = ahora
+        elif not manos:
+            self._manos_desde = None
+        if malla_falla:
+            self._ultima_falla = ahora
+        # Una vez dentro, sigue mientras haya manos, salvo que la malla lleve
+        # ``suelta_s`` sin fallar: un fallo suelto con las manos en las mejillas
+        # no puede dejar la cabeza fija todo el gesto (en p75, el 73 % de «el
+        # grito» por un solo tropiezo de la malla).
+        sigue = (self._tapada_desde is not None and self._ultima_falla is not None
+                 and ahora - self._ultima_falla < self.suelta_s)
+        tapada = manos and (sigue or malla_falla)
         if tapada:
             if self._tapada_desde is None:
                 self._tapada_desde = ahora
-                self._fija = self._pose_antes(ahora) or self._salida or (0.0, 0.0)
+                if ahora - self._manos_desde <= self.antes_s:
+                    # Entró a la vez que las manos: la pose de antes de verlas,
+                    # porque las primeras inventadas llegan antes (H58).
+                    self._fija = self._pose_antes(ahora) or self._salida or (0.0, 0.0)
+                else:
+                    # Entró después, con la cabeza siguiendo al operador con el
+                    # límite de velocidad: desde donde está, sin salto.
+                    self._fija = self._salida or self._pose_antes(ahora) or (0.0, 0.0)
                 self._volviendo = None
             peso = paso_suave((ahora - self._tapada_desde - self.espera_s) / self.rampa_s)
             self._salida = _mezcla(self._fija, (0.0, 0.0), peso)
+            self._t_salida = ahora
             return self._salida
         if self._tapada_desde is not None:           # se acaba de destapar
             self._tapada_desde = None
@@ -354,8 +418,121 @@ class GuardaCabeza:
                 self._volviendo = None
             else:
                 salida = _mezcla(desde, pose, peso)
+        if manos and self.limite_grados_s > 0.0 and self._salida is not None \
+                and self._t_salida is not None:
+            maximo = self.limite_grados_s * max(0.0, ahora - self._t_salida)
+            salida = tuple(a + max(-maximo, min(maximo, b - a)) for a, b in zip(self._salida, salida))
         self._salida = salida
+        self._t_salida = ahora
         return salida
+
+
+class MallaInestable:
+    """Si la Face Mesh ha dejado de ser de fiar: sin cara durante ``sin_cara_s``,
+    o con la mediana de sus últimos ``n`` saltos crudos por encima de
+    ``umbral`` grados (P7.6).
+
+    Con la cara a la vista los saltos crudos van por 1-2.5° (p90, con las manos
+    en las mejillas incluido); con la cara tapada, la malla se inventa una y
+    salta hasta 13° (H58). La mediana de cinco no se deja llevar por un salto
+    suelto. Simulado sobre p75: con las manos en las mejillas la guarda pasa de
+    actuar el 86-91 % de esas etiquetas al 0-1 %; con la cara tapada sigue
+    actuando.
+    """
+
+    def __init__(self, n: int = 5, umbral: float = 3.0, sin_cara_s: float = 0.3) -> None:
+        self.umbral = float(umbral)
+        self.sin_cara_s = float(sin_cara_s)
+        self._saltos: deque[float] = deque(maxlen=int(n))
+        self._previo: tuple[float, float] | None = None
+        self._ultima_cara: float | None = None
+
+    def paso(self, ahora: float, crudo: tuple[float, float] | None) -> bool:
+        """Los ángulos crudos de este frame (``None`` sin cara). Devuelve si la
+        malla falla."""
+        if crudo is None:
+            self._previo = None
+            return self._ultima_cara is None or ahora - self._ultima_cara >= self.sin_cara_s
+        self._ultima_cara = ahora
+        if self._previo is not None:
+            self._saltos.append(max(abs(crudo[0] - self._previo[0]), abs(crudo[1] - self._previo[1])))
+        self._previo = crudo
+        if len(self._saltos) < 3:
+            return False
+        ordenados = sorted(self._saltos)
+        return ordenados[len(ordenados) // 2] > self.umbral
+
+
+#: Ángulos crudos de la cabeza, en grados, dentro de los que su temblor cuenta
+#: como ruido de la luz. De perfil la malla tiembla más por sí sola: en
+#: p7_final, con la cabeza girada 40-50°, σ llegó a 3.4-4, y habría parado el
+#: robot como si faltara luz.
+FRONTAL_RUIDO = (20.0, 15.0)
+
+#: Segundos desde la última vez que se vieron las manos sobre la cara durante
+#: los que la malla no cuenta para el ruido: tapada se inventa la cara (H58), y
+#: BlazePose pierde las manos hasta ~2.5 s seguidos (p7_final).
+SIN_MANOS_RUIDO_S = 3.0
+
+
+def cuenta_para_ruido(crudo: tuple[float, float] | None, ahora: float,
+                      ultima_mano_cara: float | None) -> bool:
+    """Si el temblor de la malla en este frame es el de la luz (P7.6): hay
+    cara, está de frente y hace ``SIN_MANOS_RUIDO_S`` que no hay manos encima."""
+    if crudo is None or abs(crudo[0]) > FRONTAL_RUIDO[0] or abs(crudo[1]) > FRONTAL_RUIDO[1]:
+        return False
+    return ultima_mano_cara is None or ahora - ultima_mano_cara >= SIN_MANOS_RUIDO_S
+
+
+class VigiaRuido:
+    """La zona muerta de la cabeza según el ruido de la malla, y la pausa por
+    poca luz (P7.6, decidido con el operador el 2026-11-07).
+
+    La zona es ``por_sigma`` grados por grado de σ (``head_tracker.RuidoMalla``),
+    entre ``base`` y ``maximo``. Si haría falta más que ``maximo`` durante
+    ``pausa_s`` seguidos, pide pausa; la quita cuando la zona necesaria lleva
+    ``reanuda_s`` por debajo de ``margen`` veces el máximo. La histéresis evita
+    que el robot entre y salga de la pausa en el borde.
+    """
+
+    def __init__(self, base: float, maximo: float, por_sigma: float = 1.0,
+                 pausa_s: float = 1.0, reanuda_s: float = 3.0, margen: float = 0.85) -> None:
+        self.base, self.maximo, self.por_sigma = float(base), float(maximo), float(por_sigma)
+        self.pausa_s, self.reanuda_s, self.margen = float(pausa_s), float(reanuda_s), float(margen)
+        self.zona = self.base
+        self.pausa = False
+        self._exceso_desde: float | None = None
+        self._calma_desde: float | None = None
+
+    @classmethod
+    def desde_config(cls, cfg: AppConfig) -> "VigiaRuido":
+        h = cfg.head
+        return cls(h.zona_muerta, h.zona_muerta_max, h.zona_por_ruido,
+                   h.pausa_ruido_s, h.reanuda_ruido_s)
+
+    def paso(self, ahora: float, sigma: float | None) -> tuple[float, bool]:
+        """``(zona, pausa)`` con la σ de este frame (``None``: sin medida, se
+        mantiene lo que había)."""
+        if sigma is None:
+            return self.zona, self.pausa
+        necesaria = self.por_sigma * float(sigma)
+        self.zona = min(self.maximo, max(self.base, necesaria))
+        if necesaria > self.maximo:
+            self._calma_desde = None
+            if self._exceso_desde is None:
+                self._exceso_desde = ahora
+            if ahora - self._exceso_desde >= self.pausa_s:
+                self.pausa = True
+        else:
+            self._exceso_desde = None
+            if necesaria < self.margen * self.maximo:
+                if self._calma_desde is None:
+                    self._calma_desde = ahora
+                if self.pausa and ahora - self._calma_desde >= self.reanuda_s:
+                    self.pausa = False
+            else:
+                self._calma_desde = None
+        return self.zona, self.pausa
 
 
 # --------------------------------------------------------------------------
@@ -466,9 +643,11 @@ class HiloEmocion:
             inferencias=c.inferencias, calibraciones=c.calibraciones,
         )
 
-    def entregar(self, frame, ahora: float, t: float, etiqueta: int, manos) -> None:
-        """El frame (BGR volteado, sin dibujar) y los puntos de las manos."""
-        trabajo = (frame, ahora, t, etiqueta, manos)
+    def entregar(self, frame, ahora: float, t: float, etiqueta: int, manos,
+                 cabeceo: float | None = None) -> None:
+        """El frame (BGR volteado, sin dibujar), los puntos de las manos y el
+        cabeceo del head tracker en ese frame (P7.6)."""
+        trabajo = (frame, ahora, t, etiqueta, manos, cabeceo)
         if not self.en_hilo:
             self._paso(trabajo)
             return
@@ -491,8 +670,8 @@ class HiloEmocion:
             metodo, argumentos = self._ordenes.popleft()
             getattr(self.clasificador, metodo)(*argumentos)
         if trabajo is not None:
-            frame, ahora, t, etiqueta, manos = trabajo
-            self.clasificador.process(frame, ahora, manos=manos)
+            frame, ahora, t, etiqueta, manos, cabeceo = trabajo
+            self.clasificador.process(frame, ahora, manos=manos, cabeceo=cabeceo)
             if self.clasificador.inferencias != self._inferencias:
                 self._inferencias = self.clasificador.inferencias
                 if self._al_inferir is not None:
@@ -648,6 +827,9 @@ class EstadoPanel:
     errores_publicacion: int = 0
     errores_emocion: int = 0
     pausa: bool = False
+    pausa_luz: bool = False
+    ruido_malla: float | None = None
+    zona_muerta: float | None = None
     brillo: float | None = None
     grabando: bool = False
     etiqueta: int = 0
@@ -684,7 +866,9 @@ def dibujar_panel(lienzo: np.ndarray, x0: int, estado: EstadoPanel) -> None:
     x = x0 + 10
     y = 22
 
-    if estado.pausa:
+    if estado.pausa_luz:
+        _texto(lienzo, x, y, "POCA LUZ: no se puede continuar", _ROJO, 0.5, 2)
+    elif estado.pausa:
         _texto(lienzo, x, y, "PAUSA (k): no se publica", _AMBAR, 0.55, 2)
     elif not estado.enlace:
         _texto(lienzo, x, y, "SIN ENLACE MQTT", _ROJO, 0.55, 2)
@@ -793,7 +977,12 @@ def dibujar_panel(lienzo: np.ndarray, x0: int, estado: EstadoPanel) -> None:
         if estado.brillo < BRILLO_MINIMO:
             _texto(lienzo, x, y, f"CAMARA NEGRA (brillo {estado.brillo:.1f})", _ROJO, 0.45, 2)
         else:
-            _texto(lienzo, x, y, f"brillo {estado.brillo:.0f}", _GRIS)
+            # El brillo medio no avisa de la poca luz (la exposición automática lo
+            # sube); el ruido de la malla sí, y con él la zona de la cabeza (P7.6).
+            ruido = ("" if estado.ruido_malla is None
+                     else f"   ruido {estado.ruido_malla:.1f}  zona {estado.zona_muerta:.1f}")
+            _texto(lienzo, x, y, f"brillo {estado.brillo:.0f}{ruido}",
+                   _AMBAR if estado.zona_muerta and estado.zona_muerta > 1.5 else _GRIS)
         y += 18
     if estado.grabando:
         _texto(lienzo, x, y, f"REC  etiqueta {estado.etiqueta}", _ROJO, 0.5, 2)
@@ -1024,6 +1213,10 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
     muestras_hz: deque[tuple[float, int]] = deque()
     ms_bucle_previo = None
     guarda = GuardaCabeza()
+    malla = MallaInestable()
+    ruido = RuidoMalla()
+    vigia = VigiaRuido.desde_config(cfg)
+    ultima_mano_cara = None
     ultima_caja = None
 
     while True:
@@ -1068,14 +1261,32 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
             ultima_caja = cabeza.caja
         encima = bool(manos) and ultima_caja is not None and mano_sobre_rostro(
             manos, ultima_caja, MARGEN_MANOS)
-        pose_publicada = guarda.paso(ahora, pose_cabeza, encima) if brazos is not None else pose_cabeza
+        crudo = cabeza.raw_angles if pose_cabeza is not None else None
+        malla_falla = malla.paso(ahora, crudo)
+        pose_publicada = (guarda.paso(ahora, pose_cabeza, encima, malla_falla)
+                          if brazos is not None else pose_cabeza)
+        # P7.6: el ruido de la malla; la zona de la cabeza crece con él y, si no
+        # basta, se pausa el robot entero. Solo cuenta lo que es temblor de la
+        # luz (ver cuenta_para_ruido): de frente y sin manos en la cara.
+        if encima:
+            ultima_mano_cara = ahora
+        if cuenta_para_ruido(crudo, ahora, ultima_mano_cara):
+            ruido.actualizar(t, crudo)
+        else:
+            ruido.cortar()
+        zona, pausa_luz = vigia.paso(ahora, ruido.sigma)
+        cabeza.zona_muerta = zona
+        if pausa_luz != periodico.pausado_por_luz:
+            periodico.fijar_pausa_luz(pausa_luz)
+            print("POCA LUZ: robot en pausa" if pausa_luz else "luz suficiente: se reanuda")
 
         emocion = None
         ms_emocion = None
         if hilo is not None:
             # El BGR volteado y SIN dibujar (punto 14): es el convenio del
             # entrenamiento, y el recorte que se graba tiene que ser lo que vio.
-            hilo.entregar(frame, ahora, t, etiqueta, manos)
+            hilo.entregar(frame, ahora, t, etiqueta, manos,
+                          cabeceo=crudo[1] if crudo is not None else None)
             emocion = hilo.estado
             if emocion.inferencias != inferencias_vistas:
                 inferencias_vistas = emocion.inferencias
@@ -1149,6 +1360,9 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
             hz=hz,
             errores_publicacion=periodico.errores,
             pausa=periodico.pausado,
+            pausa_luz=periodico.pausado_por_luz,
+            ruido_malla=ruido.sigma,
+            zona_muerta=zona,
             brillo=brillo,
             grabando=grabacion is not None,
             etiqueta=etiqueta,
@@ -1174,6 +1388,8 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
                 f"{brillo:.1f}", ancho, alto,
                 int(hilo.en_hilo) if hilo is not None else "",
                 int(guarda.tapada),
+                int(malla_falla), _f(ruido.sigma, ".3f"), f"{zona:.2f}",
+                int(periodico.pausado_por_luz),
             ])
         gesto_registrado = ""
 

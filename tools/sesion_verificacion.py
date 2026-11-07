@@ -26,10 +26,15 @@ la cara, con el protocolo ``PROTOCOLO_GESTOS`` y los criterios de abajo, fijados
 antes de grabar. Acaba con 20 s del demo de la cabeza, solo, que es lo que separa
 las dos causas posibles del H60.
 
+Con ``--ajustes`` hace la del P7.6 (``PROTOCOLO_AJUSTES``): el neutral con la
+cabeza baja, la cabeza que sigue con las manos en las mejillas, el «yo no fui»
+con los codos dentro del cuadro (la prueba que decide el H65) y la luz apagada.
+
 Uso, desde la raíz del repositorio::
 
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --gestos
+    .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --ajustes
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --analizar      # rehace el informe
 """
 
@@ -128,6 +133,52 @@ GESTO_ESPERADO: dict[int, str] = {3: "R", 5: "L", 7: "LR", 9: "LR"}
 
 #: Etiquetas en las que ningún brazo puede ir a la cara.
 SIN_GESTO: tuple[int, ...] = (0, 1, 2, 11, 12)
+
+#: La sesión del P7.6 (2026-11-07): (etiqueta, qué hacer, segundos, qué debe
+#: hacer el robot). Una postura por etiqueta.
+PROTOCOLO_AJUSTES: tuple[tuple[int, str, int, str], ...] = (
+    (0, "Cara relajada mirando la pantalla, quieto, manos abajo. NO pulses c", 15,
+     "calibra 3 s; neutral; la cabeza quieta"),
+    (1, "Cara relajada: baja la cabeza a mirar el teclado 5 s, vuelve, súbela a mirar "
+        "el techo 5 s, vuelve. Sin gesticular", 20,
+     "NEUTRAL todo el tiempo (antes, enojado al bajar la cabeza)"),
+    (2, "Enojado de verdad: ceño fruncido, como al regañar, mirando la pantalla", 10, "ENOJADO"),
+    (3, "Cara relajada", 5, "NEUTRAL"),
+    (4, "«El grito»: las dos manos en las mejillas, y gira la cabeza despacio a un "
+        "lado y al otro", 15,
+     "los brazos a la cara y la cabeza TE SIGUE (antes se quedaba fija)"),
+    (5, "Tápate la cara con las dos manos, quieto", 10,
+     "la cabeza se queda quieta y a los 2 s va al frente"),
+    (6, "Baja las manos", 5, "la cabeza vuelve a tu pose en ~1 s"),
+    (7, "«Yo no fui» desde tu sitio de siempre: manos abiertas a los lados de la cabeza, "
+        "por fuera de los hombros, palmas a la cámara", 15,
+     "brazos hacia la cruz (aquí oscilaba el izquierdo)"),
+    (8, "Baja las manos y siéntate unos 20 cm más atrás, hasta ver tus codos en la ventana", 10,
+     "nada"),
+    (9, "«Yo no fui» desde ahí, con los codos a la vista", 15,
+     "brazos hacia la cruz, SIN oscilar"),
+    (10, "Desde ahí: estira los brazos hacia la cámara", 10, "brazos al frente"),
+    (11, "Vuelve a tu sitio, manos abajo, quieto. APAGA LA LUZ", 20,
+     "la cabeza no vibra (la zona sube); si no basta, el panel dice POCA LUZ y el robot se para"),
+    (12, "Prende la luz, quieto", 15, "si se paró, sigue solo a los ~3 s"),
+)
+
+#: Criterios del P7.6, fijados antes de grabar. Enojo del robot con la cabeza
+#: subiendo y bajando (etiqueta 1): en el neutral de p75 era el 23 %.
+ENOJO_NEUTRAL_MAX = 10.0
+#: Enojo de verdad (etiqueta 2): con la regla, 84 % reproducido en p7_final.
+ENOJO_REAL_MIN = 60.0
+#: Guarda con las manos en las mejillas (4) y tapada (5): en p75, 91 y 81 %;
+#: reproducido con la regla nueva, 6 y 71 %.
+GUARDA_MEJILLAS_MAX = 10.0
+GUARDA_TAPADA_MIN = 60.0
+#: Recorrido del pan publicado con las manos en las mejillas: que la cabeza siga.
+PAN_MEJILLAS_MIN = 20.0
+#: «Yo no fui» con los codos a la vista (9): saltos de más de 5° por minuto en
+#: cada brazo (en p75, 216 el izquierdo y 93 el derecho), y codos dentro del
+#: cuadro en al menos este % de los frames, para que la prueba valga.
+SALTOS_YO_NO_FUI_MAX = 40.0
+CODOS_DENTRO_MIN = 80.0
 
 
 # --------------------------------------------------------------------------
@@ -349,6 +400,126 @@ def en_la_pose_por_etiqueta(filas_brazos: list[dict]) -> dict[int, dict[str, flo
     return {e: {lado: 100.0 * n / total[e] for lado, n in v.items()} for e, v in cuenta.items()}
 
 
+def angulo_a_la_cruz(abduccion: float, flexion: float) -> float:
+    """Grados entre el brazo del robot y la cruz (su lateral)."""
+    import math
+
+    from telmeow_teleop.retarget import direccion
+
+    return math.degrees(math.acos(max(-1.0, min(1.0, direccion(abduccion, flexion)[0]))))
+
+
+def saltos_por_minuto(filas_brazos: list[dict], lado: str, umbral: float = 5.0) -> float | None:
+    """Saltos del comando de un brazo mayores que ``umbral`` grados, por minuto."""
+    abd, flex = ("armL", "armLtw") if lado == "L" else ("armR", "armRtw")
+    comandos = [(_num(f.get(abd)), _num(f.get(flex))) for f in filas_brazos]
+    comandos = [c for c in comandos if None not in c]
+    if len(filas_brazos) < 2 or len(comandos) < 2:
+        return None
+    minutos = (float(filas_brazos[-1]["t"]) - float(filas_brazos[0]["t"])) / 60.0
+    if minutos <= 0:
+        return None
+    return sum(1 for s in saltos(comandos) if s > umbral) / minutos
+
+
+def analizar_ajustes(base: Path) -> str:
+    """El informe de la sesión del P7.6, con los criterios fijados antes."""
+    import filtros_cabeza as fc
+    from telmeow_teleop.main import rutas_de_grabacion
+
+    rutas = rutas_de_grabacion(base.with_suffix(".csv"))
+    sesion = fc.leer(rutas["sesion"])
+    brazos = fc.leer(rutas["brazos"])
+    emocion = fc.leer(rutas["emocion"]) if rutas["emocion"].is_file() else []
+
+    def de(filas, etiqueta):
+        return [f for f in filas if int(f["etiqueta"]) == etiqueta]
+
+    def pct(filas, condicion):
+        return 100.0 * sum(1 for f in filas if condicion(f)) / len(filas) if filas else None
+
+    def ok(cumple):
+        return "OK" if cumple else "NO CUMPLE"
+
+    lineas = [f"INFORME DEL P7.6 DE {base.name}", "=" * 60, ""]
+    lineas.append("Emocion (robot, % de la etiqueta):")
+    for etiqueta, emo, umbral, mayor in ((1, "enojado", ENOJO_NEUTRAL_MAX, False),
+                                         (2, "enojado", ENOJO_REAL_MIN, True)):
+        filas = [f for f in de(emocion, etiqueta) if f.get("rostro") == "1"]
+        p = pct(filas, lambda f: f["emocion"] == emo)
+        if p is None:
+            lineas.append(f"  {etiqueta:>2}: sin datos")
+            continue
+        cumple = p >= umbral if mayor else p <= umbral
+        lineas.append(f"  {etiqueta:>2} {emo}: {p:.0f} % (criterio {'>=' if mayor else '<='} {umbral:.0f} %) "
+                      f"{ok(cumple)}")
+
+    lineas += ["", "Cabeza con las manos en la cara:"]
+    for etiqueta, umbral, mayor in ((4, GUARDA_MEJILLAS_MAX, False), (5, GUARDA_TAPADA_MIN, True)):
+        filas = de(sesion, etiqueta)
+        p = pct(filas, lambda f: f.get("cabeza_tapada") == "1")
+        if p is None:
+            continue
+        cumple = p >= umbral if mayor else p <= umbral
+        texto = "mejillas" if etiqueta == 4 else "tapada"
+        linea = (f"  {etiqueta:>2} {texto}: guarda {p:.0f} % (criterio {'>=' if mayor else '<='} "
+                 f"{umbral:.0f} %) {ok(cumple)}")
+        if etiqueta == 4:
+            pans = [_num(f.get("pan")) for f in filas if _num(f.get("pan")) is not None]
+            recorrido = max(pans) - min(pans) if pans else 0.0
+            linea += f"; el pan recorre {recorrido:.0f} grados (criterio >= {PAN_MEJILLAS_MIN:.0f}) " \
+                     f"{ok(recorrido >= PAN_MEJILLAS_MIN)}"
+        lineas.append(linea)
+
+    lineas += ["", "«Yo no fui» (H65): saltos > 5 grados por minuto L / R, angulo mediano a la cruz L / R, "
+                   "codos dentro del cuadro:"]
+    for etiqueta, texto in ((7, "en tu sitio"), (9, "codos a la vista"), (10, "estirar")):
+        filas = de(brazos, etiqueta)
+        if len(filas) < 2:
+            continue
+        sl, sr = saltos_por_minuto(filas, "L"), saltos_por_minuto(filas, "R")
+        cruz = {}
+        for lado, abd, flex in (("L", "armL", "armLtw"), ("R", "armR", "armRtw")):
+            v = sorted(angulo_a_la_cruz(_num(f[abd]), _num(f[flex])) for f in filas
+                       if _num(f.get(abd)) is not None and _num(f.get(flex)) is not None)
+            cruz[lado] = v[len(v) // 2] if v else None
+        alto = _num(filas[0].get("alto")) or 480.0
+        dentro = pct(filas, lambda f: all(
+            _num(f.get(f"img_codo_y_{lado}")) is not None and _num(f.get(f"img_codo_y_{lado}")) <= alto
+            for lado in "LR"))
+        linea = (f"  {etiqueta:>2} {texto}: {sl or 0:.0f} / {sr or 0:.0f}, "
+                 f"{cruz['L'] or 0:.0f} / {cruz['R'] or 0:.0f} grados, {dentro:.0f} %")
+        if etiqueta == 9:
+            vale = dentro >= CODOS_DENTRO_MIN
+            cumple = vale and max(sl or 0, sr or 0) <= SALTOS_YO_NO_FUI_MAX
+            linea += (f"  (criterio <= {SALTOS_YO_NO_FUI_MAX:.0f} con codos >= {CODOS_DENTRO_MIN:.0f} %) "
+                      + (ok(cumple) if vale else "NO VALE: los codos no se vieron"))
+        lineas.append(linea)
+
+    lineas += ["", "Luz (indice de ruido de la malla, zona muerta, pausa):"]
+    for etiqueta, texto in ((0, "con luz"), (11, "luz apagada"), (12, "luz prendida otra vez")):
+        filas = de(sesion, etiqueta)
+        if not filas:
+            continue
+        ruido = sorted(v for v in (_num(f.get("ruido_malla")) for f in filas) if v is not None)
+        zona = sorted(v for v in (_num(f.get("zona_muerta")) for f in filas) if v is not None)
+        pausa = pct(filas, lambda f: f.get("pausa_luz") == "1")
+        poses = [_pose(f) for f in filas if f.get("pausa_luz") != "1"]
+        s = saltos(poses)
+        lineas.append(f"  {etiqueta:>2} {texto}: ruido {ruido[len(ruido) // 2] if ruido else float('nan'):.2f}, "
+                      f"zona {zona[len(zona) // 2] if zona else float('nan'):.1f} (max {max(zona) if zona else 0:.1f}), "
+                      f"pausa {pausa:.0f} %, cabeza publicada sin pausa: salto mediano "
+                      f"{statistics.median(s) if s else float('nan'):.2f}")
+    luz = de(sesion, 12)
+    if luz:
+        t0 = float(luz[0]["t"])
+        tarde = [f for f in luz if float(f["t"]) - t0 > 6.0]
+        if tarde:
+            sigue = pct(tarde, lambda f: f.get("pausa_luz") == "1")
+            lineas.append(f"  con la luz prendida, pasados 6 s: pausa {sigue:.0f} % (criterio 0 %) {ok(sigue == 0.0)}")
+    return "\n".join(lineas)
+
+
 def analizar_gestos(base: Path) -> str:
     """El informe de la sesión de los gestos, con los criterios fijados antes."""
     import filtros_cabeza as fc
@@ -429,12 +600,15 @@ def analizar_gestos(base: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sesion_verificacion", description=__doc__.split("\n\n")[0])
     parser.add_argument("--base", help="nombre de los archivos, sin .csv (p7_final; p75 con --gestos)")
-    parser.add_argument("--gestos", action="store_true", help="la sesion corta de la cabeza y la mano a la cara")
+    modo = parser.add_mutually_exclusive_group()
+    modo.add_argument("--gestos", action="store_true", help="la sesion corta de la cabeza y la mano a la cara")
+    modo.add_argument("--ajustes", action="store_true", help="la del P7.6: enojo, mejillas, codos y luz")
     parser.add_argument("--analizar", action="store_true", help="solo el informe, sin grabar")
     args = parser.parse_args(argv)
-    base = PROJECT_ROOT / (args.base or ("p75" if args.gestos else "p7_final"))
+    base = PROJECT_ROOT / (args.base or ("p75" if args.gestos else "p76" if args.ajustes else "p7_final"))
     py = sys.executable
-    analisis = analizar_gestos if args.gestos else analizar
+    analisis = analizar_gestos if args.gestos else analizar_ajustes if args.ajustes else analizar
+    protocolo = PROTOCOLO_GESTOS if args.gestos else PROTOCOLO_AJUSTES if args.ajustes else PROTOCOLO
 
     if args.analizar:
         informe = analisis(base)
@@ -476,7 +650,7 @@ def main(argv: list[str] | None = None) -> int:
         webbrowser.open(URL_VISOR)
         _esperar(f"Visor: {URL_VISOR}\n  Conectalo a ws://localhost:9001 con el topic telmeow/teleop/pose.")
 
-        print(tabla_protocolo(PROTOCOLO_GESTOS if args.gestos else PROTOCOLO))
+        print(tabla_protocolo(protocolo))
         _esperar("Lee la tabla. Al seguir se abre la ventana del pipeline: la etiqueta 0\n"
                  "  empieza sola, y cada ESPACIO pasa a la siguiente.")
         latencia = base.with_name(base.name + "_latencia.csv")
@@ -491,7 +665,9 @@ def main(argv: list[str] | None = None) -> int:
             monitor.terminate()
             monitor.wait(timeout=5)
 
-        if args.gestos:
+        if args.ajustes:
+            pass
+        elif args.gestos:
             _esperar("Por ultimo, 20 s con el demo de la cabeza solo, para saber de donde sale\n"
                      "  el temblor: cara relajada, quieto, manos abajo. q lo corta.")
             subprocess.run([py, "-m", "telmeow_teleop.head_tracker",

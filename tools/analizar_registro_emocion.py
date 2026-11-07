@@ -65,7 +65,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from telmeow_teleop.emotion_classifier import NEUTRAL  # noqa: E402
+from telmeow_teleop.emotion_classifier import NEUTRAL, voto_con_cabeceo  # noqa: E402
 from telmeow_teleop.filters import ClassHysteresis  # noqa: E402
 
 #: Lo que tiene que enseñar el robot en cada etiqueta del protocolo del P6.1
@@ -176,6 +176,12 @@ def cargar(ruta: Path) -> list[dict]:
         fila["inicio_calibracion"] = None if valor in (None, "") else int(valor)
         # 'sin_apoyo' llegó el 2026-10-26; antes la regla no existía (0).
         fila["sin_apoyo"] = int(fila.get("sin_apoyo") or 0)
+        # 'cabeceo' y la regla del enojo llegaron el 2026-11-07 (P7.6); antes la
+        # regla no existía (por_grado 0).
+        cabeceo = fila.get("cabeceo")
+        fila["cabeceo"] = float(cabeceo) if cabeceo else None
+        fila["enojo_por_grado"] = float(fila.get("enojo_por_grado") or 0.0)
+        fila["enojo_desde"] = float(fila.get("enojo_desde") or 2.0)
     return filas
 
 
@@ -212,13 +218,17 @@ def voto(fila: dict) -> tuple[str, float] | None:
     Como en ``EmotionClassifier._inferir``: sin rostro no se llama al backend,
     y con rostro tampoco vota si ganó una clase sin equivalente (``prediccion``
     vacía), ni si había una mano sobre la cara (``manos``), ni si la cara se
-    usó para calibrar la neutra (``calibrando``).
+    usó para calibrar la neutra (``calibrando``). Y desde el P7.6 el enojo con
+    la cabeza baja vota neutral si no llega a su umbral (``voto_con_cabeceo``).
     """
     if not fila["rostro"] or not fila["prediccion"] or fila["confianza_pred"] is None:
         return None
     if fila.get("manos") or fila.get("calibrando"):
         return None
-    return fila["prediccion"], fila["confianza_pred"]
+    etiqueta = voto_con_cabeceo(
+        fila["prediccion"], fila["confianza_pred"], fila.get("cabeceo"),
+        fila["min_confidence"], fila.get("enojo_por_grado") or 0.0, fila.get("enojo_desde", 2.0))
+    return etiqueta, fila["confianza_pred"]
 
 
 def reproducir(

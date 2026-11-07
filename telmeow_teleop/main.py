@@ -623,6 +623,7 @@ class EstadoPanel:
     recortes_brazos: dict = field(default_factory=dict)   # {Side: ArmClamp}
     estimado: dict = field(default_factory=dict)          # {Side: bool}
     saludo: dict = field(default_factory=dict)            # {Side: 0..1}
+    mano_cara: dict = field(default_factory=dict)         # {Side: 0..1}
     brazos_activos: bool = True
     emocion_activa: bool = True
     emocion: str | None = None
@@ -733,9 +734,13 @@ def dibujar_panel(lienzo: np.ndarray, x0: int, estado: EstadoPanel) -> None:
             if eje is not None:
                 dibujar_barra(lienzo, x + 140, y, eje.fraction, recortado)
         y += 18
-    activos = [c for c in (Side.L, Side.R) if estado.saludo.get(c, 0.0) > 0.0]
-    if activos:
-        _texto(lienzo, x, y, "SALUDO " + " ".join(CANALES[c][0] for c in activos), _CIAN)
+    gestos = []
+    for nombre, pesos in (("SALUDO", estado.saludo), ("A LA CARA", estado.mano_cara)):
+        activos = [CANALES[c][0] for c in (Side.L, Side.R) if pesos.get(c, 0.0) > 0.0]
+        if activos:
+            gestos.append(f"{nombre} {' '.join(activos)}")
+    if gestos:
+        _texto(lienzo, x, y, "  ".join(gestos), _CIAN)
     y += 22
 
     # -- expresión ---------------------------------------------------------
@@ -1118,6 +1123,7 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
             recortes_brazos=brazos.last_clamp if brazos is not None else {},
             estimado=brazos.estimado if brazos is not None else {},
             saludo=brazos.pesos_saludo if brazos is not None else {},
+            mano_cara=brazos.pesos_mano_cara if brazos is not None else {},
             brazos_activos=brazos is not None,
             emocion_activa=emocion is not None,
             emocion=emocion.etiqueta if emocion is not None else None,

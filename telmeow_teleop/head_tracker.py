@@ -71,7 +71,7 @@ import numpy as np
 
 from .camera import abrir_camara, describir
 from .config import AppConfig
-from .filters import OneEuroFilter
+from .filters import OneEuroFilter, ZonaMuerta
 from .limits import HEAD_PAN_TARGET_RANGE, HEAD_TILT_RANGE, HeadClamp, clamp_head
 
 __all__ = [
@@ -323,6 +323,11 @@ class HeadTracker:
             Parámetros del filtro One Euro. ``min_cutoff`` gobierna el temblor
             en reposo (bajarlo suaviza más) y ``beta`` el retardo al moverse
             (subirlo lo hace más reactivo).
+        zona_muerta:
+            Grados que la salida del filtro tiene que alejarse para que el
+            robot se mueva (``filters.ZonaMuerta``). Quita el temblor con la
+            persona quieta a cambio de quedarse hasta ese ancho corto al
+            pararse. Con 0 no actúa.
         max_num_faces:
             Fijo en 1: se teleopera a una persona.
     """
@@ -339,6 +344,7 @@ class HeadTracker:
         invert_tilt: bool = False,
         min_cutoff: float = 0.5,
         beta: float = 0.5,
+        zona_muerta: float = 0.0,
         clock=time.perf_counter,
     ) -> None:
         arriba = gain_tilt if gain_tilt_up is None else gain_tilt_up
@@ -367,6 +373,10 @@ class HeadTracker:
 
         self._filter_pan = OneEuroFilter(min_cutoff, beta, clock=clock)
         self._filter_tilt = OneEuroFilter(min_cutoff, beta, clock=clock)
+        # Tras el One Euro y antes del recorte: así el recorte sigue mandando y
+        # el HUD pinta lo que de verdad se publica (P7.4).
+        self._zona_pan = ZonaMuerta(zona_muerta)
+        self._zona_tilt = ZonaMuerta(zona_muerta)
 
         self._neutral: tuple[float, float] | None = None
         self._raw: tuple[float, float] | None = None
@@ -396,6 +406,7 @@ class HeadTracker:
             invert_tilt=cfg.head.invert_tilt,
             min_cutoff=cfg.head.min_cutoff,
             beta=cfg.head.beta,
+            zona_muerta=cfg.head.zona_muerta,
         )
 
     # -- estado, para el HUD ----------------------------------------------
@@ -534,15 +545,19 @@ class HeadTracker:
             if self._raw is None:
                 return False
             self._neutral = self._raw
-        self._filter_pan.reset()
-        self._filter_tilt.reset()
+        self._reiniciar_filtros()
         return True
 
     def clear_neutral(self) -> None:
         self._neutral = None
         self._reference_cloud = None
+        self._reiniciar_filtros()
+
+    def _reiniciar_filtros(self) -> None:
         self._filter_pan.reset()
         self._filter_tilt.reset()
+        self._zona_pan.reset()
+        self._zona_tilt.reset()
 
     # -- proceso -----------------------------------------------------------
 
@@ -642,8 +657,8 @@ class HeadTracker:
         tilt = pitch * ganancia_tilt * (-1.0 if self.invert_tilt else 1.0)
 
         ahora = self._clock() if timestamp is None else timestamp
-        pan = self._filter_pan(pan, ahora)
-        tilt = self._filter_tilt(tilt, ahora)
+        pan = self._zona_pan(self._filter_pan(pan, ahora))
+        tilt = self._zona_tilt(self._filter_tilt(tilt, ahora))
 
         try:
             recorte = clamp_head(pan, tilt)

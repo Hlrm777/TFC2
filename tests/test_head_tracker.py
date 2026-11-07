@@ -11,6 +11,9 @@ stdlib puro como config/limits/filters).
 """
 
 import math
+import statistics
+import sys
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -34,6 +37,7 @@ from telmeow_teleop.limits import (
     HEAD_TILT_RANGE,
 )
 
+_RAIZ = Path(__file__).resolve().parent.parent
 ANCHO, ALTO = 640, 480
 K = camera_matrix(ANCHO, ALTO)
 SIN_DISTORSION = np.zeros((4, 1))
@@ -295,6 +299,85 @@ def test_invertir_cambia_el_sentido():
     finally:
         normal.close()
         invertido.close()
+
+
+def test_la_zona_muerta_va_tras_la_ganancia_y_antes_del_recorte():
+    """P7.4. El ancho es en grados DEL ROBOT: con ganancia 2, medio grado del
+    operador (1° del robot) no sale, y uno y medio sí, con un grado de
+    retraso. Y el recorte sigue mandando aunque la zona esté puesta."""
+    t = tracker_con(gain_pan=2.0, zona_muerta=1.0)
+    try:
+        assert t.map_to_robot(0.0, 0.0, timestamp=0.0) == pytest.approx((0.0, 0.0), abs=1e-6)
+        assert t.map_to_robot(0.5, 0.0, timestamp=0.1)[0] == pytest.approx(0.0, abs=0.01)
+        assert t.map_to_robot(1.5, 0.0, timestamp=0.2)[0] == pytest.approx(2.0, abs=0.01)
+        pan, _ = t.map_to_robot(80.0, 0.0, timestamp=0.3)
+        assert pan == pytest.approx(HEAD_PAN_RANGE[1]) and t.last_clamp.clamped
+    finally:
+        t.close()
+
+
+def test_calibrar_reinicia_la_zona_muerta():
+    """Si no, tras pulsar c el robot arrastraría hasta un grado de la pose
+    anterior a la calibración."""
+    t = tracker_con(method="pnp", zona_muerta=1.0)
+    try:
+        t.map_to_robot(0.0, 0.0, timestamp=0.0)
+        t.map_to_robot(10.0, 0.0, timestamp=0.1)            # sale 9: un grado corto
+        t._raw = (10.0, 0.0)
+        t.set_neutral()
+        assert t.map_to_robot(10.5, 0.0, timestamp=0.2)[0] == pytest.approx(0.5, abs=0.01)
+    finally:
+        t.close()
+
+
+def test_desde_config_pasa_el_filtro_del_p7_4():
+    from telmeow_teleop.config import AppConfig
+
+    t = HeadTracker.desde_config(AppConfig())
+    try:
+        assert t._zona_pan.ancho == t._zona_tilt.ancho == 1.0
+        assert t._filter_pan.beta == 0.2
+    finally:
+        t.close()
+
+
+@pytest.mark.skipif(
+    not (_RAIZ / "p7_final_cabeza.csv").exists()
+    or not (_RAIZ / "p7_movimiento_cabeza.csv").exists(),
+    reason="faltan las sesiones del P7",
+)
+def test_el_filtro_del_p7_4_quita_el_temblor_sobre_lo_grabado():
+    """La reproducción offline que decidió el filtro (tools/filtros_cabeza.py),
+    sobre las mismas sesiones. El ancla primero: con el filtro con que se grabó, la
+    cadena da lo grabado; si no, las cifras no hablarían de lo que vio el robot.
+    Con el nuevo, el salto mediano en reposo baja más de 10 veces y el retraso al
+    girar sube como mucho 40 ms."""
+    sys.path.insert(0, str(_RAIZ / "tools"))
+    import filtros_cabeza as fc
+    from telmeow_teleop.config import HeadConfig
+
+    reposo = fc.leer(_RAIZ / "p7_final_cabeza.csv")
+    giros = fc.leer(_RAIZ / "p7_movimiento_cabeza.csv")
+    quieto = {0, 4, 10}
+
+    antes = fc.reproducir(reposo, 0.5, 0.5)
+    grabado = [(float(f["pan"]), float(f["tilt"])) for f in reposo]
+    assert statistics.median(
+        max(abs(a[0] - b[0]), abs(a[1] - b[1])) for a, b in zip(antes, grabado)
+    ) < 0.05
+
+    cfg = HeadConfig()
+    ahora = fc.reproducir(reposo, cfg.min_cutoff, cfg.beta, cfg.zona_muerta)
+    mediana_antes = fc.temblor(reposo, antes, quieto)[0]
+    mediana_ahora = fc.temblor(reposo, ahora, quieto)[0]
+    assert mediana_antes > 1.0
+    assert mediana_ahora < 0.1
+    assert mediana_ahora * 10 < mediana_antes
+
+    ref = fc.reproducir(giros, 1000.0, 0.0)
+    r_antes = fc.retraso_ms(giros, fc.reproducir(giros, 0.5, 0.5), {1, 2, 3}, ref)
+    r_ahora = fc.retraso_ms(giros, fc.reproducir(giros, cfg.min_cutoff, cfg.beta, cfg.zona_muerta), {1, 2, 3}, ref)
+    assert r_ahora - r_antes <= 40
 
 
 def test_ganancias_no_positivas_se_rechazan():

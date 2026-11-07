@@ -391,8 +391,18 @@ class HeadConfig:
     gain_tilt_down: float = 1.80
     invert_pan: bool = True
     invert_tilt: bool = False
+    # Filtro (P7.4). En el pipeline la cabeza temblaba con la persona quieta:
+    # 1.02°/frame de salto mediano en reposo (p7_final), frente a 0.08 con la
+    # misma regla en la sesión del P4: la Face Mesh oscila 3-4 veces más (H60,
+    # causa sin determinar), la ganancia lo amplifica y beta lo deja pasar.
+    # Reproducido offline sobre esa sesión (tools/filtros_cabeza.py), beta 0.2 +
+    # zona muerta de 1° lo deja en 0.07°/frame en reposo y 0.64 sonriendo (antes
+    # 1.56), a cambio de +30 ms de retraso al girar y de quedarse hasta 1° corto
+    # al pararse. Decidido con Harold el 2026-11-03. Con zona_muerta 0 y beta 0.5
+    # vuelve el filtro del P4.
     min_cutoff: float = 0.5
-    beta: float = 0.5
+    beta: float = 0.2
+    zona_muerta: float = 1.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "HeadConfig":
@@ -405,6 +415,7 @@ class HeadConfig:
             invert_tilt=_env_bool(env, "HEAD_INVERT_TILT", cls.invert_tilt),
             min_cutoff=_env_float(env, "HEAD_MIN_CUTOFF", cls.min_cutoff),
             beta=_env_float(env, "HEAD_BETA", cls.beta),
+            zona_muerta=_env_float(env, "HEAD_ZONA_MUERTA", cls.zona_muerta),
         )
 
 
@@ -584,6 +595,10 @@ class ArmConfig:
     # lado—, el robot hace el saludo del visor con ese brazo (H42). El robot no
     # tiene antebrazo, así que no lo copia: lo reconoce. Ver saludo.py.
     saludo: bool = True
+    # ``mano_cara``: con una mano en la cara, el robot lleva a la suya el brazo
+    # de ese lado, y con las dos, los dos (P7.5). Tampoco se copia: se reconoce,
+    # porque copiado el brazo saltaba 2.6-5.1° por frame. Ver mano_cara.py.
+    mano_cara: bool = True
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "ArmConfig":
@@ -626,6 +641,7 @@ class ArmConfig:
             ),
             rampa_mano=_env_float(env, "ARM_RAMPA_MANO", cls.rampa_mano),
             saludo=_env_bool(env, "ARM_SALUDO", cls.saludo),
+            mano_cara=_env_bool(env, "ARM_MANO_CARA", cls.mano_cara),
         )
 
 

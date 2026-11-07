@@ -20,9 +20,16 @@ orden:
 Al terminar para lo que arrancó él (broker y servidor del visor), no lo que
 ya estaba en marcha.
 
+Con ``--gestos`` hace la sesión corta del P7.4 y el P7.5, sin la cámara de
+latencia ni la tabla de emociones: la cabeza que ya no debe temblar y la mano a
+la cara, con el protocolo ``PROTOCOLO_GESTOS`` y los criterios de abajo, fijados
+antes de grabar. Acaba con 20 s del demo de la cabeza, solo, que es lo que separa
+las dos causas posibles del H60.
+
 Uso, desde la raíz del repositorio::
 
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py
+    .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --gestos
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --analizar      # rehace el informe
 """
 
@@ -68,6 +75,60 @@ PROTOCOLO: tuple[tuple[int, str, int, str], ...] = (
      "la cabeza va a tu pose en ~1 s, sin salto"),
 )
 
+#: La sesión de los gestos (P7.4 y P7.5): (etiqueta, qué hacer, segundos, qué debe
+#: hacer el robot). Una postura por etiqueta, y bajar las manos es una etiqueta
+#: aparte para que las cifras del gesto no se mezclen con la salida.
+PROTOCOLO_GESTOS: tuple[tuple[int, str, int, str], ...] = (
+    (0, "Cara relajada mirando la pantalla, quieto, manos abajo. NO pulses c", 15,
+     "calibra 3 s; la cabeza NO vibra, quieta del todo"),
+    (1, "Sin girar la cabeza: habla en voz alta y sonríe a ratos, manos abajo", 15,
+     "la cabeza casi no se mueve aunque cambies la expresión"),
+    (2, "Gira despacio: a tu izquierda, centro, a tu derecha, centro, arriba, abajo, centro", 20,
+     "la cabeza te sigue sin retraso que se note; al pararte puede quedar 1° corta"),
+    (3, "Mano DERECHA en tu mejilla derecha, codo abajo; la izquierda abajo", 10,
+     "SU brazo derecho a la cara en ~1 s y quieto, sin saltos; el izquierdo en reposo"),
+    (4, "Baja la mano", 5, "el brazo vuelve a reposo en ~1 s, sin salto"),
+    (5, "Mano IZQUIERDA en tu mejilla izquierda, codo abajo; la derecha abajo", 10,
+     "SU brazo izquierdo a la cara y quieto; el derecho en reposo"),
+    (6, "Baja la mano", 5, "el brazo vuelve a reposo en ~1 s, sin salto"),
+    (7, "«El grito»: las dos manos en las mejillas, codos abajo", 10,
+     "los dos brazos a la cara y quietos"),
+    (8, "Baja las manos", 5, "los dos vuelven a reposo"),
+    (9, "Tápate la cara con las dos manos, quieto", 10,
+     "los dos brazos a la cara; la cabeza quieta y a los 2 s al frente"),
+    (10, "Baja las manos", 5, "brazos a reposo y la cabeza vuelve a tu pose en ~1 s"),
+    (11, "«Yo no fui»: manos abiertas a los lados de la cabeza, POR FUERA de los hombros, "
+         "palmas a la cámara", 10,
+     "NO es la mano a la cara: los brazos hacia la cruz"),
+    (12, "Saluda con la derecha, la izquierda abajo", 10,
+     "el saludo del robot con el derecho; NO la mano a la cara"),
+    (13, "Narra como contando un cuento, con las manos", 40,
+     "sigue tus gestos; A LA CARA solo si de verdad llevas la mano a la barbilla o la cara"),
+)
+
+#: Salto mediano de la cabeza con la persona quieta, en grados por frame: el de
+#: p7_final fue 1.02, y la reproducción offline con el filtro nuevo da 0.07.
+TEMBLOR_QUIETO_MAX = 0.2
+
+#: Lo mismo hablando y sonriendo: 1.56 sonriendo en p7_final, 0.64 offline.
+TEMBLOR_HABLANDO_MAX = 0.8
+
+#: % mínimo de la etiqueta con el brazo en la pose. No es 100: la etiqueta incluye
+#: subir la mano, reconocerla y la rampa, unos 2 de sus 10 s, más lo que tarde el
+#: operador tras pulsar ESPACIO.
+GESTO_MIN = 60.0
+
+#: Temblor crudo de la Face Mesh con la persona quieta en la sesión del P4
+#: (2026-09-06), con la misma regla que ``temblor_crudo``. En las nueve sesiones
+#: del pipeline, 0.9-1.4 (H60).
+TEMBLOR_CRUDO_P4 = 0.36
+
+#: Qué brazos del robot van a la cara en cada etiqueta de ``PROTOCOLO_GESTOS``.
+GESTO_ESPERADO: dict[int, str] = {3: "R", 5: "L", 7: "LR", 9: "LR"}
+
+#: Etiquetas en las que ningún brazo puede ir a la cara.
+SIN_GESTO: tuple[int, ...] = (0, 1, 2, 11, 12)
+
 
 # --------------------------------------------------------------------------
 # Antes de grabar
@@ -93,12 +154,12 @@ def estado_broker(tcp: bool, websocket: bool) -> str:
     return "arrancar"
 
 
-def tabla_protocolo() -> str:
+def tabla_protocolo(protocolo=PROTOCOLO) -> str:
     lineas = ["", "PROTOCOLO (ESPACIO al empezar cada etiqueta; la 0 empieza sola; q al acabar)", ""]
-    for etiqueta, que, segundos, robot in PROTOCOLO:
+    for etiqueta, que, segundos, robot in protocolo:
         lineas.append(f"  {etiqueta:>2}  {segundos:>3} s  {que}")
         lineas.append(f"              -> robot: {robot}")
-    total = sum(s for _, _, s, _ in PROTOCOLO)
+    total = sum(s for _, _, s, _ in protocolo)
     lineas += ["", f"  Unos {total // 60} min {total % 60} s en total.", ""]
     return "\n".join(lineas)
 
@@ -249,6 +310,117 @@ def analizar(base: Path) -> str:
     return "\n".join(lineas)
 
 
+def temblor_crudo(filas_cabeza: list[dict], etiqueta: int = 0, sin_arranque_s: float = 3.0) -> float | None:
+    """Salto mediano de lo que da la Face Mesh, antes de la ganancia y del filtro,
+    sin los primeros segundos de la etiqueta. Con ella en la mano se comparan
+    sesiones sin que el filtro de cada una se meta por medio."""
+    filas = [f for f in filas_cabeza if int(f["etiqueta"]) == etiqueta]
+    if not filas:
+        return None
+    t0 = float(filas[0]["t"])
+    filas = [f for f in filas if float(f["t"]) - t0 > sin_arranque_s]
+    s = saltos([(float(f["raw_pan"]), float(f["raw_tilt"])) for f in filas])
+    return statistics.median(s) if s else None
+
+
+def de_donde_sale_el_temblor(pipeline: float | None, demo: float | None) -> str:
+    """Lo que dice comparar el demo con el pipeline en la misma sesión (H60). El
+    2 es un corte de orden de magnitud: lo que hay que separar es 0.36 de 1.3."""
+    if pipeline is None or demo is None:
+        return "sin las dos medidas no se puede decir de donde sale"
+    if pipeline >= 2.0 * demo:
+        return "lo causa el PIPELINE: el demo solo tiembla mucho menos en las mismas condiciones"
+    if demo >= 2.0 * TEMBLOR_CRUDO_P4:
+        return "NO es el pipeline: el demo solo tiembla igual, asi que cambio algo desde septiembre"
+    return "ni el demo ni el pipeline tiemblan como antes: mirar que cambio en esta sesion"
+
+
+def en_la_pose_por_etiqueta(filas_brazos: list[dict]) -> dict[int, dict[str, float]]:
+    """``{etiqueta: {lado: % de sus frames con el brazo del todo en la pose}}``."""
+    cuenta: dict[int, dict[str, int]] = {}
+    total: dict[int, int] = {}
+    for f in filas_brazos:
+        e = int(f["etiqueta"])
+        total[e] = total.get(e, 0) + 1
+        por_lado = cuenta.setdefault(e, {"L": 0, "R": 0})
+        for lado in "LR":
+            if (_num(f.get(f"mano_cara_{lado}")) or 0.0) >= 0.999:
+                por_lado[lado] += 1
+    return {e: {lado: 100.0 * n / total[e] for lado, n in v.items()} for e, v in cuenta.items()}
+
+
+def analizar_gestos(base: Path) -> str:
+    """El informe de la sesión de los gestos, con los criterios fijados antes."""
+    import filtros_cabeza as fc
+    from telmeow_teleop.main import rutas_de_grabacion
+
+    rutas = rutas_de_grabacion(base.with_suffix(".csv"))
+    cabeza = fc.leer(rutas["cabeza"])
+    brazos = fc.leer(rutas["brazos"])
+    lineas = [f"INFORME DE GESTOS DE {base.name}", "=" * 60, "", "Cabeza publicada, salto mediano entre frames:"]
+    poses = [(float(f["pan"]), float(f["tilt"])) for f in cabeza]
+
+    def veredicto(cumple: bool) -> str:
+        return "OK" if cumple else "NO CUMPLE"
+
+    for etiqueta, texto, maximo, antes in (
+        (0, "quieto", TEMBLOR_QUIETO_MAX, 1.02),
+        (1, "hablando y sonriendo", TEMBLOR_HABLANDO_MAX, 1.56),
+    ):
+        try:
+            mediana, p95 = fc.temblor(cabeza, poses, {etiqueta})
+        except statistics.StatisticsError:
+            lineas.append(f"  {etiqueta:>2} {texto}: sin datos")
+            continue
+        lineas.append(f"  {etiqueta:>2} {texto}: {mediana:.3f} grados/frame, p95 {p95:.2f} "
+                      f"(criterio <= {maximo}; en p7_final {antes}) {veredicto(mediana <= maximo)}")
+    giros = [p for f, p in zip(cabeza, poses) if int(f["etiqueta"]) == 2]
+    if giros:
+        lineas.append(f"   2 girando: pan {min(p[0] for p in giros):+.0f}..{max(p[0] for p in giros):+.0f}, "
+                      f"tilt {min(p[1] for p in giros):+.0f}..{max(p[1] for p in giros):+.0f} grados")
+
+    crudo = temblor_crudo(cabeza)
+    ruta_demo = base.with_name(base.name + "_demo_cabeza.csv")
+    demo = temblor_crudo(fc.leer(ruta_demo)) if ruta_demo.is_file() else None
+    formato = lambda v: "--" if v is None else f"{v:.2f}"  # noqa: E731
+    lineas += ["", f"Temblor crudo de la Face Mesh, quieto (H60): pipeline {formato(crudo)}, "
+                   f"demo solo {formato(demo)}, sesion del P4 {TEMBLOR_CRUDO_P4}",
+               f"  {de_donde_sale_el_temblor(crudo, demo)}"]
+
+    pose = en_la_pose_por_etiqueta(brazos)
+    lineas += ["", "Mano a la cara, % de la etiqueta con el brazo en la pose (L / R):"]
+    for etiqueta, que, _, _ in PROTOCOLO_GESTOS:
+        if etiqueta not in pose:
+            continue
+        p = pose[etiqueta]
+        nota = ""
+        if etiqueta in GESTO_ESPERADO:
+            esperado = GESTO_ESPERADO[etiqueta]
+            bien = all(p[lado] >= GESTO_MIN for lado in esperado) and all(
+                p[lado] == 0.0 for lado in "LR" if lado not in esperado)
+            nota = f"  (esperado {esperado}, >= {GESTO_MIN:.0f} %) {veredicto(bien)}"
+        elif etiqueta in SIN_GESTO:
+            nota = f"  (esperado ninguno) {veredicto(p['L'] == 0.0 and p['R'] == 0.0)}"
+        lineas.append(f"  {etiqueta:>2} {p['L']:5.1f} / {p['R']:5.1f}{nota}  {que[:44]}")
+
+    comandos = {lado: [] for lado in "LR"}
+    for f in brazos:
+        for lado, abd, flex in (("L", "armL", "armLtw"), ("R", "armR", "armRtw")):
+            if (_num(f.get(f"mano_cara_{lado}")) or 0.0) >= 0.999 and _num(f.get(abd)) is not None:
+                comandos[lado].append((float(f[abd]), float(f[flex])))
+    for lado, valores in comandos.items():
+        s = saltos(valores)
+        if s:
+            lineas.append(f"  brazo {lado} en la pose: salto mediano {statistics.median(s):.2f} "
+                          f"grados/frame, maximo {max(s):.1f} (antes 2.6-5.1)")
+    saludos = [f for f in brazos if int(f["etiqueta"]) == 12]
+    if saludos:
+        reconocido = sum((_num(f.get("saludo_R")) or 0.0) > 0.0 for f in saludos)
+        lineas += ["", f"Saludo (etiqueta 12): el robot saludo en {100 * reconocido / len(saludos):.0f} % "
+                       "de la etiqueta"]
+    return "\n".join(lineas)
+
+
 # --------------------------------------------------------------------------
 # La sesión
 # --------------------------------------------------------------------------
@@ -256,14 +428,16 @@ def analizar(base: Path) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sesion_verificacion", description=__doc__.split("\n\n")[0])
-    parser.add_argument("--base", default="p7_final", help="nombre de los archivos (sin .csv)")
+    parser.add_argument("--base", help="nombre de los archivos, sin .csv (p7_final; p75 con --gestos)")
+    parser.add_argument("--gestos", action="store_true", help="la sesion corta de la cabeza y la mano a la cara")
     parser.add_argument("--analizar", action="store_true", help="solo el informe, sin grabar")
     args = parser.parse_args(argv)
-    base = PROJECT_ROOT / args.base
+    base = PROJECT_ROOT / (args.base or ("p75" if args.gestos else "p7_final"))
     py = sys.executable
+    analisis = analizar_gestos if args.gestos else analizar
 
     if args.analizar:
-        informe = analizar(base)
+        informe = analisis(base)
         print(informe)
         base.with_name(base.name + "_informe.txt").write_bytes(informe.encode("utf-8"))
         return 0
@@ -302,7 +476,7 @@ def main(argv: list[str] | None = None) -> int:
         webbrowser.open(URL_VISOR)
         _esperar(f"Visor: {URL_VISOR}\n  Conectalo a ws://localhost:9001 con el topic telmeow/teleop/pose.")
 
-        print(tabla_protocolo())
+        print(tabla_protocolo(PROTOCOLO_GESTOS if args.gestos else PROTOCOLO))
         _esperar("Lee la tabla. Al seguir se abre la ventana del pipeline: la etiqueta 0\n"
                  "  empieza sola, y cada ESPACIO pasa a la siguiente.")
         latencia = base.with_name(base.name + "_latencia.csv")
@@ -317,18 +491,25 @@ def main(argv: list[str] | None = None) -> int:
             monitor.terminate()
             monitor.wait(timeout=5)
 
-        _esperar("Ahora la latencia de la camara, con la LUZ DE TRABAJO de siempre:\n"
-                 "  30 s mirando la pantalla, quieto. q la corta.")
-        r = subprocess.run([py, str(PROJECT_ROOT / "tools" / "medir_latencia_camara.py"),
-                            "--csv", str(base.with_name(base.name + "_latencia_camara.csv"))])
-        if r.returncode != 0:
-            otra = input("\nNo hubo contraste. ¿Repetir con menos luz (solo una lampara)? [s/N] ")
-            if otra.strip().lower().startswith("s"):
-                subprocess.run([py, str(PROJECT_ROOT / "tools" / "medir_latencia_camara.py"),
-                                "--csv", str(base.with_name(base.name + "_latencia_camara_penumbra.csv"))])
+        if args.gestos:
+            _esperar("Por ultimo, 20 s con el demo de la cabeza solo, para saber de donde sale\n"
+                     "  el temblor: cara relajada, quieto, manos abajo. q lo corta.")
+            subprocess.run([py, "-m", "telmeow_teleop.head_tracker",
+                            "--record", str(base.with_name(base.name + "_demo_cabeza.csv"))],
+                           cwd=PROJECT_ROOT)
+        else:
+            _esperar("Ahora la latencia de la camara, con la LUZ DE TRABAJO de siempre:\n"
+                     "  30 s mirando la pantalla, quieto. q la corta.")
+            r = subprocess.run([py, str(PROJECT_ROOT / "tools" / "medir_latencia_camara.py"),
+                                "--csv", str(base.with_name(base.name + "_latencia_camara.csv"))])
+            if r.returncode != 0:
+                otra = input("\nNo hubo contraste. ¿Repetir con menos luz (solo una lampara)? [s/N] ")
+                if otra.strip().lower().startswith("s"):
+                    subprocess.run([py, str(PROJECT_ROOT / "tools" / "medir_latencia_camara.py"),
+                                    "--csv", str(base.with_name(base.name + "_latencia_camara_penumbra.csv"))])
 
         print("\nAnalizando...\n")
-        informe = analizar(base)
+        informe = analisis(base)
         print(informe)
         destino = base.with_name(base.name + "_informe.txt")
         destino.write_bytes(informe.encode("utf-8"))

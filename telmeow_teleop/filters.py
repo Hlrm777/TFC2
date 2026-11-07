@@ -479,6 +479,58 @@ class SlewLimiter:
         return self._y
 
 
+class ZonaMuerta:
+    """Mantiene la salida quieta mientras la entrada no se aleje más de
+    ``ancho``; cuando se aleja, la sigue a esa distancia (histéresis).
+
+    Existe por el temblor de la cabeza en el pipeline (P7.4): con la persona
+    quieta, la Face Mesh oscila 1-3° de un frame a otro, la ganancia de la
+    cabeza (1.5-1.8) lo amplifica y el One Euro no lo para del todo, porque su
+    ``beta`` toma cada oscilación por un movimiento. El robot tiembla con la
+    persona quieta, y a un niño eso le parece raro. Un pasabajos más fuerte no
+    lo resuelve sin hacer lento todo lo demás; esto sí: las oscilaciones más
+    pequeñas que ``ancho`` no salen, y un giro de verdad pasa entero, con
+    ``ancho`` grados de retraso.
+
+    El precio, y se declara: al pararse tras un giro, la salida se queda hasta
+    ``ancho`` grados corta de la entrada, y no lo recupera hasta el siguiente
+    movimiento. Con 1° en la cabeza es menos de lo que un niño distingue en un
+    robot de este tamaño, y el robot nunca pasa de donde llegó la entrada, así
+    que no rompe ningún límite que se aplique antes.
+
+    Con ``ancho`` 0 deja pasar la entrada tal cual.
+    """
+
+    def __init__(self, ancho: float) -> None:
+        ancho = float(ancho)
+        if not (math.isfinite(ancho) and ancho >= 0.0):
+            raise ValueError(f"ancho debe ser finito y no negativo, se recibió {ancho!r}")
+        self.ancho = ancho
+        self._y: float | None = None
+
+    @property
+    def value(self) -> float | None:
+        """Salida actual, sin consumir una muestra."""
+        return self._y
+
+    def reset(self) -> None:
+        """Olvida el estado: la siguiente muestra sale tal cual. Se usa al
+        calibrar, para que la cabeza no arrastre un grado de la pose de antes."""
+        self._y = None
+
+    def __call__(self, valor: float) -> float:
+        valor = float(valor)
+        if not math.isfinite(valor):
+            raise ValueError(f"el valor no es finito: {valor!r}")
+        if self._y is None:
+            self._y = valor
+        elif valor > self._y + self.ancho:
+            self._y = valor - self.ancho
+        elif valor < self._y - self.ancho:
+            self._y = valor + self.ancho
+        return self._y
+
+
 class SlewLimiterND:
     """Límite de velocidad sobre un VECTOR de articulaciones, coordinado.
 

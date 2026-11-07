@@ -85,6 +85,17 @@ def test_defaults_cabeza():
     assert head.gain_tilt_down == 1.80
 
 
+def test_el_filtro_de_la_cabeza_es_el_del_p7_4():
+    """beta 0.2 y zona muerta de 1°, decididos con Harold el 2026-11-03 sobre
+    la reproducción offline de p7_final (tools/filtros_cabeza.py): el temblor
+    en reposo baja de 1.02 a 0.07°/frame por +30 ms al girar. Se pueden
+    devolver al filtro del P4 por entorno, sin tocar código."""
+    head = HeadConfig()
+    assert (head.min_cutoff, head.beta, head.zona_muerta) == (0.5, 0.2, 1.0)
+    cfg = AppConfig.from_env({"TELMEOW_HEAD_BETA": "0.5", "TELMEOW_HEAD_ZONA_MUERTA": "0"})
+    assert (cfg.head.beta, cfg.head.zona_muerta) == (0.5, 0.0)
+
+
 def test_el_pan_viene_invertido_a_proposito():
     """Para que el robot gire a SU derecha cuando el operador gira a la suya.
 

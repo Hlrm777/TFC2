@@ -7,6 +7,7 @@ doble broker, el protocolo que se enseña, y las cifras del informe.
 
 from __future__ import annotations
 
+import csv
 import socket
 import sys
 from pathlib import Path
@@ -90,6 +91,104 @@ def test_con_el_servicio_de_mosquitto_se_para_sin_lanzar_nada(monkeypatch, capsy
     assert sv.main([]) == 1
     assert lanzados == []
     assert "Stop-Service mosquitto" in capsys.readouterr().out
+
+
+def test_el_protocolo_de_los_gestos_es_una_postura_por_etiqueta():
+    """Una postura por etiqueta y con referencia concreta: lo que el informe
+    espera de cada una tiene que estar en la tabla que lee el operador."""
+    etiquetas = [e for e, *_ in sv.PROTOCOLO_GESTOS]
+    assert etiquetas == list(range(14))
+    que = {e: t for e, t, *_ in sv.PROTOCOLO_GESTOS}
+    assert "DERECHA" in que[3] and "IZQUIERDA" in que[5] and "grito" in que[7]
+    assert "POR FUERA de los hombros" in que[11] and "Saluda" in que[12]
+    assert set(sv.GESTO_ESPERADO) | set(sv.SIN_GESTO) <= set(etiquetas)
+    assert not set(sv.GESTO_ESPERADO) & set(sv.SIN_GESTO)
+    tabla = sv.tabla_protocolo(sv.PROTOCOLO_GESTOS)
+    assert "2 min 50 s" in tabla and "NO pulses c" in tabla
+
+
+def _sesion_de_gestos(tmp_path, *, derecha_en_3=1.0, izquierda_en_3=0.0, en_11=0.0, temblor=0.05):
+    """Escribe los CSV de cabeza y brazos de una sesión de 2 s por etiqueta."""
+    from telmeow_teleop.arm_tracker import COLUMNAS_CSV as BRAZOS
+    from telmeow_teleop.head_tracker import COLUMNAS_CSV as CABEZA
+
+    def escribir(ruta, columnas, filas):
+        with open(ruta, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=columnas, restval="")
+            w.writeheader()
+            w.writerows(filas)
+
+    cabeza, brazos = [], []
+    t = 0.0
+    for etiqueta in range(14):
+        for k in range(40):
+            t += 0.05
+            cabeza.append({"t": t, "etiqueta": etiqueta, "pan": temblor * (k % 2), "tilt": 0.0,
+                           "raw_pan": 0.0, "raw_tilt": 0.0})
+            pesos = {3: (izquierda_en_3, derecha_en_3), 5: (1.0, 0.0), 7: (1.0, 1.0),
+                     9: (1.0, 1.0), 11: (en_11, en_11)}.get(etiqueta, (0.0, 0.0))
+            brazos.append({"t": t, "etiqueta": etiqueta,
+                           "mano_cara_L": pesos[0], "mano_cara_R": pesos[1],
+                           "armL": -57.0, "armLtw": -125.0, "armR": -57.0, "armRtw": -125.0,
+                           "saludo_R": 1.0 if etiqueta == 12 else 0.0})
+    escribir(tmp_path / "g_cabeza.csv", CABEZA, cabeza)
+    escribir(tmp_path / "g_brazos.csv", BRAZOS, brazos)
+    return tmp_path / "g"
+
+
+def test_el_informe_de_gestos_da_por_buena_una_sesion_que_cumple(tmp_path):
+    informe = sv.analizar_gestos(_sesion_de_gestos(tmp_path))
+    assert "NO CUMPLE" not in informe
+    assert informe.count("OK") == 2 + 4 + 5      # temblor, gestos esperados, sin gesto
+    assert "el robot saludo en 100 %" in informe
+    assert "salto mediano 0.00" in informe
+
+
+@pytest.mark.parametrize("cambio, donde", [
+    ({"derecha_en_3": 0.0}, "   3 "),               # el brazo no fue
+    ({"izquierda_en_3": 1.0}, "   3 "),             # fue también el otro
+    ({"en_11": 1.0}, "  11 "),                      # «yo no fui» dispara el gesto
+    ({"temblor": 1.0}, "   0 quieto"),              # la cabeza sigue temblando
+])
+def test_el_informe_de_gestos_senala_lo_que_no_cumple(tmp_path, cambio, donde):
+    informe = sv.analizar_gestos(_sesion_de_gestos(tmp_path, **cambio))
+    assert any("NO CUMPLE" in linea and linea.startswith(donde) for linea in informe.splitlines())
+
+
+def test_el_temblor_crudo_es_el_de_la_face_mesh_y_sin_el_arranque():
+    filas = [{"t": 0.05 * k, "etiqueta": 0, "raw_pan": 9.0 * (k % 2), "raw_tilt": 0.0} for k in range(60)]
+    filas += [{"t": 3.5 + 0.05 * k, "etiqueta": 0, "raw_pan": 0.5 * (k % 2), "raw_tilt": 0.0} for k in range(60)]
+    filas += [{"t": 7.0 + 0.05 * k, "etiqueta": 1, "raw_pan": 4.0 * (k % 2), "raw_tilt": 0.0} for k in range(100)]
+    assert sv.temblor_crudo(filas) == pytest.approx(0.5)
+    assert sv.temblor_crudo(filas, etiqueta=1) == pytest.approx(4.0)
+    assert sv.temblor_crudo(filas, etiqueta=5) is None
+
+
+@pytest.mark.parametrize("pipeline, demo, dice", [
+    (1.3, 0.36, "PIPELINE"),           # el demo solo sigue como en septiembre
+    (1.3, 1.2, "NO es el pipeline"),   # los dos tiemblan: cambió otra cosa
+    (0.4, 0.36, "mirar"),              # hoy no tiembla ninguno
+    (1.3, None, "sin las dos"),
+])
+def test_de_donde_sale_el_temblor(pipeline, demo, dice):
+    assert dice in sv.de_donde_sale_el_temblor(pipeline, demo)
+
+
+def test_el_informe_de_gestos_compara_con_el_demo_si_lo_hay(tmp_path):
+    base = _sesion_de_gestos(tmp_path)
+    assert "demo solo --" in sv.analizar_gestos(base)
+    with open(tmp_path / "g_demo_cabeza.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["t", "etiqueta", "raw_pan", "raw_tilt"])
+        w.writeheader()
+        w.writerows({"t": 0.05 * k, "etiqueta": 0, "raw_pan": 0.3 * (k % 2), "raw_tilt": 0.0} for k in range(200))
+    assert "demo solo 0.30" in sv.analizar_gestos(base)
+
+
+def test_con_gestos_el_informe_y_la_base_son_los_suyos(monkeypatch, tmp_path):
+    monkeypatch.setattr(sv, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(sv, "analizar_gestos", lambda base: f"GESTOS DE {base.name}")
+    assert sv.main(["--analizar", "--gestos"]) == 0
+    assert (tmp_path / "p75_informe.txt").read_text(encoding="utf-8") == "GESTOS DE p75"
 
 
 def test_analizar_escribe_el_informe(monkeypatch, tmp_path, capsys):

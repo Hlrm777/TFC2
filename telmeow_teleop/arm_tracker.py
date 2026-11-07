@@ -111,6 +111,9 @@ from .retarget import (
     Retargeting,
     direccion_por_posicion,
 )
+from .mano_cara import POSE as POSE_MANO_CARA
+from .mano_cara import RAMPA as RAMPA_MANO_CARA
+from .mano_cara import DetectorManoCara, senales_mano_cara
 from .saludo import RAMPA as RAMPA_SALUDO
 from .saludo import DetectorSaludo, patron_saludo, senales_saludo
 
@@ -732,6 +735,11 @@ class ArmTracker:
             no cuenta nunca. Ver ``RAMPA_MANO_S``.
         saludo: que el robot salude solo cuando el operador saluda (P5.7). Ver
             ``saludo.py`` y ``aplicar_saludo``.
+        mano_cara: que el robot se lleve a la cara el brazo del lado de la mano
+            que el operador tiene en la suya (P7.5). Ver ``mano_cara.py`` y
+            ``aplicar_mano_cara``. Apagada por defecto para que reproducir una
+            grabación antigua siga dando lo que se publicó; la enciende la
+            configuración.
         banda_tronco: lo que tarda el brazo del robot en cerrarse hasta su
             tope interno cuando la muñeca cruza hacia dentro del tronco, en
             fracción del largo del brazo (0.3 = la mitad del cuerpo). Ver
@@ -771,6 +779,7 @@ class ArmTracker:
         focal_relativa: float = FOCAL_RELATIVA,
         rampa_mano: float = RAMPA_MANO_S,
         saludo: bool = True,
+        mano_cara: bool = False,
         pose_estimator=None,
         clock=time.perf_counter,
     ) -> None:
@@ -915,6 +924,13 @@ class ArmTracker:
         self._pesos_saludo: dict[Side, float] = {Side.L: 0.0, Side.R: 0.0}
         self._inicio_saludo: dict[Side, float] = {}
         self._t_saludo: dict[Side, float] = {}
+        # -- la mano a la cara (P7.5) ----------------------------------------------
+        self.mano_cara = bool(mano_cara)
+        self._detectores_cara: dict[Side, DetectorManoCara] = {
+            lado: DetectorManoCara() for lado in (Side.L, Side.R)
+        }
+        self._pesos_cara: dict[Side, float] = {Side.L: 0.0, Side.R: 0.0}
+        self._t_cara: dict[Side, float] = {}
 
         # -- etapa de salida: de la estimación al comando ------------------
         # La pose de reposo pasa por clamp_arm igual que cualquier otra: así no
@@ -994,6 +1010,7 @@ class ArmTracker:
             focal_relativa=cfg.arm.focal_relativa,
             rampa_mano=cfg.arm.rampa_mano,
             saludo=cfg.arm.saludo,
+            mano_cara=cfg.arm.mano_cara,
         )
 
     # -- estado para el HUD y la calibración -------------------------------
@@ -1122,6 +1139,12 @@ class ArmTracker:
         normal, 1 = el saludo entero; entre medias, la entrada o la salida.
         Ver ``aplicar_saludo``."""
         return dict(self._pesos_saludo)
+
+    @property
+    def pesos_mano_cara(self) -> dict[Side, float]:
+        """Cuánto manda la pose de la mano a la cara en cada canal, igual que
+        ``pesos_saludo``. Ver ``aplicar_mano_cara``."""
+        return dict(self._pesos_cara)
 
     @property
     def hombros_mundo(self) -> tuple[float, float] | None:
@@ -1606,6 +1629,7 @@ class ArmTracker:
             self._hombros_mundo = None
             for canal in (Side.L, Side.R):
                 self._cortar_saludo(canal)
+                self._perder_mano_cara(canal, self._clock())
             return None
         mundo = mundo.landmark
         self._landmarks_imagen = resultado.pose_landmarks
@@ -1638,6 +1662,8 @@ class ArmTracker:
         ahora = self._clock()
         u_sup = self._actualizar_tronco(mundo, ahora)
         if u_sup is None:
+            for canal in (Side.L, Side.R):
+                self._perder_mano_cara(canal, ahora)
             return ArmAngles()
 
         salida = ArmAngles()
@@ -1651,6 +1677,7 @@ class ArmTracker:
                 # hueco, el brazo puede estar en cualquier sitio.
                 self._escorzo_previo.pop(canal, None)
                 self._cortar_saludo(canal)
+                self._soltar_mano_cara(canal)
                 continue
             campo_abd, campo_flex = CANALES[canal]
             setattr(salida, campo_abd, angulos[0])
@@ -1698,6 +1725,12 @@ class ArmTracker:
         self._confianzas_mano[canal] = confianza
         vis_mano = vis_mano * confianza
         peso_mano = self._peso_mano(vis_mano, vis_codo)
+        # Aquí y no al final: con la mano delante de la cara el brazo puede
+        # quedarse sin medir, y eso no puede dejar al detector sin muestra.
+        self._medir_mano_cara(
+            canal, etiqueta, pixeles,
+            confianza >= 0.999 and vis_mano >= self.min_visibility, timestamp,
+        )
 
         hombro = self._punto(mundo, etiqueta, "hombro")
         base = torso_basis(hombro, self._punto(mundo, etiqueta.opposite, "hombro"), u_sup)
@@ -1813,7 +1846,83 @@ class ArmTracker:
         if salida is None:
             return None
         salida = self.aplicar_reposo(canal, direccion, salida)
+        salida = self.aplicar_mano_cara(canal, salida, timestamp)
         return self.aplicar_saludo(canal, salida, timestamp)
+
+    def _medir_mano_cara(
+        self,
+        canal: Side,
+        etiqueta: Side,
+        pixeles: dict[str, tuple[float, float]] | None,
+        de_fiar: bool,
+        timestamp: float,
+    ) -> None:
+        """Da al detector la mano de este frame respecto a los dos hombros."""
+        muestra = None
+        if pixeles is not None:
+            imagen, ancho, alto = self._imagen
+            contrario = imagen[LANDMARKS[etiqueta.opposite]["hombro"]]
+            muestra = senales_mano_cara(
+                pixeles["mano"],
+                pixeles["hombro"],
+                (float(contrario.x) * ancho, float(contrario.y) * alto),
+            )
+        self._detectores_cara[canal].actualizar(timestamp, muestra, de_fiar)
+
+    def _perder_mano_cara(self, canal: Side, timestamp: float) -> None:
+        """Un frame sin pose. No corta el gesto: tapándose la cara BlazePose
+        se pierde a ratos, y el gesto acaba cuando eso dura ``T_SALIDA``."""
+        self._detectores_cara[canal].actualizar(timestamp, None)
+        self._soltar_mano_cara(canal)
+
+    def _soltar_mano_cara(self, canal: Side) -> None:
+        """Un frame sin brazo que mezclar: si el gesto acabó, el peso no se
+        queda colgado y el comando lo lleva el limitador, como en el saludo."""
+        if not self._detectores_cara[canal].activo:
+            self._pesos_cara[canal] = 0.0
+            self._t_cara.pop(canal, None)
+
+    def _mano_en_la_cara(self, canal: Side) -> bool:
+        """Si el gesto está reconocido y este mapeo puede hacerlo."""
+        return (
+            self.mano_cara
+            and self._mapeo != "articular"
+            and self._detectores_cara[canal].activo
+        )
+
+    def aplicar_mano_cara(
+        self,
+        canal: Side | str,
+        salida: tuple[float, float],
+        timestamp: float,
+    ) -> tuple[float, float]:
+        """La mano a la cara (P7.5): mientras el detector del canal ve la mano
+        del operador en la cara, el brazo pasa del mapeo a ``mano_cara.POSE``
+        con un paso suave de ``mano_cara.RAMPA``, y vuelve igual al terminar.
+        Con el peso en 1 lo que diga BlazePose no llega al robot: ahí se quedan
+        los saltos.
+
+        Solo con los mapeos vectoriales, como el saludo: la pose vive en la rama
+        de flexión extendida, que el mapeo ``articular`` no usa.
+        """
+        canal = Side.parse(canal)
+        ultimo = self._t_cara.get(canal)
+        self._t_cara[canal] = timestamp
+        if not self.mano_cara or self._mapeo == "articular":
+            self._pesos_cara[canal] = 0.0
+            return salida
+        paso = 0.0 if ultimo is None else max(0.0, timestamp - ultimo) / RAMPA_MANO_CARA
+        activo = self._mano_en_la_cara(canal)
+        peso = self._pesos_cara[canal]
+        peso = min(1.0, peso + paso) if activo else max(0.0, peso - paso)
+        self._pesos_cara[canal] = peso
+        if peso <= 0.0:
+            return salida
+        e = _paso_suave(peso)
+        return (
+            salida[0] + e * (POSE_MANO_CARA[0] - salida[0]),
+            salida[1] + e * (POSE_MANO_CARA[1] - salida[1]),
+        )
 
     def aplicar_saludo(
         self,
@@ -2030,18 +2139,21 @@ class ArmTracker:
         aquí» de «el brazo no se veía y el comando venía de otra parte», que es
         exactamente la ambigüedad del H26.
 
-        Tres reglas, en orden:
+        Cuatro reglas, en orden:
 
         1. **Si el brazo se estimó**, el objetivo es lo estimado.
-        2. **Si no, y lleva menos de ``gracia_s`` sin estimarse**, se mantiene el
+        2. **Si no, y la mano sigue en la cara** (P7.5), el objetivo es la pose
+           de la mano a la cara. Es justo cuando BlazePose se queda sin el brazo,
+           y sin esta regla el robot lo bajaría a reposo a mitad del gesto.
+        3. **Si no, y lleva menos de ``gracia_s`` sin estimarse**, se mantiene el
            último objetivo. Es lo que evita que un parpadeo de visibilidad
            —frecuentísimo con la mano en el borde del cuadro— tire los brazos al
            suelo a mitad de gesto.
-        3. **Si no, el objetivo es la pose de reposo.** Perder el seguimiento no
+        4. **Si no, el objetivo es la pose de reposo.** Perder el seguimiento no
            debe dejar el brazo clavado donde estaba: el robot se queda con un
            gesto que ya nadie sostiene, y a un espectador le parece un cuelgue.
 
-        Y sobre las tres, un **límite de velocidad angular** por canal. Es lo
+        Y sobre las cuatro, un **límite de velocidad angular** por canal. Es lo
         que hace que las transiciones se vean como un movimiento y no como un
         teletransporte, y protege de la discontinuidad que el One Euro no puede
         filtrar: tras un hueco largo su ``dt`` es grande, su factor de suavizado
@@ -2062,6 +2174,8 @@ class ArmTracker:
             if medido_abd is not None and medido_flex is not None:
                 objetivo = (medido_abd, medido_flex)
                 self._t_estimado[canal] = ahora
+            elif self._mano_en_la_cara(canal):
+                objetivo = POSE_MANO_CARA
             else:
                 ultimo = self._t_estimado.get(canal)
                 en_gracia = ultimo is not None and ahora - ultimo <= self.gracia_s
@@ -2233,6 +2347,8 @@ COLUMNAS_CSV = (
     "hombros_ancho_m", "hombros_dz_m",
     # P5.7. saludo_*: cuánto mandaba el saludo del robot (0..1).
     "saludo_L", "saludo_R",
+    # P7.5. mano_cara_*: cuánto mandaba la pose de la mano a la cara (0..1).
+    "mano_cara_L", "mano_cara_R",
 )
 
 
@@ -2269,6 +2385,7 @@ def fila_csv(tracker: "ArmTracker", mando: ArmAngles, t: float, etiqueta: int,
     confianzas_mano = tracker.confianzas_mano
     hombros = tracker.hombros_mundo
     pesos_saludo = tracker.pesos_saludo
+    pesos_cara = tracker.pesos_mano_cara
 
     def _f(valor: float | None) -> str:
         return "" if valor is None else f"{valor:.4f}"
@@ -2325,6 +2442,8 @@ def fila_csv(tracker: "ArmTracker", mando: ArmAngles, t: float, etiqueta: int,
         *(("", "") if hombros is None else (f"{hombros[0]:.5f}", f"{hombros[1]:.5f}")),
         _f(pesos_saludo.get(Side.L)),
         _f(pesos_saludo.get(Side.R)),
+        _f(pesos_cara.get(Side.L)),
+        _f(pesos_cara.get(Side.R)),
     ]
 
 

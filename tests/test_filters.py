@@ -21,6 +21,7 @@ from telmeow_teleop.filters import (
     EMAFilter,
     OneEuroFilter,
     SlewLimiter,
+    ZonaMuerta,
 )
 
 FS = 100.0
@@ -378,6 +379,53 @@ def test_el_limitador_acepta_reloj_inyectable():
     lim = SlewLimiter(10.0, clock=lambda: next(reloj))
     assert lim(0.0) == 0.0
     assert lim(100.0) == pytest.approx(5.0)
+
+
+# --------------------------------------------------------------------------
+# Zona muerta (P7.4)
+# --------------------------------------------------------------------------
+
+
+def test_la_zona_muerta_no_deja_salir_las_oscilaciones_pequenas():
+    """La persona quieta: la entrada oscila ±0.9° y la salida no se mueve."""
+    z = ZonaMuerta(1.0)
+    assert z(10.0) == 10.0
+    assert [z(10.0 + d) for d in (0.9, -0.9, 0.5, -1.0, 0.0)] == [10.0] * 5
+
+
+def test_la_zona_muerta_sigue_un_giro_con_un_ancho_de_retraso_y_se_queda_corta():
+    """Un giro pasa entero, a ``ancho`` de distancia; al pararse, la salida
+    se queda ese ancho corta y nunca pasa de donde llegó la entrada."""
+    z = ZonaMuerta(1.0)
+    z(0.0)
+    salida = [z(x) for x in (2.0, 5.0, 9.0, 12.0, 12.0, 12.0)]
+    assert salida == [1.0, 4.0, 8.0, 11.0, 11.0, 11.0]
+    assert max(salida) <= 12.0
+    assert z(10.5) == 11.0           # volver medio grado no la mueve
+    assert z(8.0) == 9.0             # al otro lado, la sigue igual
+
+
+def test_la_zona_muerta_en_cero_deja_pasar_todo_y_se_reinicia():
+    z = ZonaMuerta(0.0)
+    assert [z(x) for x in (1.0, 1.2, -3.0)] == [1.0, 1.2, -3.0]
+    z = ZonaMuerta(1.0)
+    z(5.0)
+    z.reset()
+    assert z.value is None and z(5.5) == 5.5
+
+
+@pytest.mark.parametrize("ancho", [-0.1, float("nan"), float("inf")])
+def test_la_zona_muerta_valida_su_ancho(ancho):
+    with pytest.raises(ValueError):
+        ZonaMuerta(ancho)
+
+
+def test_la_zona_muerta_rechaza_valores_no_finitos():
+    z = ZonaMuerta(1.0)
+    z(0.0)
+    with pytest.raises(ValueError):
+        z(float("nan"))
+    assert z.value == 0.0
 
 
 # --------------------------------------------------------------------------

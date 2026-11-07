@@ -271,6 +271,7 @@ def reproducir(filas: list[dict], invert_abduccion: bool = False, **kwargs) -> d
                 "confianza": tracker.confianzas_mano.get(canal),
                 "reposo": tracker.pesos_reposo.get(canal),
                 "saludo": tracker.pesos_saludo.get(canal, 0.0),
+                "mano_cara": tracker.pesos_mano_cara.get(canal, 0.0),
                 "mano": tracker.vectores.get(canal),
             })
     salida["incompletos"] = incompletos
@@ -338,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mapeo", choices=("posicion", "direccion", "articular"))
     parser.add_argument("--sin-escorzo", action="store_true")
     parser.add_argument("--sin-saludo", action="store_true")
+    parser.add_argument("--mano-cara", action="store_true",
+                        help="con el gesto de la mano a la cara del P7.5")
     parser.add_argument(
         "--comparar", action="store_true",
         help="medir la diferencia con los comandos grabados",
@@ -358,6 +361,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["escorzo"] = False
     if args.sin_saludo:
         kwargs["saludo"] = False
+    if args.mano_cara:
+        kwargs["mano_cara"] = True
 
     # La salida va sin tildes, como la de los otros analizadores: la consola de
     # Windows no siempre las muestra.

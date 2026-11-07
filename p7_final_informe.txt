@@ -1,0 +1,29 @@
+INFORME DE p7_final
+============================================================
+
+Tasas: camara 20.9 fps medios, frames perdidos 2.6 %, bucle 42 ms (con inferencia 43 ms), MQTT 19.9 Hz, perdidos 0
+
+Emocion (mbf_va_mtl.onnx+emotion_blendshapes_facs_relativo_p65.json+cejas0.15), robot y prediccion cruda por tramo:
+  tramo              |     esta sesion |    P6.5 (antes)
+                     |    robot  crudo |    robot  crudo
+  neutral            |    87 %    86 % |    95 %    92 %
+  triste sin ceño    |    92 %    72 % |    39 %    38 %
+  triste con ceño    |    97 %    83 % |    19 %    23 %
+  enojado            |    93 %    67 % |    91 %    89 %
+  feliz              |    66 %    61 % |    78 %    78 %
+  sorprendido        |    85 %    85 % |    69 %    67 %
+  lectura            |    98 %    99 % |    90 %    85 %
+  leyendo: camb/min  |             1.2 |             8.8
+
+Cara tapada (etiqueta 11):
+  expresion a neutral 2.0 s despues de taparse
+  la guarda actuo en 56 % de los frames
+  cabeza publicada: salto medio 1.05 grados/frame, p95 4.75
+  cabeza medida (Face Mesh): salto medio 3.32 grados/frame, p95 10.03
+
+Al destaparse (etiqueta 12): salto maximo de la cabeza publicada 6.5 grados/frame
+
+Latencia:
+  captura -> mensaje: mediana 64 ms, p95 100 (7269 mensajes)
+  pantalla + camara (p7_final_latencia_camara.csv): mediana 362 ms, 2 destellos
+  TOTAL: ~426 ms (sin el render del visor)

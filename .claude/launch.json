@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "http.server", "8000", "--directory", "telmeow_viewer"],
       "port": 8000
+    },
+    {
+      "name": "interfaz-demo",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "telmeow_teleop.control_panel", "--demo", "--sin-navegador"],
+      "port": 8001
     }
   ]
 }

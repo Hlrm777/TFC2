@@ -104,8 +104,9 @@ condicional, latencia medida en el P7.3) y un hallazgo:
   que llega a menos de 45 ms del anterior, y un bucle que publica en cada frame
   a 30 fps pasa uno sí y otro no. El P7 publica desde un hilo con reloj propio.
 
-El código está hecho y probado; falta la sesión con el operador (P7, «Lo que
-falta»).
+**El P7 se cerró el 2026-11-08**, por decisión del operador, tras ocho rondas
+de ajustes salidas de sus sesiones (P7.1-P7.8) y con los límites declarados en
+«Los límites con que se cierra el P7». Lo siguiente es el P10.
 
 Cómo leerlo:
 
@@ -133,7 +134,7 @@ cambia respecto al plan original.
 | **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral · **2026-11-03 (P6.5)**: las gafas no pesan; los blendshapes, reentrenados con el dataset y cuatro sesiones del operador (tristeza con ceño 32-38 % → 61-72 % en validación cruzada), y la regla «sin cejas arriba no es sorpresa» encendida, por decisión del operador | `1e3b6c1`, `de4827a` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
-| P7 — Integración | 🟡 **código hecho el 2026-10-26, sesión con el operador el 2026-11-02** · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cierre propuesto el 2026-11-08** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7» | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a` |
+| P7 — Integración | ✅ **cerrado el 2026-11-08** · código hecho el 2026-10-26, sesión con el operador el 2026-11-02 · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cerrado el 2026-11-08 por decisión del operador** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7»; el P7.8 se ve en vivo en la primera sesión del P10 | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a`, `3bd2be8` |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
@@ -191,7 +192,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── arm_tracker.py        🟡 BlazePose · signos verificados · falta medir
 │   ├── emotion_classifier.py 🟡 Haar + CNN propia, DeepFace, HSEmotion · falta el visor
 │   ├── control_panel.py      ⬜ P10
-│   └── main.py               🟡 P7 · una cámara, los tres, 20 Hz · falta el operador
+│   └── main.py               ✅ P7 · una cámara, los tres, 20 Hz · cerrado el 2026-11-08
 ├── raspberry/
 │   └── story_display.py      ⬜ P11
 ├── telmeow_viewer/           ✅ el visor 3D y sus 40 STL · en git desde el 2026-09-06
@@ -426,7 +427,7 @@ tesis.
 | 5 | **P5** | Arm tracker corregido (bugs 1–4) | ✅ cerrado el 2026-10-19 |
 | 6 | **P6** | Clasificador de emoción con backends intercambiables | ✅ backend `combinado` elegido, integrado y verificado en vivo; `min_confidence` 0.5 (P6.4) |
 | 7 | **P8** | Entrenamiento con FER-2013 | ✅ 58.0 % · falta decidir P8.1 |
-| 8 | **P7** | Integración: captura única + HUD | 🟡 código hecho; falta la sesión con el operador |
+| 8 | **P7** | Integración: captura única + HUD | ✅ cerrado el 2026-11-08 con los límites declarados |
 | 9 | **P10** | Panel de control del operador | ⬜ |
 | 10 | **P11** | Servicio de pantalla externa en la Raspberry | ⬜ |
 | 11 | **P9** | Evaluación comparativa | ⬜ |
@@ -2804,7 +2805,7 @@ Commit: "feat: clasificador de emocion con backends intercambiables"
 
 ---
 
-## PROMPT 7 — Integración 🟡 **código hecho el 2026-10-26** · falta la sesión con el operador
+## PROMPT 7 — Integración ✅ **cerrado el 2026-11-08** · con los límites declarados en «Los límites con que se cierra el P7»
 
 ### Las decisiones, tomadas con el operador antes de escribir código (2026-10-26)
 
@@ -3752,7 +3753,8 @@ emoción gana `giro` y `mirada_fuera`, y la reproducción no hace votar esas car
 
 ### Los límites con que se cierra el P7
 
-Lo que queda, con quién lo lleva y qué lo reabriría:
+El operador dio el P7 por cerrado el 2026-11-08 con estos límites declarados. Lo
+que queda, con quién lo lleva y qué lo reabriría:
 
 | Límite | Cifras | Quién lo lleva |
 |---|---|---|
@@ -4391,6 +4393,14 @@ crudos), que son para comprobar el estado y no para narrar. Encaja con las dos
 distribuciones de arriba; el panel de OpenCV del P7 se queda como herramienta
 de diagnóstico.
 
+**Del cierre del P7 (2026-11-08).** La primera sesión del P10 comprueba también,
+en vivo, lo último del P7 (P7.8), que solo se midió reproduciendo grabaciones:
+que el brazo quieto ya no tiembla con la zona de 5° y que, al apartar la mirada
+un par de segundos narrando con la expresión puesta, el robot la conserva. Antes
+de esa sesión, el operador revisa en Windows los efectos de la cámara
+(encuadre automático, contacto visual, desenfoque), por el H60; si había alguno
+encendido, la sesión dice si el temblor de la malla baja.
+
 ```
 Crea `telmeow_teleop/control_panel.py`. Elige entre Tkinter o una página HTML
 servida localmente con websockets; si eliges HTML, sírvela en un puerto distinto
@@ -4559,8 +4569,10 @@ emoción en operación, que abrió el P8, se cerró el 2026-10-25 (punto 4).
    en `t` la hora de CAPTURA del frame (no la de publicación), el visor muestra
    «Periodo cmd» y «Latencia», `tools/mqtt_monitor.py --latencia` da la cifra
    citable, y `tools/medir_latencia_camara.py` lo que tarda la cámara. Lo que
-   queda sin medir, el render del visor (~1 refresco), se declara. **En
-   medición**: falta la sesión del P7.
+   queda sin medir, el render del visor (~1 refresco), se declara. **Medida y
+   declarada al cerrar el P7 (2026-11-08)**: de la captura al mensaje 64 ms, la
+   cámara con la pantalla 203 ms a oscuras, ~270 ms en el peor caso; lo que pasa
+   de 150 ms es la cámara (ver «Los límites con que se cierra el P7»).
 
 3. **Qué hacer si el gesto de página coincide con movimiento del operador.**
    Implementado un handoff (`liveTiltPanBuffer`: el gesto toma control temporal

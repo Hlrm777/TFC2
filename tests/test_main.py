@@ -570,6 +570,65 @@ def test_salir_desde_el_navegador_cierra_limpio(pipeline):
     assert pipeline.estado["camara"].liberada
 
 
+def test_con_interfaz_el_bucle_le_da_el_video_el_estado_y_sus_ordenes(pipeline, monkeypatch,
+                                                                     cuentos):
+    """P10.4: el servidor de verdad, en un puerto libre. Recibe el BGR volteado
+    y sin dibujar, el estado de cada frame en palabras, y lo que pide la
+    página se ejecuta como una tecla. Al terminar, se apaga."""
+    import telmeow_teleop.control_panel as cp
+
+    creados = []
+
+    class Interfaz(cp.ServidorInterfaz):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.estados = []
+            self.frames = []
+            entregar = self.emisor.entregar
+            self.emisor.entregar = lambda f: (self.frames.append(f), entregar(f))
+            self.ordenes.put(principal.Orden("historia", "El túnel.pdf", "navegador"))
+            self.ordenes.put(principal.Orden("expresion", "triste", "navegador"))
+            creados.append(self)
+
+        def publicar_estado(self, estado):
+            super().publicar_estado(estado)
+            self.estados.append(estado)
+
+    monkeypatch.setattr(cp, "ServidorInterfaz", Interfaz)
+    assert pipeline.correr(argv=["--interfaz", "0"], frames=5) == 0
+    (interfaz,) = creados
+    assert len(interfaz.estados) == len(interfaz.frames) == 5
+    for original, enviado in zip(pipeline.estado["camara"].leidos, interfaz.frames):
+        assert np.array_equal(enviado, cv2.flip(original, 1))
+    ultimo = interfaz.estados[-1]
+    assert ultimo["cuento"] == {"nombre": "El túnel.pdf", "titulo": "El túnel",
+                                "pagina": 1, "total": 3}
+    assert ultimo["expresion"]["manual"] == "triste"
+    assert ultimo["robot"]["clave"] == "ok"
+    assert pipeline.eventos_mqtt[0][0] == "telmeow/teleop/story"
+    assert interfaz.parando
+    import http.client
+
+    with pytest.raises(OSError):
+        http.client.HTTPConnection("127.0.0.1", interfaz.puerto, timeout=1).request("GET", "/")
+
+
+def test_con_el_puerto_de_la_interfaz_ocupado_no_arranca_y_cierra_limpio(pipeline):
+    import socket
+
+    ocupado = socket.socket()
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        ocupado.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    ocupado.bind(("127.0.0.1", 0))
+    ocupado.listen(1)
+    try:
+        assert pipeline.correr(argv=["--interfaz", str(ocupado.getsockname()[1])], frames=5) == 1
+    finally:
+        ocupado.close()
+    assert pipeline.estado["camara"].liberada
+    assert pipeline.estado["publicador"].desconectado
+
+
 def test_varias_ordenes_en_un_frame_quedan_todas_en_la_fila(pipeline, cuentos):
     ruta = pipeline.tmp / "sesion.csv"
     varias = [_abrir(), principal.Orden("pagina_siguiente", origen="navegador")]

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import csv
 import math
-import socket
 import sys
 from pathlib import Path
 
@@ -21,26 +20,7 @@ sys.path.insert(0, str(RAIZ / "tools"))
 import sesion_verificacion as sv  # noqa: E402
 
 
-@pytest.mark.parametrize("tcp, ws, estado", [
-    (True, True, "listo"),
-    (True, False, "servicio"),       # §4.1: el servicio, sin WebSocket
-    (False, False, "arrancar"),
-    (False, True, "arrancar"),
-])
-def test_el_estado_del_broker(tcp, ws, estado):
-    assert sv.estado_broker(tcp, ws) == estado
-
-
-def test_puerto_abierto():
-    servidor = socket.socket()
-    servidor.bind(("localhost", 0))
-    servidor.listen(1)
-    puerto = servidor.getsockname()[1]
-    try:
-        assert sv.puerto_abierto(puerto)
-    finally:
-        servidor.close()
-    assert not sv.puerto_abierto(puerto)
+# El estado del broker y puerto_abierto: tests/test_broker.py (desde el P10).
 
 
 def test_el_protocolo_sigue_al_del_p6_5_y_anade_la_cara_tapada():

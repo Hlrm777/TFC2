@@ -33,7 +33,14 @@ visor conserva el último valor (punto 12); los brazos nunca tienen huecos
 Teclas: ``q`` salir · ``c`` calibrar cabeza y emoción a la vez · ``1..6``
 forzar expresión (orden de los botones del visor) · ``0`` automático · ``k``
 pausar la publicación · ``j`` / ``l`` gesto de página anterior / siguiente ·
-ESPACIO cambiar de etiqueta (con ``--record``).
+ESPACIO cambiar de etiqueta (con ``--record``). Las teclas son órdenes
+(``ordenes.py``) que ejecuta ``ejecutar_orden``.
+
+Con ``--interfaz`` (P10) el pipeline sirve además la interfaz de narración en
+``http://localhost:8001``: el visor con la cámara del operador, el libro y los
+botones, cuyas órdenes entran por una cola y se ejecutan como las teclas. El
+comando de la sesión es ``python -m telmeow_teleop.control_panel``, que además
+levanta el broker y abre el navegador (ver ``control_panel.py``).
 
 No hay tecla ``m``: el enunciado pedía alternar el espejo, pero voltear la
 imagen en caliente invertiría el pan sin aviso (el head tracker asume la imagen
@@ -63,7 +70,6 @@ from .config import AppConfig, MQTTConfig, add_cli_args, from_args
 from .emotion_classifier import COLUMNAS_CSV as COLUMNAS_EMOCION
 from .emotion_classifier import (
     MARGEN_MANOS,
-    TECLAS_MANUAL,
     EmotionClassifier,
     crear_backend_o_reserva,
     mano_sobre_rostro,
@@ -74,6 +80,7 @@ from .head_tracker import HeadTracker, RuidoMalla, apartar_si_existe
 from .head_tracker import fila_csv as fila_cabeza
 from .historias import Biblioteca, Lector
 from .limits import Side
+from .ordenes import ORDENES, ORDENES_DE_TECLA, Orden
 
 __all__ = [
     "PublicadorPeriodico",
@@ -142,57 +149,13 @@ COLUMNAS_SESION = (
     "historia", "pagina", "orden",
 )
 
-TECLA_SALIR = ord("q")
-TECLA_CALIBRAR = ord("c")
-TECLA_AUTOMATICO = ord("0")
-TECLA_PAUSA = ord("k")
-TECLA_PAGINA_ANTERIOR = ord("j")
-TECLA_PAGINA_SIGUIENTE = ord("l")
-TECLA_ETIQUETA = ord(" ")
+# Las teclas y las órdenes viven en ``ordenes.py`` (solo biblioteca estándar),
+# para que el servidor de la interfaz las valide sin cargar MediaPipe.
 
 
 # --------------------------------------------------------------------------
-# Órdenes: lo que hacen las teclas, y desde el P10 también los botones
+# Lo que comparten las órdenes y el bucle
 # --------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Orden:
-    """Algo que el operador pide: con una tecla en la ventana de OpenCV o, desde
-    el P10, con un botón o una tecla en el navegador. Las dos vías acaban en el
-    mismo ``ejecutar_orden``, así que hacen exactamente lo mismo.
-
-    ``valor`` es la expresión de ``expresion`` y el nombre del archivo de
-    ``historia``. ``origen`` queda en la grabación: ``tecla`` u otro
-    (``navegador``).
-    """
-
-    nombre: str
-    valor: str | None = None
-    origen: str = "tecla"
-
-    def para_registro(self) -> str:
-        """Cómo queda en la columna ``orden``: ``nombre=valor@origen``."""
-        valor = f"={self.valor}" if self.valor is not None else ""
-        return f"{self.nombre}{valor}@{self.origen}"
-
-
-#: Las órdenes que existen. Lo que no esté aquí no se ejecuta.
-ORDENES = ("salir", "etiqueta", "calibrar", "expresion", "automatico", "pausa",
-           "pagina_anterior", "pagina_siguiente", "historia")
-
-#: La tecla de cada orden en la ventana de OpenCV. El modo narración del visor
-#: lleva la misma tabla en JavaScript, y una prueba exige que coincidan.
-ORDENES_DE_TECLA: dict[int, Orden] = {
-    TECLA_SALIR: Orden("salir"),
-    TECLA_ETIQUETA: Orden("etiqueta"),
-    TECLA_CALIBRAR: Orden("calibrar"),
-    **{tecla: Orden("expresion", expresion) for tecla, expresion in TECLAS_MANUAL.items()},
-    TECLA_AUTOMATICO: Orden("automatico"),
-    TECLA_PAUSA: Orden("pausa"),
-    TECLA_PAGINA_ANTERIOR: Orden("pagina_anterior"),
-    TECLA_PAGINA_SIGUIENTE: Orden("pagina_siguiente"),
-}
 
 
 @dataclass
@@ -391,6 +354,10 @@ class PublicadorPeriodico:
     def pausado(self) -> bool:
         """Si no sale nada: por la tecla o por una pausa automática."""
         return self._pausado or bool(self._motivos)
+
+    @property
+    def pausado_por_tecla(self) -> bool:
+        return self._pausado
 
     @property
     def pausado_por_luz(self) -> bool:
@@ -1340,6 +1307,16 @@ def _parser() -> argparse.ArgumentParser:
         help="Con --record: guarda la cara de cada inferencia, para evaluar otros "
              "modelos sobre las mismas caras (tools/evaluar_backends.py).",
     )
+    propios.add_argument(
+        "--interfaz", metavar="PUERTO", type=int, nargs="?", const=8001, default=None,
+        help="Sirve la interfaz de narración (P10) en http://localhost:PUERTO "
+             "(8001 si no se dice): el visor con la cámara, el libro y los botones.",
+    )
+    propios.add_argument(
+        "--abrir-navegador", action="store_true",
+        help="Con --interfaz: abre el navegador en cuanto aparece la ventana de "
+             "OpenCV, para que el navegador quede delante.",
+    )
     add_cli_args(parser)
     return parser
 
@@ -1423,6 +1400,7 @@ def main(argv: list[str] | None = None) -> int:
     periodico = None
     grabacion = None
     hilo = None
+    interfaz = None
     try:
         print(describir(cap, cfg.camera) + "\n")
         cabeza = HeadTracker.desde_config(cfg)
@@ -1461,11 +1439,22 @@ def main(argv: list[str] | None = None) -> int:
                                al_inferir=_grabar_inferencia(clasificador, grabacion))
             hilo.arrancar()
 
-        _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion)
+        if args.interfaz is not None:
+            interfaz = _crear_interfaz(cfg, args.interfaz)
+            if interfaz is None:
+                return 1
+            print(f"Interfaz de narracion en {interfaz.url} (cuentos de "
+                  f"{cfg.paths.stories_dir}).\n")
+
+        _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
+               pendientes=interfaz.pendientes if interfaz is not None else None,
+               interfaz=interfaz, abrir_navegador=args.abrir_navegador)
     except KeyboardInterrupt:
         print("\nInterrumpido.")
     finally:
         # Cierre limpio en cualquier caso (punto 7): q, Ctrl-C o excepción.
+        if interfaz is not None:
+            interfaz.parar()
         if periodico is not None:
             periodico.parar()
         if hilo is not None:
@@ -1487,6 +1476,26 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _crear_interfaz(cfg: AppConfig, puerto: int):
+    """El servidor de la interfaz de narración (P10), ya arrancado, o ``None``
+    si el puerto está ocupado (otra sesión abierta)."""
+    # Aquí y no arriba: sin --interfaz no se carga nada de esto.
+    from .control_panel import CARPETA_VISOR, ServidorInterfaz
+
+    try:
+        interfaz = ServidorInterfaz(CARPETA_VISOR, Biblioteca(cfg.paths.stories_dir),
+                                    puerto=puerto)
+    except OSError as exc:
+        print(f"No se pudo abrir la interfaz en el puerto {puerto} ({exc}). "
+              f"Hay otra sesion abierta?")
+        return None
+    if not interfaz.biblioteca.existe:
+        print(f"AVISO: no encuentro la carpeta de cuentos {cfg.paths.stories_dir}. "
+              f"Usa --stories-dir o TELMEOW_STORIES_DIR.")
+    interfaz.arrancar()
+    return interfaz
+
+
 def _grabar_inferencia(clasificador, grabacion):
     """La función que graba cada inferencia en el CSV de emoción (y su recorte)."""
     if grabacion is None or "emocion" not in grabacion.escritores:
@@ -1501,9 +1510,10 @@ def _grabar_inferencia(clasificador, grabacion):
 
 
 def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
-           pendientes=None) -> None:
+           pendientes=None, interfaz=None, abrir_navegador=False) -> None:
     """El bucle de visión. ``pendientes``, si se da, devuelve en cada frame las
-    órdenes que llegaron del navegador (P10)."""
+    órdenes que llegaron del navegador (P10); ``interfaz`` recibe el video y el
+    estado de cada frame."""
     import mediapipe as mp
 
     dibujo = mp.solutions.drawing_utils
@@ -1528,6 +1538,10 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
     vigia_cara = VigiaCara.desde_config(cfg)
     ultima_mano_cara = None
     ultima_caja = None
+    # Para el indicador de la interfaz: cuándo se perdió el último mensaje.
+    fallos_vistos = (0, 0)
+    ultimo_fallo = -math.inf
+    navegador_abierto = False
 
     while True:
         ok, frame = cap.read()
@@ -1537,6 +1551,11 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
         t_captura_ms = time.time() * 1000.0
         if cfg.camera.flip:
             frame = cv2.flip(frame, 1)
+        if interfaz is not None:
+            # El BGR volteado y SIN dibujar: el operador se ve como en un espejo,
+            # sin esqueleto. Nadie lo modifica después (el panel dibuja en una
+            # copia), así que basta la referencia.
+            interfaz.emisor.entregar(frame)
         alto, ancho = frame.shape[:2]
         marcas.append(ahora)
         dt_ms = None if t_anterior is None else 1000.0 * (ahora - t_anterior)
@@ -1697,6 +1716,13 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
         ms_bucle = ms_bucle_previo = 1000.0 * (time.perf_counter() - ahora)
 
         cv2.imshow(VENTANA, lienzo)
+        if abrir_navegador and interfaz is not None and not navegador_abierto:
+            # Después del primer imshow, para que el navegador quede delante de
+            # la ventana de OpenCV.
+            import webbrowser
+
+            webbrowser.open(interfaz.url)
+            navegador_abierto = True
         tecla = cv2.waitKey(1) & 0xFF
         orden = ORDENES_DE_TECLA.get(tecla)
         if orden is not None:
@@ -1729,10 +1755,46 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
                 sesion.lector.pagina if sesion.lector.abierto else "",
                 sesion.orden_registrada,
             ])
+        if interfaz is not None:
+            fallos = (publicador.failed_count, periodico.errores)
+            if fallos != fallos_vistos:
+                ultimo_fallo, fallos_vistos = ahora, fallos
+            interfaz.publicar_estado(_estado_interfaz(
+                cfg, publicador, periodico, emocion, sesion, grabacion,
+                fallo_reciente=ahora - ultimo_fallo < FALLO_RECIENTE_S))
         sesion.gesto_registrado = ""
         sesion.orden_registrada = ""
         if sesion.salir:
             break
+
+
+#: Tras perder un mensaje, cuántos segundos sigue en rojo el indicador de la
+#: interfaz.
+FALLO_RECIENTE_S = 3.0
+
+
+def _estado_interfaz(cfg, publicador, periodico, emocion, sesion, grabacion, *,
+                     fallo_reciente: bool) -> dict:
+    """Lo que enseña la página en este frame (``control_panel.estado_interfaz``)."""
+    from .control_panel import estado_interfaz
+
+    return estado_interfaz(
+        enlace=publicador.connected,
+        fallo_reciente=fallo_reciente,
+        pausa_tecla=periodico.pausado_por_tecla,
+        pausa_luz=periodico.pausado_por_luz,
+        pausa_cara=periodico.pausado_sin_cara,
+        emocion_activa=emocion is not None,
+        expresion=emocion.etiqueta if emocion is not None else None,
+        manual=emocion.manual if emocion is not None else None,
+        calibrando=bool(emocion and emocion.calibrando),
+        lector=sesion.lector,
+        grabando=grabacion is not None,
+        etiqueta=sesion.etiqueta,
+        aviso=sesion.aviso,
+        ws_port=cfg.mqtt.ws_port,
+        topic_pose=cfg.mqtt.topic_pose,
+    )
 
 
 if __name__ == "__main__":

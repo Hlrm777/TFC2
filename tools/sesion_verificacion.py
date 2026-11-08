@@ -53,7 +53,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import socket
 import statistics
 import subprocess
 import sys
@@ -63,9 +62,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Desde el P10 viven en el paquete (telmeow_teleop/broker.py).
+from telmeow_teleop.broker import asegurar_broker, puerto_abierto  # noqa: E402
 from telmeow_teleop.config import PROJECT_ROOT  # noqa: E402
 
-MOSQUITTO = Path(r"C:\Program Files\mosquitto\mosquitto.exe")
 URL_VISOR = "http://localhost:8000/telmeow_viewer.html"
 
 #: El protocolo: (etiqueta, qué hacer, segundos, qué debe hacer el robot). Las
@@ -239,23 +239,7 @@ CODOS_DENTRO_MIN = 80.0
 # --------------------------------------------------------------------------
 
 
-def puerto_abierto(puerto: int, host: str = "localhost") -> bool:
-    try:
-        with socket.create_connection((host, puerto), timeout=0.5):
-            return True
-    except OSError:
-        return False
-
-
-def estado_broker(tcp: bool, websocket: bool) -> str:
-    """``"listo"``, ``"arrancar"`` o ``"servicio"`` (la trampa del §4.1: el
-    servicio de Mosquitto escucha en el 1883 sin WebSocket, y si además se
-    lanza el del repositorio quedan dos brokers que no se hablan)."""
-    if tcp and websocket:
-        return "listo"
-    if tcp:
-        return "servicio"
-    return "arrancar"
+# puerto_abierto, estado_broker y el arranque del broker: telmeow_teleop/broker.py.
 
 
 def tabla_protocolo(protocolo=PROTOCOLO) -> str:
@@ -739,27 +723,9 @@ def main(argv: list[str] | None = None) -> int:
 
     arrancados: list[subprocess.Popen] = []
     try:
-        estado = estado_broker(puerto_abierto(1883), puerto_abierto(9001))
-        if estado == "servicio":
-            print("\nEl 1883 esta abierto pero el 9001 no: es el SERVICIO de Mosquitto, que no\n"
-                  "habla con el visor. En una terminal COMO ADMINISTRADOR:\n\n"
-                  "    Stop-Service mosquitto; Set-Service mosquitto -StartupType Manual\n\n"
-                  "y vuelve a lanzar este script.")
+        # puerto_abierto se pasa desde aquí para que las pruebas lo sustituyan.
+        if not asegurar_broker(arrancados, puerto_abierto=puerto_abierto):
             return 1
-        if estado == "arrancar":
-            if not MOSQUITTO.is_file():
-                print(f"No encuentro {MOSQUITTO}. Lanza el broker a mano (§4.2) o "
-                      f"tools/dev_broker.py, y vuelve a empezar.")
-                return 1
-            print("Levantando el broker del repositorio (mosquitto.conf)...")
-            arrancados.append(subprocess.Popen(
-                [str(MOSQUITTO), "-c", str(PROJECT_ROOT / "mosquitto.conf")],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-            time.sleep(1.5)
-            if estado_broker(puerto_abierto(1883), puerto_abierto(9001)) != "listo":
-                print("El broker no abrio los dos puertos. Revisa §4.1 del plan.")
-                return 1
-        print("Broker: listo (1883 y 9001).")
 
         if not puerto_abierto(8000):
             arrancados.append(subprocess.Popen(

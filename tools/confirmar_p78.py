@@ -67,6 +67,8 @@ TRISTEZA = ("triste al frente", "triste abajo")
 SUBIDA_ENOJO_ABAJO = 30.0
 NEUTRAL_ABAJO_MIN = 90.0
 
+#: La regla con que se grabó p78 (la de operación hasta el 2026-11-08) y la suave,
+#: que se adoptó ese día al cumplir el criterio.
 REGLA_OPERACION = 0.03
 REGLA_SUAVE = 0.015
 
@@ -126,20 +128,48 @@ def con_regla(filas: list[dict], por_grado: float) -> list[dict]:
     return copia
 
 
+def tramos_en_pausa(sesion_csv: Path) -> list[tuple[float, float]]:
+    """Los intervalos ``(desde, hasta)`` en que la publicación estuvo en pausa
+    (columna ``pausa`` de ``sesion.csv``)."""
+    import csv
+
+    with open(sesion_csv, encoding="utf-8", newline="") as f:
+        filas = list(csv.DictReader(f))
+    tramos, desde = [], None
+    for fila in filas:
+        en_pausa = fila.get("pausa") == "1"
+        if en_pausa and desde is None:
+            desde = float(fila["t"])
+        elif not en_pausa and desde is not None:
+            tramos.append((desde, float(fila["t"])))
+            desde = None
+    if desde is not None:
+        tramos.append((desde, float(filas[-1]["t"])))
+    return tramos
+
+
+def fuera_de_pausa(filas: list[dict], tramos: list[tuple[float, float]]) -> list[dict]:
+    """Las filas que no caen en una pausa. En p78 el operador pausó con la k
+    para rascarse la cara, fuera de la postura pedida: con ``--sin-pausas`` se
+    comprueba que el veredicto no depende de esos segundos."""
+    return [f for f in filas if not any(a <= f["t"] <= b for a, b in tramos)]
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--sesion", default="p78")
     p.add_argument("--pesos", type=Path, default=PESOS_FINALES)
+    p.add_argument("--sin-pausas", action="store_true",
+                   help="ademas, las cifras sin los segundos en que la publicacion estuvo en pausa")
     a = p.parse_args(argv)
 
     import analizar_p65 as p65
     import evaluar_backends as eb
-    import reentrenar_p77 as rp
 
     cfg = AppConfig.from_env()
     filas, carpeta = p65._cargar(PROJECT_ROOT / f"{a.sesion}_emocion.csv")
     episodios = p65.episodios_de(filas, carpeta, cfg)
-    tablas = {}
+    tablas, tablas_sin, pausas = {}, {}, []
     for nombre, pesos in (("operacion", Path(cfg.paths.emotion_blendshapes)), ("reentrenado", a.pesos)):
         motor = eb.crear(f"combinado:onnx:{cfg.paths.emotion_onnx}+blendshapes:{pesos}"
                          f"+cejas:{cfg.emotion.umbral_cejas}", cfg)
@@ -149,7 +179,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ancla: los pesos de operacion reproducen lo grabado en {ev.coinciden} de "
                   f"{ev.comparables} caras" + ("" if exacta else "   <-- NO CUADRA: estas tablas no valen"))
         for regla in (REGLA_OPERACION, REGLA_SUAVE):
-            tablas[(nombre, regla)] = resumir(con_regla(ev.filas, regla))
+            rehechas = con_regla(ev.filas, regla)
+            tablas[(nombre, regla)] = resumir(rehechas)
+            if a.sin_pausas:
+                pausas = tramos_en_pausa(PROJECT_ROOT / f"{a.sesion}.csv")
+                tablas_sin[(nombre, regla)] = resumir(fuera_de_pausa(rehechas, pausas))
+
+    _informe(tablas)
+    if a.sin_pausas:
+        print(f"\n===== SIN LOS SEGUNDOS EN PAUSA: {pausas} =====")
+        _informe(tablas_sin)
+    return 0
+
+
+def _informe(tablas: dict) -> None:
+    import reentrenar_p77 as rp
 
     columnas = list(tablas)
     print(f"\n{'tramo':20s} | " + " | ".join(f"{n} {r:g}".rjust(17) for n, r in columnas))
@@ -169,7 +213,6 @@ def main(argv: list[str] | None = None) -> int:
     for motivo in r.motivos:
         print(f"  - {motivo}")
     print("  => VALE: se adopta" if r.vale else "  => no vale: se queda la de 0.03")
-    return 0
 
 
 if __name__ == "__main__":

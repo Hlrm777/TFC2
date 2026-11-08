@@ -223,11 +223,12 @@ def test_el_csv_de_emocion_lleva_el_cabeceo_y_la_regla():
 
 
 def test_la_configuracion_del_enojo():
+    """0.015 desde el 2026-11-08: la regla suave, confirmada en p78 (antes 0.03)."""
     cfg = AppConfig.from_env({})
-    assert (cfg.emotion.enojo_por_grado, cfg.emotion.enojo_desde) == (0.03, 2.0)
+    assert (cfg.emotion.enojo_por_grado, cfg.emotion.enojo_desde) == (0.015, 2.0)
     assert AppConfig.from_env({"TELMEOW_EMOTION_ENOJO_POR_GRADO": "0"}).emotion.enojo_por_grado == 0.0
     c = EmotionClassifier.desde_config(cfg, backend=_Fijo("enojado", 0.6))
-    assert c.enojo_por_grado == 0.03
+    assert c.enojo_por_grado == 0.015
 
 
 @pytest.mark.parametrize("base", ["p75", "p7_final"])

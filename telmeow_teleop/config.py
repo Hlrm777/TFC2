@@ -775,6 +775,13 @@ class EmotionConfig:
     verdad de p7_final de 93 a 84 %; el neutral sube de 93 a 99 %. Un umbral fijo
     no sirve: con 0.6 el falso baja a 2 % pero el de verdad cae a 35 %. Decidido
     por el operador el 2026-11-07. 0 la desactiva; sin el head tracker no actúa.
+
+    **0.015 desde el 2026-11-08** (era 0.03): a 0.03 apagaba el enojo mirando
+    abajo (12 % en p77, 3 % en p78) más de lo necesario. Propuesta con p77 y
+    confirmada en p78, una sesión que nadie había mirado, con el criterio fijado
+    antes de grabarla (``tools/confirmar_p78.py``): el enojo mirando abajo pasa
+    del 3 al 46 %, el neutral mirando abajo sigue al 100 % y ningún otro tramo
+    cae (el enojo al frente sube de 79 a 88 %).
     """
 
     backend: str = "combinado"
@@ -787,7 +794,7 @@ class EmotionConfig:
     calibracion_s: float = 3.0
     neutral_sin_apoyo_s: float = 2.0
     umbral_cejas: float = 0.15
-    enojo_por_grado: float = 0.03
+    enojo_por_grado: float = 0.015
     enojo_desde: float = 2.0
 
     @classmethod

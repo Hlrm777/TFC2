@@ -407,3 +407,23 @@ def test_con_confirmar_el_informe_y_la_base_son_los_suyos(monkeypatch, tmp_path)
     monkeypatch.setattr(sv, "analizar_confirmacion", lambda base: f"CONFIRMAR {base.name}")
     assert sv.main(["--analizar", "--confirmar"]) == 0
     assert (tmp_path / "p78_informe.txt").read_text(encoding="utf-8") == "CONFIRMAR p78"
+
+
+def test_los_tramos_en_pausa_se_pueden_quitar(tmp_path):
+    """En p78 el operador pausó con la k para rascarse: esos segundos se pueden
+    apartar para ver que el veredicto no depende de ellos."""
+    filas = ["t,pausa"] + [f"{0.5 * k},{1 if 4 <= k < 8 else 0}" for k in range(12)]
+    (tmp_path / "s.csv").write_text("\n".join(filas) + "\n", encoding="utf-8")
+    tramos = cp.tramos_en_pausa(tmp_path / "s.csv")
+    assert tramos == [(2.0, 4.0)]
+    emocion = [{"t": t} for t in (1.0, 2.5, 3.9, 4.5)]
+    assert [f["t"] for f in cp.fuera_de_pausa(emocion, tramos)] == [1.0, 4.5]
+
+
+@pytest.mark.skipif(not (RAIZ / "p78.csv").exists(), reason="falta la sesión p78")
+def test_las_pausas_de_p78_solo_tocan_etiquetas_neutrales():
+    tramos = cp.tramos_en_pausa(RAIZ / "p78.csv")
+    with open(RAIZ / "p78.csv", encoding="utf-8") as f:
+        filas = list(csv.DictReader(f))
+    etiquetas = {int(x["etiqueta"]) for x in filas if any(a <= float(x["t"]) <= b for a, b in tramos)}
+    assert etiquetas <= {e for e, v in cp.ESPERADAS_P78.items() if v == "neutral"}

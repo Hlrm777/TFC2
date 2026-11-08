@@ -382,6 +382,7 @@ python tools/reentrenar_p77.py                                   # y el reentren
 .venv/Scripts/python.exe tools/sesion_verificacion.py --confirmar # la confirmacion, en caras nuevas
 python tools/confirmar_p78.py                                    # reentrenado y regla suave, evaluados en p78
 python tools/simular_vistazos.py p78                             # los vistazos del P7.8 sobre una sesion
+.venv/Scripts/python.exe tools/sesion_verificacion.py --narracion # el P10: sin y con la interfaz, con su guia
 ```
 
 Comprueba el broker (y avisa si es el servicio de Mosquitto sin WebSocket),

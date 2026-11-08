@@ -39,6 +39,13 @@ Con ``--confirmar`` graba la sesión corta que confirma, en caras que nadie ha
 mirado, los pesos reentrenados y la regla suave del enojo
 (``PROTOCOLO_CONFIRMAR``; la evaluación, ``tools/confirmar_p78.py``).
 
+Con ``--narracion`` hace la sesión del P10, en dos grabaciones, y antes de cada
+una enseña su tabla: ``p10_sin_interfaz`` (solo ``main.py``, la referencia de
+los fps) y ``p10_narracion`` (la interfaz en el navegador, con todas las teclas
+ahí). Al final pregunta qué teclas funcionaron y qué vista prefiere el
+operador, y analiza con los criterios del plan. Con ``--guia`` solo enseña las
+tablas, para leerlas con calma antes.
+
 Uso, desde la raíz del repositorio::
 
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py
@@ -46,6 +53,8 @@ Uso, desde la raíz del repositorio::
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --ajustes
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --entrenar
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --confirmar
+    .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --narracion
+    .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --narracion --guia   # solo las tablas
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --analizar      # rehace el informe
 """
 
@@ -216,6 +225,101 @@ PROTOCOLO_CONFIRMAR: tuple[tuple[int, str, int, str], ...] = (
     (10, "Cara neutral mirando la pantalla", 10, "NEUTRAL"),
 )
 
+#: La sesión del P10 (2026-11-08), en dos grabaciones. La etiqueta 1 es la misma
+#: en las dos, palabra por palabra: sus fps son el primer criterio.
+_HABLAR_P10 = ("Habla en voz alta mirando la pantalla: cuenta qué hiciste hoy. Antebrazos "
+               "apoyados en la mesa, sin gestos")
+
+#: La primera, sin la interfaz: solo ``main.py``, como en el P7. Las teclas van a
+#: la ventana de Python.
+PROTOCOLO_P10_SIN_INTERFAZ: tuple[tuple[int, str, int, str], ...] = (
+    (0, "Cara relajada mirando la pantalla, quieto, antebrazos apoyados en la mesa. "
+        "NO pulses nada", 10,
+     "la ventana de Python dice CALIBRANDO unos 3 s"),
+    (1, _HABLAR_P10, 60, "la ventana de Python sigue tu cabeza (aquí no hay robot a la vista)"),
+)
+
+#: La segunda, con la interfaz de narración: TODAS las teclas en el navegador.
+#: Una postura por etiqueta; las 3, 4, 9 y 10 comprueban en vivo el P7.8.
+PROTOCOLO_P10_NARRACION: tuple[tuple[int, str, int, str], ...] = (
+    (0, "Cara relajada mirando la pantalla, quieto, antebrazos en la mesa. NO pulses nada: "
+        "espera a que se abra el navegador con el robot, tu cámara y el libro", 15,
+     "abajo dice «Calibrando: cara relajada, mirando la pantalla» unos 3 s; luego, neutral"),
+    (1, _HABLAR_P10, 60, "sigue tu cabeza; los brazos quietos"),
+    (2, "Cara relajada mirando la pantalla: pulsa c y quédate quieto", 5,
+     "«Calibrando: cara relajada, mirando la pantalla» 3 s; luego, cabeza al frente y neutral"),
+    (3, "Antebrazos apoyados en la mesa, como al leer, sin moverlos", 30,
+     "los dos brazos quietos, SIN temblor"),
+    (4, "Brazo DERECHO estirado hacia tu derecha, a la altura del hombro, como señalando la "
+        "ventana; el izquierdo en la mesa. Quieto", 20,
+     "su brazo derecho estirado y quieto, sin temblor"),
+    (5, "Pulsa con el ratón el botón «Vista» (el último de la fila de botones): el robot "
+        "se ve de frente. Saluda 2 veces con la derecha. Vuelve a pulsarlo (detrás) y saluda 2 "
+        "veces más. Fíjate cuál te resulta más natural: al final te lo pregunto", 20,
+     "desde detrás saluda por el mismo lado de la pantalla que tú en tu cámara; de frente, "
+     "por el contrario"),
+    (6, "En la lista «Elige un cuento…» (debajo del libro) elige «El túnel». Léelo en voz "
+        "alta y pasa 5 páginas, una cada ~6 s: las 3 primeras con l y las 2 últimas con la "
+        "flecha →. Mueve la cabeza con normalidad", 40,
+     "gesto de página en cada cambio; la pantalla del robot muestra la misma página que el libro"),
+    (7, "Vuelve atrás 2 páginas, una cada ~3 s: la primera con j y la segunda con la flecha ←", 10,
+     "gesto hacia el otro lado y página anterior, las dos veces"),
+    (8, "Pulsa k (pausa). Intenta pasar de página con l. Pulsa k otra vez (reanudar) y pasa "
+        "con l", 15,
+     "en pausa se queda quieto, abajo dice «En pausa (k)» y la página NO cambia; al reanudar, "
+     "cambia con su gesto"),
+    (9, "Sonrisa clara, leyendo. Tres veces: baja la cabeza 2 s para mirar la esquina de abajo "
+        "a la derecha de la página («buscando la línea siguiente») y vuelve", 20,
+     "FELIZ todo el rato, también mientras miras abajo"),
+    (10, "Lo mismo con cara triste, con puchero, «cuando el personaje se pierde»: tres veces "
+         "baja la cabeza 2 s a la esquina y vuelve", 20,
+     "TRISTE todo el rato, también mientras miras abajo"),
+    (11, "Pulsa 6 (concentrado) y quédate así 5 s; luego pulsa 0 (automático) con la cara "
+         "relajada", 10,
+     "ojos concentrados y abajo «Expresión fijada: concentrado»; con 0, vuelve a tu cara: neutral"),
+    (12, "En la lista elige «Cambios» (sus páginas son verticales) y pasa 2 páginas con l", 15,
+     "la página se ve entera y sin deformar"),
+    (13, "Pulsa q dos veces seguidas (en menos de 3 s)", 5,
+     "la primera q pide confirmación; con la segunda se cierra la ventana de Python y la página "
+     "dice «La sesión terminó»"),
+)
+
+#: Lo que se le pregunta al operador al acabar: (clave, pregunta, respuesta que
+#: cumple). Sin respuesta que cumpla, la pregunta informa y no decide: el criterio
+#: es no tocar la ventana de Python, y la vista la elige él.
+PREGUNTAS_P10: tuple[tuple[str, str, str], ...] = (
+    ("clic_python", "¿Tuviste que hacer clic en la ventana de Python en algún momento?", "n"),
+    ("clic_navegador", "¿Tuviste que hacer clic en el navegador para que las teclas respondieran?", ""),
+    ("ESPACIO", "¿ESPACIO pasaba de etiqueta?", "s"),
+    ("c", "¿c calibraba (etiqueta 2)?", "s"),
+    ("l", "¿l pasaba a la página siguiente?", "s"),
+    ("flecha_derecha", "¿La flecha → pasaba a la página siguiente?", "s"),
+    ("j", "¿j volvía a la página anterior?", "s"),
+    ("flecha_izquierda", "¿La flecha ← volvía a la página anterior?", "s"),
+    ("k", "¿k pausaba y reanudaba?", "s"),
+    ("6", "¿6 fijaba «concentrado»?", "s"),
+    ("0", "¿0 volvía a la expresión automática?", "s"),
+    ("q", "¿q dos veces cerraba la sesión?", "s"),
+    ("temblor", "¿Viste temblar los brazos del robot en las etiquetas 3 o 4?", "n"),
+    ("vistazos", "¿El robot perdió la expresión al mirar abajo en las etiquetas 9 o 10?", "n"),
+    ("vertical", "¿«Cambios» se veía entera y sin deformar?", "s"),
+    ("vista", "¿Qué vista del robot prefieres? (d = detrás, f = frente)", ""),
+)
+
+#: Criterios del P10, fijados antes de grabar (plan maestro, P10). Fps medios de
+#: la etiqueta 1 con la interfaz frente a sin ella.
+FPS_INTERFAZ_MIN = 0.90
+#: Publicación con la interfaz (mediana de mqtt_hz fuera de pausa): en el P7,
+#: 19.7-19.9 Hz.
+HZ_INTERFAZ_MIN = 19.5
+#: Páginas que se pasan en cada etiqueta (dentro del mismo cuento).
+PAGINAS_P10: dict[int, int] = {6: 5, 7: 2, 8: 1, 12: 2}
+#: Vistazos (P7.8): filas del vistazo, dentro de sus 3 s, en que el robot conserva
+#: la expresión que tenía justo antes. La regla la conserva siempre; el margen es
+#: para la primera fila, que puede llegar con el voto ya hecho.
+VISTAZO_CONSERVA_MIN = 95.0
+VISTAZO_MAX_S = 3.0
+
 #: Criterios del P7.6, fijados antes de grabar. Enojo del robot con la cabeza
 #: subiendo y bajando (etiqueta 1): en el neutral de p75 era el 23 %.
 ENOJO_NEUTRAL_MAX = 10.0
@@ -242,11 +346,26 @@ CODOS_DENTRO_MIN = 80.0
 # puerto_abierto, estado_broker y el arranque del broker: telmeow_teleop/broker.py.
 
 
-def tabla_protocolo(protocolo=PROTOCOLO) -> str:
-    lineas = ["", "PROTOCOLO (ESPACIO al empezar cada etiqueta; la 0 empieza sola; q al acabar)", ""]
+def tabla_protocolo(protocolo=PROTOCOLO, *, cabecera: str | None = None, quien: str = "robot",
+                    ancho: int | None = None) -> str:
+    """La tabla que se lee antes de grabar: qué hacer en cada etiqueta, cuánto, y
+    qué debe pasar (``quien``: el robot, o lo que se ve si no hay robot). Con
+    ``ancho``, los textos largos se parten en líneas de ese ancho, sangradas."""
+    import textwrap
+
+    cabecera = cabecera or "PROTOCOLO (ESPACIO al empezar cada etiqueta; la 0 empieza sola; q al acabar)"
+    def partir(primera: str, texto: str, sangria: str) -> list[str]:
+        return textwrap.wrap(texto, width=ancho, initial_indent=primera, subsequent_indent=sangria,
+                             break_on_hyphens=False) or [primera]
+
+    lineas = ["", cabecera, ""]
     for etiqueta, que, segundos, robot in protocolo:
-        lineas.append(f"  {etiqueta:>2}  {segundos:>3} s  {que}")
-        lineas.append(f"              -> robot: {robot}")
+        if ancho is None:
+            lineas += [f"  {etiqueta:>2}  {segundos:>3} s  {que}", f"              -> {quien}: {robot}"]
+            continue
+        lineas += partir(f"  {etiqueta:>2}  {segundos:>3} s  ", que, " " * 13)
+        lineas += partir(f"{' ' * 13}-> {quien}: ", robot, " " * 16)
+        lineas.append("")
     total = sum(s for _, _, s, _ in protocolo)
     lineas += ["", f"  Unos {total // 60} min {total % 60} s en total.", ""]
     return "\n".join(lineas)
@@ -690,6 +809,289 @@ def analizar_gestos(base: Path) -> str:
 
 
 # --------------------------------------------------------------------------
+# El P10: la interfaz de narración
+# --------------------------------------------------------------------------
+
+INTRO_P10 = """
+LA SESIÓN DEL P10: dos grabaciones, unos 6 minutos en total, con buena luz.
+
+  1. p10_sin_interfaz: solo la ventana de Python, como en el P7. Es la
+     referencia de velocidad: 1 minuto hablando. Las teclas van a ESA ventana.
+  2. p10_narracion: el navegador con el robot, tu cámara y el libro. TODAS las
+     teclas van al navegador: no hagas clic en la ventana de Python.
+
+  En las dos la etiqueta 0 empieza sola, y cada ESPACIO pasa a la siguiente.
+  Antes de cada una sale su tabla. Al final te hago unas preguntas y sale el
+  informe.
+"""
+
+CABECERA_P10_SIN_INTERFAZ = (
+    "PRIMERA GRABACIÓN, sin la interfaz. ESPACIO en la ventana de Python pasa de\n"
+    "etiqueta (la 0 empieza sola); al acabar la 1, q en esa ventana.")
+CABECERA_P10_NARRACION = (
+    "SEGUNDA GRABACIÓN, con la interfaz de narración: TODAS las teclas en el navegador.\n"
+    "ESPACIO pasa de etiqueta (la 0 empieza sola); la etiqueta en curso sale abajo en\n"
+    "la página: «Grabando · etiqueta N». La ventana de Python también se abre: déjala,\n"
+    "sin hacer clic en ella. Si el navegador no queda delante, haz clic una vez en el libro.")
+
+#: Ancho de las tablas del P10 en la terminal.
+ANCHO_P10 = 88
+
+
+def rutas_p10(base: Path) -> tuple[Path, Path]:
+    """Las dos grabaciones del P10: sin la interfaz y con ella."""
+    return (base.with_name(base.name + "_sin_interfaz.csv"),
+            base.with_name(base.name + "_narracion.csv"))
+
+
+def guia_p10() -> str:
+    """Todo lo que se lee antes de la sesión del P10."""
+    return "\n".join([
+        INTRO_P10,
+        tabla_protocolo(PROTOCOLO_P10_SIN_INTERFAZ, cabecera=CABECERA_P10_SIN_INTERFAZ, quien="se ve",
+                        ancho=ANCHO_P10),
+        tabla_protocolo(PROTOCOLO_P10_NARRACION, cabecera=CABECERA_P10_NARRACION, ancho=ANCHO_P10),
+    ])
+
+
+def cambios_de_pagina(filas: list[dict]) -> list[tuple[dict, int]]:
+    """Las filas en que cambió la página dentro del mismo cuento, con el paso
+    (+1 adelante, -1 atrás). Abrir un cuento no cuenta: no lleva gesto."""
+    cambios = []
+    anterior = None
+    for f in filas:
+        historia, pagina = f.get("historia") or "", _num(f.get("pagina"))
+        if (anterior is not None and historia and historia == anterior[0]
+                and pagina is not None and anterior[1] is not None and pagina != anterior[1]):
+            cambios.append((f, int(pagina - anterior[1])))
+        anterior = (historia, pagina)
+    return cambios
+
+
+def ordenes_de(filas: list[dict]) -> list[tuple[int, str]]:
+    """(etiqueta, orden) de cada orden registrada; la columna ``orden`` junta con
+    «|» las de un mismo frame."""
+    return [(int(f["etiqueta"]), o) for f in filas for o in (f.get("orden") or "").split("|") if o]
+
+
+def vistazos(filas_emocion: list[dict], etiqueta: int) -> tuple[int, int, int]:
+    """En una etiqueta del CSV de emoción: (vistazos, filas mirando fuera dentro
+    de sus primeros 3 s, de ellas en cuántas el robot conserva la expresión de
+    justo antes). Las filas sin cara no cuentan ni cortan el vistazo."""
+    n = fuera = conserva = 0
+    antes, inicio = None, None
+    for f in filas_emocion:
+        if int(f["etiqueta"]) != etiqueta or f.get("rostro") != "1":
+            continue
+        if f.get("mirada_fuera") == "1":
+            t = float(f["t"])
+            if inicio is None:
+                n, inicio = n + 1, t
+            if t - inicio <= VISTAZO_MAX_S and antes is not None:
+                fuera += 1
+                conserva += f.get("emocion") == antes
+        else:
+            antes, inicio = f.get("emocion"), None
+    return n, fuera, conserva
+
+
+def movimiento_brazos(filas: list[dict], etiqueta: int) -> dict[str, tuple[float, float, float]]:
+    """Por brazo, el comando publicado en una etiqueta: (cambios de más de 1° por
+    minuto, saltos de más de 5° por minuto, p95 del salto), como en el P7.8."""
+    tramo = [f for f in filas if int(f["etiqueta"]) == etiqueta]
+    if len(tramo) < 2:
+        return {}
+    minutos = (float(tramo[-1]["t"]) - float(tramo[0]["t"])) / 60.0
+    salida = {}
+    for lado, abd, flex in (("L", "armL", "armLtw"), ("R", "armR", "armRtw")):
+        comandos = [(_num(f.get(abd)), _num(f.get(flex))) for f in tramo]
+        s = saltos([c if None not in c else None for c in comandos])
+        if s and minutos > 0:
+            salida[lado] = (sum(x > 1 for x in s) / minutos, sum(x > 5 for x in s) / minutos,
+                            _percentil(s, 0.95))
+    return salida
+
+
+def _ruta_respuestas(base: Path) -> Path:
+    return base.with_name(base.name + "_respuestas.csv")
+
+
+def preguntar_p10(base: Path, entrada=None) -> dict[str, str]:
+    """Las preguntas del final; las respuestas quedan en ``<base>_respuestas.csv``."""
+    entrada = entrada or input
+    print("\nUnas preguntas sobre la segunda grabación (s = sí, n = no):")
+    respuestas = {}
+    for clave, pregunta, _ in PREGUNTAS_P10:
+        validas = ("d", "f") if clave == "vista" else ("s", "n")
+        while True:
+            r = entrada(f"  {pregunta} [{'/'.join(validas)}] ").strip().lower()[:1]
+            if r in validas:
+                break
+            print(f"    Responde {' o '.join(validas)}.")
+        respuestas[clave] = r
+    with open(_ruta_respuestas(base), "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f, lineterminator="\n")
+        w.writerow(["clave", "pregunta", "respuesta"])
+        for clave, pregunta, _ in PREGUNTAS_P10:
+            w.writerow([clave, pregunta, respuestas[clave]])
+    return respuestas
+
+
+def leer_respuestas(base: Path) -> dict[str, str] | None:
+    ruta = _ruta_respuestas(base)
+    if not ruta.is_file():
+        return None
+    with open(ruta, newline="", encoding="utf-8") as f:
+        return {fila["clave"]: fila["respuesta"] for fila in csv.DictReader(f)}
+
+
+def analizar_narracion(base: Path) -> str:
+    """El informe del P10, con los criterios fijados antes de grabar."""
+    import analizar_sesion as asn
+    import filtros_cabeza as fc
+    from telmeow_teleop.main import rutas_de_grabacion
+
+    def ok(cumple):
+        return "OK" if cumple else "NO CUMPLE"
+
+    ruta_sin, ruta_con = rutas_p10(base)
+    lineas = [f"INFORME DEL P10 DE {base.name}", "=" * 60, ""]
+    if not ruta_con.is_file():
+        return "\n".join(lineas + [f"Falta {ruta_con.name}: no hay nada que analizar."])
+    con = asn.cargar(ruta_con)
+
+    def resumen(filas):
+        try:
+            return asn.resumir(filas, 1)
+        except ValueError:
+            return None
+
+    r_con = resumen(con)
+    r_sin = resumen(asn.cargar(ruta_sin)) if ruta_sin.is_file() else None
+    lineas.append("No le roba tiempo al bucle (etiqueta 1, hablando):")
+    falta = [r.name for r, x in ((ruta_sin, r_sin), (ruta_con, r_con)) if x is None or not x.fps_medios]
+    if falta:
+        lineas.append(f"  sin datos: falta la etiqueta 1 en {', '.join(falta)}")
+    else:
+        fraccion = r_con.fps_medios / r_sin.fps_medios
+        lineas.append(f"  fps medios sin interfaz {r_sin.fps_medios:.1f}, con interfaz {r_con.fps_medios:.1f}: "
+                      f"{100 * fraccion:.0f} % (criterio >= {100 * FPS_INTERFAZ_MIN:.0f} %) "
+                      f"{ok(fraccion >= FPS_INTERFAZ_MIN)}")
+    if r_con is not None and r_con.hz is not None:
+        referencia = f"; sin interfaz {r_sin.hz:.1f}" if r_sin is not None and r_sin.hz is not None else ""
+        lineas.append(f"  publicacion con interfaz {r_con.hz:.1f} Hz (criterio >= {HZ_INTERFAZ_MIN}{referencia}) "
+                      f"{ok(r_con.hz >= HZ_INTERFAZ_MIN)}")
+        lineas.append(f"  mensajes perdidos en la etiqueta: {r_con.fallidos}")
+
+    cambios = cambios_de_pagina(con)
+    por_etiqueta: dict[int, int] = {}
+    for f, _ in cambios:
+        por_etiqueta[f["etiqueta"]] = por_etiqueta.get(f["etiqueta"], 0) + 1
+    lineas += ["", "Pagina y gesto juntos (cada cambio de pagina con su gesto en la misma fila; ninguno en pausa):",
+               f"  cambios de pagina: {len(cambios)} (esperados {sum(PAGINAS_P10.values())}: "
+               + ", ".join(f"{n} en la {e}" for e, n in PAGINAS_P10.items()) + "); por etiqueta, "
+               + (", ".join(f"{e}: {n}" for e, n in sorted(por_etiqueta.items())) or "ninguno")]
+    if cambios:
+        con_gesto = sum(1 for f, paso in cambios if f.get("gesto") == ("page_next" if paso > 0 else "page_prev"))
+        en_pausa = sum(1 for f, _ in cambios if f["pausa"])
+        lineas.append(f"  con su gesto, en su sentido, en la misma fila: {con_gesto} de {len(cambios)} "
+                      f"{ok(con_gesto == len(cambios))}")
+        lineas.append(f"  en pausa: {en_pausa} (criterio 0) {ok(en_pausa == 0)}")
+    else:
+        lineas.append("  NO VALE: no se paso ninguna pagina")
+    intentos = sum(1 for f in con if f["pausa"]
+                   for o in (f.get("orden") or "").split("|") if o.startswith("pagina_"))
+    lineas.append(f"  intentos de pasar de pagina en pausa: {intentos} (el protocolo hace 1, en la 8)")
+
+    lineas += ["", "Ordenes que llegaron del navegador (columna orden), por etiqueta:"]
+    agrupadas: dict[int, dict[str, int]] = {}
+    for etiqueta, orden in ordenes_de(con):
+        if orden.endswith("@navegador"):
+            nombre = orden.rsplit("@", 1)[0]
+            agrupadas.setdefault(etiqueta, {})
+            agrupadas[etiqueta][nombre] = agrupadas[etiqueta].get(nombre, 0) + 1
+    for etiqueta, cuenta in sorted(agrupadas.items()):
+        lineas.append(f"  {etiqueta:>2}: " + ", ".join(f"{n} x{c}" if c > 1 else n for n, c in cuenta.items()))
+    desde_python = sum(1 for _, orden in ordenes_de(con) if orden.endswith("@tecla"))
+    lineas.append(f"  ordenes desde la ventana de Python: {desde_python} (lo esperado: 0)")
+
+    respuestas = leer_respuestas(base)
+    lineas += ["", "Lo que respondio el operador:"]
+    if respuestas is None:
+        lineas.append(f"  sin respuestas (falta {_ruta_respuestas(base).name})")
+    else:
+        for clave, pregunta, cumple in PREGUNTAS_P10:
+            r = respuestas.get(clave, "")
+            texto = {"d": "detras", "f": "frente", "s": "si", "n": "no"}.get(r, "--")
+            lineas.append(f"  {pregunta} {texto}" + (f" {ok(r == cumple)}" if cumple else ""))
+
+    lineas += ["", "P7.8 en vivo, brazos del robot (cambios > 1 grado/min, saltos > 5 grados/min, p95 del "
+                   "salto; decide lo que viste, las cifras quedan de referencia):"]
+    for etiqueta, texto in ((3, "antebrazos en la mesa"), (4, "brazo derecho estirado")):
+        m = movimiento_brazos(con, etiqueta)
+        lineas.append(f"  {etiqueta:>2} {texto}: " + ("; ".join(
+            f"{lado} {c:.0f} / {sal:.0f} / {p95:.1f}" for lado, (c, sal, p95) in m.items()) or "sin datos"))
+
+    rutas = rutas_de_grabacion(ruta_con)
+    emocion = fc.leer(rutas["emocion"]) if rutas["emocion"].is_file() else []
+    lineas += ["", "P7.8 en vivo, vistazos (mirando abajo, el robot conserva la expresion de justo antes, "
+                   "hasta 3 s):"]
+    for etiqueta, emo in ((9, "feliz"), (10, "triste")):
+        filas = [f for f in emocion if int(f["etiqueta"]) == etiqueta and f.get("rostro") == "1"]
+        if not filas:
+            lineas.append(f"  {etiqueta:>2} {emo}: sin datos")
+            continue
+        n, fuera, conserva = vistazos(emocion, etiqueta)
+        tramo = 100.0 * sum(f.get("emocion") == emo for f in filas) / len(filas)
+        if fuera == 0:
+            lineas.append(f"  {etiqueta:>2} {emo}: NO VALE: no se detecto ningun vistazo (la cabeza no bajo "
+                          f"mas de 8 grados); {emo} en el {tramo:.0f} % del tramo")
+            continue
+        p = 100.0 * conserva / fuera
+        lineas.append(f"  {etiqueta:>2} {emo}: {n} vistazos (el protocolo hace 3); conserva la expresion en el "
+                      f"{p:.0f} % de sus filas (criterio >= {VISTAZO_CONSERVA_MIN:.0f} %) "
+                      f"{ok(p >= VISTAZO_CONSERVA_MIN)}; {emo} en el {tramo:.0f} % del tramo")
+    return "\n".join(lineas)
+
+
+def _hay_que_grabar(ruta: Path, entrada) -> bool:
+    """Una grabación que ya existe solo se repite si el operador lo pide."""
+    if not ruta.is_file():
+        return True
+    r = entrada(f"\nYa existe {ruta.name}. ¿Grabarla otra vez? La de antes se pierde. [s/N] ")
+    return r.strip().lower().startswith("s")
+
+
+def _sesion_narracion(base: Path, py: str, entrada=None) -> None:
+    """Las dos grabaciones del P10, cada una con su tabla delante, y las preguntas."""
+    entrada = entrada or input
+    sin, con = rutas_p10(base)
+    print(INTRO_P10)
+    if _hay_que_grabar(sin, entrada):
+        print(tabla_protocolo(PROTOCOLO_P10_SIN_INTERFAZ, cabecera=CABECERA_P10_SIN_INTERFAZ, quien="se ve",
+                              ancho=ANCHO_P10))
+        _esperar("Lee la tabla. Al seguir se abre la ventana de Python y empieza la etiqueta 0.\n"
+                 "  Cuando acabe la etiqueta 1, pulsa q en esa ventana.")
+        subprocess.run([py, "-m", "telmeow_teleop.main", "--record", str(sin)], cwd=PROJECT_ROOT)
+    if _hay_que_grabar(con, entrada):
+        print(tabla_protocolo(PROTOCOLO_P10_NARRACION, cabecera=CABECERA_P10_NARRACION, ancho=ANCHO_P10))
+        _esperar("Lee la tabla. Al seguir se abre la ventana de Python y, unos segundos después,\n"
+                 "  el navegador: desde ahí, todo con el navegador delante.")
+        subprocess.run([py, "-m", "telmeow_teleop.control_panel", "--record", str(con)], cwd=PROJECT_ROOT)
+        preguntar_p10(base, entrada)
+
+
+def _guardar_informe(base: Path, analisis) -> int:
+    print("\nAnalizando...\n")
+    informe = analisis(base)
+    print(informe)
+    destino = base.with_name(base.name + "_informe.txt")
+    destino.write_bytes(informe.encode("utf-8"))
+    print(f"\nInforme guardado en {destino}")
+    return 0
+
+
+# --------------------------------------------------------------------------
 # La sesión
 # --------------------------------------------------------------------------
 
@@ -702,18 +1104,24 @@ def main(argv: list[str] | None = None) -> int:
     modo.add_argument("--ajustes", action="store_true", help="la del P7.6: enojo, mejillas, codos y luz")
     modo.add_argument("--entrenar", action="store_true", help="la del P7.7: caras para reentrenar la emocion")
     modo.add_argument("--confirmar", action="store_true", help="la que confirma el reentrenado y la regla suave")
+    modo.add_argument("--narracion", action="store_true", help="la del P10: sin y con la interfaz de narracion")
     parser.add_argument("--analizar", action="store_true", help="solo el informe, sin grabar")
+    parser.add_argument("--guia", action="store_true", help="solo las tablas del protocolo, sin grabar")
     args = parser.parse_args(argv)
     modo_ = ("gestos" if args.gestos else "ajustes" if args.ajustes else "entrenar" if args.entrenar
-             else "confirmar" if args.confirmar else "")
+             else "confirmar" if args.confirmar else "narracion" if args.narracion else "")
     base = PROJECT_ROOT / (args.base or {"gestos": "p75", "ajustes": "p76", "entrenar": "p77",
-                                         "confirmar": "p78"}.get(modo_, "p7_final"))
+                                         "confirmar": "p78", "narracion": "p10"}.get(modo_, "p7_final"))
     py = sys.executable
     analisis = {"gestos": analizar_gestos, "ajustes": analizar_ajustes,
                 "entrenar": analizar_entrenamiento,
-                "confirmar": analizar_confirmacion}.get(modo_, analizar)
+                "confirmar": analizar_confirmacion, "narracion": analizar_narracion}.get(modo_, analizar)
     protocolo = {"gestos": PROTOCOLO_GESTOS, "ajustes": PROTOCOLO_AJUSTES,
                  "entrenar": PROTOCOLO_ENTRENAR, "confirmar": PROTOCOLO_CONFIRMAR}.get(modo_, PROTOCOLO)
+
+    if args.guia:
+        print(guia_p10() if modo_ == "narracion" else tabla_protocolo(protocolo))
+        return 0
 
     if args.analizar:
         informe = analisis(base)
@@ -726,6 +1134,10 @@ def main(argv: list[str] | None = None) -> int:
         # puerto_abierto se pasa desde aquí para que las pruebas lo sustituyan.
         if not asegurar_broker(arrancados, puerto_abierto=puerto_abierto):
             return 1
+        if modo_ == "narracion":
+            # Ni el visor del 8000 ni el monitor: la interfaz la sirve main.py.
+            _sesion_narracion(base, py)
+            return _guardar_informe(base, analisis)
 
         if not puerto_abierto(8000):
             arrancados.append(subprocess.Popen(

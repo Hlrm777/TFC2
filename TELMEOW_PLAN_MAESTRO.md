@@ -148,11 +148,11 @@ cambia respecto al plan original.
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral · **2026-11-03 (P6.5)**: las gafas no pesan; los blendshapes, reentrenados con el dataset y cuatro sesiones del operador (tristeza con ceño 32-38 % → 61-72 % en validación cruzada), y la regla «sin cejas arriba no es sorpresa» encendida, por decisión del operador | `1e3b6c1`, `de4827a` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ✅ **cerrado el 2026-11-08** · código hecho el 2026-10-26, sesión con el operador el 2026-11-02 · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cerrado el 2026-11-08 por decisión del operador** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7»; el P7.8 se ve en vivo en la primera sesión del P10 | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a`, `3bd2be8` |
-| P10 — Interfaz de narración | 🟡 **código hecho el 2026-11-08** · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **falta la sesión con el operador** (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
+| P10 — Interfaz de narración | 🟡 **código hecho el 2026-11-08** · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **falta la sesión con el operador**: `tools/sesion_verificacion.py --narracion`, que enseña la tabla de cada grabación antes de lanzarla (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1566 pruebas en verde** (desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración—; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1595 pruebas en verde** (desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 29 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -221,7 +221,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── mqtt_monitor.py       ✅ · --latencia: la latencia desde la captura (P7.3)
 │   ├── analizar_sesion.py    ✅ P7: fps, frames perdidos, ms por etapa, criterio del P7.1
 │   ├── analizar_p65.py       ✅ P6.5: gafas y reentrenamiento de los blendshapes, por sesiones
-│   ├── sesion_verificacion.py ✅ la sesión de verificación tras el P6.5, entera: broker, visor, grabación, latencias, informe · --gestos: la del P7.4 y el P7.5
+│   ├── sesion_verificacion.py ✅ la sesión de verificación tras el P6.5, entera: broker, visor, grabación, latencias, informe · --gestos: la del P7.4 y el P7.5 · --narracion: la del P10, con su guía
 │   ├── filtros_cabeza.py     ✅ P7.4: la cadena de la cabeza offline con otros filtros
 │   ├── pose_mano_cara.py     ✅ P7.5: la pose con las mallas y la cadena del visor
 │   ├── analizar_mano_cara.py ✅ P7.5: el detector sobre grabaciones de brazos
@@ -4497,15 +4497,25 @@ en la pantalla externa del robot 3D; y la doble `q`, que cierra la demo y deja
 la página en «La sesión terminó». La doble `q` funcionó con eventos simulados
 en la página; con la herramienta de automatización la segunda pulsación no
 llegó como tecla aparte, así que se confirma con el teclado en la sesión
-(etiqueta 12).
+(etiqueta 13).
 
-**1566 pruebas en verde** tras el P10 (117 nuevas: el envío de página y gesto,
+- **La guía de la sesión** (2026-11-08, la pidió el operador):
+  `tools/sesion_verificacion.py --narracion` lleva la sesión entera, como las del
+  P7: comprueba el broker, enseña la tabla de cada grabación en la terminal
+  antes de lanzarla, pregunta al final qué teclas funcionaron y qué vista
+  prefiere el operador (`p10_respuestas.csv`) y analiza con los criterios de
+  abajo (`p10_informe.txt`). Una grabación que ya existe solo se repite si se
+  pide. `--guia` enseña las tablas sin grabar.
+
+**1595 pruebas en verde** tras el P10 (146 nuevas: el envío de página y gesto,
 la lista de cuentos, cada orden del navegador frente a su tecla, el servidor de
 verdad en un puerto libre —estado, órdenes válidas e inválidas, PDF, rutas con
 `..`, el MJPEG—, el broker, el comando de la sesión y el HTML: la tabla de
 teclas de JavaScript igual a la de Python, el módulo último y el importmap
 intacto para `barrido_colisiones.mjs`, y que todo lo que la página pide lo sirve
-el servidor).
+el servidor; y 29 de la guía de la sesión: el protocolo frente a la tabla de
+teclas, el informe con sesiones fabricadas que cumplen y que no, y el orden
+tabla → grabación).
 
 ### Lo que no se hace del enunciado, y por qué
 
@@ -4530,49 +4540,79 @@ el servidor).
 
 - **No le roba tiempo al bucle**: con la página abierta y el video corriendo,
   los fps medios de la etiqueta 1 son al menos el 90 % de los de la misma
-  etiqueta sin interfaz, y la publicación sigue a 19.9 Hz
-  (`tools/analizar_sesion.py --comparar`).
-- **Página y gesto juntos**: en el CSV, cada cambio de `pagina` tiene su `gesto`
-  en la misma fila, y hay 0 cambios de página con `pausa` = 1.
+  etiqueta sin interfaz, y la publicación sigue a 20 Hz: mediana de `mqtt_hz`
+  de al menos 19.5 Hz (en el P7, 19.7-19.9).
+- **Página y gesto juntos**: en el CSV, cada cambio de `pagina` dentro de un
+  mismo cuento tiene su `gesto` en la misma fila y en su sentido (`page_next`
+  al avanzar, `page_prev` al volver), y hay 0 cambios de página con `pausa` = 1.
+  El protocolo pasa 10 páginas: 5 en la etiqueta 6, 2 en la 7, 1 en la 8 y 2 en
+  la 12.
 - **Las teclas, sin clic en la ventana de Python**: cada tecla funciona con el
-  navegador delante. Lo marca el operador: sí o no por tecla.
+  navegador delante. Lo marca el operador, sí o no por tecla, al acabar; la
+  columna `orden` lo respalda con lo que llegó de verdad del navegador, y las
+  órdenes desde la ventana de Python tienen que ser 0. Hacer clic en el
+  navegador para darle el foco se pregunta, pero no decide.
+- **Los vistazos del P7.8**: en las etiquetas 9 y 10, mientras la cara mira
+  fuera (columna `mirada_fuera`, sus primeros 3 s), el robot conserva la
+  expresión de justo antes en al menos el 95 % de las filas. Si no se detecta
+  ningún vistazo, la prueba no vale: la cabeza no bajó más de 8°.
+- **Los brazos del P7.8** (etiquetas 3 y 4) los decide lo que vea el operador;
+  las cifras del comando publicado (cambios de más de 1° y saltos de más de 5°
+  por minuto, como en la tabla del P7.8) quedan de referencia.
 
 ### La sesión con el operador — el protocolo (p10; comprueba también el P7.8 en vivo)
 
-Buena luz, y antes, que haya un solo broker (§4.1). Dos grabaciones, que se pasan
-de etiqueta con ESPACIO (en el navegador, en la segunda):
+Un solo comando, como las sesiones del P7. Antes de cada grabación enseña su
+tabla en la terminal; al acabar, pregunta qué teclas funcionaron y qué vista
+prefiere el operador, y deja el informe en `p10_informe.txt`:
 
 ```
-.venv\Scripts\python.exe -m telmeow_teleop.main --record p10_sin_interfaz.csv
-.venv\Scripts\python.exe -m telmeow_teleop.control_panel --record p10_narracion.csv
+.venv\Scripts\python.exe tools\sesion_verificacion.py --narracion
+.venv\Scripts\python.exe tools\sesion_verificacion.py --narracion --guia   # solo las tablas, para leerlas antes
 ```
 
-`p10_sin_interfaz.csv`: solo la etiqueta 1, y se cierra con `q` en la ventana de
-OpenCV.
+Buena luz, y el comando comprueba antes que haya un solo broker (§4.1). Son dos
+grabaciones, y en las dos la etiqueta 0 (la calibración) empieza sola y ESPACIO
+pasa a la siguiente:
 
-| # | Qué hacer | Tiempo | Qué debe hacer el robot |
-|---|---|---|---|
-| 1 | Leer en voz alta una página sin pasarla, mirando la pantalla y con los brazos en la mesa | 60 s | seguir la cabeza; brazos quietos |
-| 2 | Pulsar `c` en el navegador con la cara relajada, mirando la pantalla | 5 s | cabeza al frente, neutral |
-| 3 | Brazos apoyados en la mesa, como al leer, sin moverlos (P7.8) | 30 s | brazos quietos, **sin temblor** |
-| 4 | Brazo derecho estirado al lado, «señalando la ventana», quieto (P7.8) | 20 s | brazo quieto, sin temblor |
-| 5 | Elegir «El túnel». Leer y pasar 5 páginas con `l` (o →), una cada ~6 s, moviendo la cabeza con normalidad | 40 s | gesto de página en cada cambio; la pantalla externa del visor muestra la misma página |
-| 6 | `j` dos veces | 10 s | gesto hacia el otro lado y página anterior |
-| 7 | `k` (pausa); intentar pasar con `l`; `k` otra vez; pasar con `l` | 15 s | en pausa no cambia la página ni se mueve; tras reanudar, cambia con gesto |
-| 8 | Sonrisa clara leyendo; mirar 2 s el libro abajo a la derecha, «buscando la línea siguiente», y volver. Tres veces (P7.8) | 20 s | **conserva feliz** durante el vistazo |
-| 9 | Lo mismo con cara triste, «cuando el personaje se pierde» (P7.8) | 20 s | conserva triste |
-| 10 | `6` (concentrado) 3 s; luego `0` | 10 s | ojos concentrados y vuelta a lo que lee |
-| 11 | Elegir un cuento de páginas verticales («Cambios») y pasar 2 páginas | 15 s | la página se ve entera y sin deformar |
-| 12 | `q` dos veces | — | `main.py` cierra limpio; la página dice «La sesión terminó» |
+1. **`p10_sin_interfaz.csv`**: solo `main.py`, como en el P7, con las teclas en
+   su ventana. Es la referencia de los fps.
 
-También en esta sesión: el operador elige la vista del robot (Detrás o Frente).
-Desde atrás, el brazo que levanta sale del mismo lado en su cámara y en el
-robot; desde el frente, del lado contrario, como lo ven los niños. Se comprueba
-en vivo, no se deduce.
+   | # | Qué hacer | Tiempo | Qué se ve |
+   |---|---|---|---|
+   | 0 | Cara relajada mirando la pantalla, quieto, antebrazos en la mesa. No pulsar nada | 10 s | la ventana dice CALIBRANDO unos 3 s |
+   | 1 | Hablar en voz alta mirando la pantalla, contando qué se hizo hoy. Antebrazos en la mesa, sin gestos. Al acabar, `q` en la ventana de Python | 60 s | la ventana sigue la cabeza |
+
+2. **`p10_narracion.csv`**: la interfaz de narración, con TODAS las teclas en
+   el navegador y sin hacer clic en la ventana de Python.
+
+   | # | Qué hacer | Tiempo | Qué debe hacer el robot |
+   |---|---|---|---|
+   | 0 | Lo mismo que la 0 de arriba, hasta que se abra el navegador | 15 s | «Calibrando: cara relajada, mirando la pantalla» unos 3 s; luego, neutral |
+   | 1 | La 1 de arriba, palabra por palabra | 60 s | sigue la cabeza; los brazos quietos |
+   | 2 | Cara relajada mirando la pantalla: `c` y quieto | 5 s | calibra 3 s; cabeza al frente y neutral |
+   | 3 | Antebrazos apoyados en la mesa, como al leer, sin moverlos (P7.8) | 30 s | los dos brazos quietos, **sin temblor** |
+   | 4 | Brazo derecho estirado a la derecha, a la altura del hombro, «señalando la ventana»; el izquierdo en la mesa. Quieto (P7.8) | 20 s | su brazo derecho estirado y quieto, sin temblor |
+   | 5 | Botón «Vista» (de frente), saludar 2 veces con la derecha; «Vista» otra vez (detrás), saludar 2 veces | 20 s | desde detrás saluda por el mismo lado de la pantalla que el operador en su cámara; de frente, por el contrario |
+   | 6 | Elegir «El túnel» y leerlo pasando 5 páginas, una cada ~6 s: 3 con `l` y 2 con → | 40 s | gesto de página en cada cambio; la pantalla del robot muestra la misma página |
+   | 7 | Volver 2 páginas, una cada ~3 s: una con `j` y otra con ← | 10 s | gesto hacia el otro lado y página anterior, las dos veces |
+   | 8 | `k` (pausa); intentar pasar con `l`; `k` otra vez; pasar con `l` | 15 s | en pausa, quieto, «En pausa (k)» y la página NO cambia; al reanudar, cambia con su gesto |
+   | 9 | Sonrisa clara leyendo; tres veces, bajar la cabeza 2 s a la esquina de abajo a la derecha de la página («buscando la línea siguiente») y volver (P7.8) | 20 s | **conserva feliz** durante el vistazo |
+   | 10 | Lo mismo con cara triste, «cuando el personaje se pierde» (P7.8) | 20 s | conserva triste |
+   | 11 | `6` (concentrado) 5 s; luego `0` con la cara relajada | 10 s | ojos concentrados y «Expresión fijada: concentrado»; con `0`, neutral |
+   | 12 | Elegir «Cambios» (páginas verticales) y pasar 2 páginas con `l` | 15 s | la página se ve entera y sin deformar |
+   | 13 | `q` dos veces seguidas | 5 s | la primera pide confirmación; con la segunda se cierra `main.py` y la página dice «La sesión terminó» |
+
+**Cambios frente al primer borrador del protocolo** (2026-11-08, al escribir la
+guía, que el operador pidió porque los dos comandos sueltos no decían qué hacer
+en cada etiqueta): faltaba la etiqueta 0, la calibración que empieza sola; la 1
+pedía leer una página cuando todavía no había cuento elegido (ahora es hablar,
+igual en las dos grabaciones); la vista se elige en una etiqueta propia (la 5); y
+`l`/→ y `j`/← se prueban por separado. Por eso son 14 etiquetas y no 12.
 
 Al analizar, primero se comprueba en los datos qué se hizo de verdad en cada
-etiqueta. El temblor de las etiquetas 3 y 4, con `tools/zona_brazos.py`; los
-vistazos, con la columna de emoción.
+etiqueta: las páginas pasadas por etiqueta, las órdenes que llegaron del
+navegador y los vistazos detectados salen en el informe.
 
 ### Enunciado original
 

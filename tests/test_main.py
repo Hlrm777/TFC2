@@ -112,6 +112,7 @@ class Registro:
         self.rgb = 0             # conversiones BGR -> RGB
         self.eventos = []        # orden de las llamadas al publicador
         self.publicados = []     # kwargs de cada publish
+        self.eventos_mqtt = []   # (topic, datos, retain) de cada publicar_evento (P10)
         self.neutros = 0
         self.calibraciones = 0
         self.ventanas_cerradas = False
@@ -142,6 +143,11 @@ class PublicadorFalso:
         self.r.eventos.append("publish")
         self.r.publicados.append({k: v for k, v in campos.items() if v is not None})
         self.message_count += 1
+        return True
+
+    def publicar_evento(self, topic, datos, retain=False):
+        self.r.eventos.append("evento")
+        self.r.eventos_mqtt.append((topic, dict(datos), retain))
         return True
 
     def disconnect(self):
@@ -250,7 +256,10 @@ def pipeline(monkeypatch, tmp_path):
             r.rgb += 1
         return original_cvt(imagen, codigo, *a, **k)
 
-    def correr(argv=(), frames=8, teclas=(), backend=None, hilo_real=False, pausa_s=0.0):
+    def correr(argv=(), frames=8, teclas=(), backend=None, hilo_real=False, pausa_s=0.0,
+               ordenes=None):
+        """``ordenes``: una lista por frame con las órdenes que llegan del
+        navegador en ese frame (P10)."""
         camara = CamaraFalsa(frames, pausa_s)
         estado["camara"] = camara
         pulsadas = iter(list(teclas))
@@ -277,6 +286,15 @@ def pipeline(monkeypatch, tmp_path):
             monkeypatch.setattr(principal, "HiloEmocion", EmocionSincrona)
         estado["publicador"] = PublicadorFalso(r)
         monkeypatch.setattr(principal, "_crear_publicador", crear_publicador)
+        if ordenes is not None:
+            por_frame = iter(list(ordenes))
+            bucle_original = principal._bucle
+
+            def bucle(*a, **k):
+                k["pendientes"] = lambda: next(por_frame, [])
+                return bucle_original(*a, **k)
+
+            monkeypatch.setattr(principal, "_bucle", bucle)
         monkeypatch.setattr(ht.mp.solutions.face_mesh, "FaceMesh", Malla)
         monkeypatch.setattr(at.mp.solutions.pose, "Pose", Pose)
         monkeypatch.setattr(at.mp.solutions.drawing_utils, "draw_landmarks", lambda *a, **k: None)
@@ -410,6 +428,155 @@ def test_k_pausa_la_publicacion_y_no_deja_salir_gestos(pipeline):
 def test_q_sale_antes_de_que_se_acaben_los_frames(pipeline):
     assert pipeline.correr(frames=50, teclas=[-1, -1, ord("q")]) == 0
     assert len(pipeline.estado["camara"].leidos) == 3
+
+
+# --------------------------------------------------------------------------
+# 2b. Las órdenes del navegador y los cuentos (P10.3)
+# --------------------------------------------------------------------------
+
+
+def _resultado(pipeline):
+    return {
+        "frames": len(pipeline.estado["camara"].leidos),
+        "publicados": [(m.get("emo"), m.get("gesture"), m.get("page"))
+                       for m in pipeline.publicados],
+        "neutros": pipeline.neutros,
+        "calibraciones": pipeline.calibraciones,
+        "eventos": list(pipeline.eventos_mqtt),
+    }
+
+
+@pytest.mark.parametrize("tecla", sorted(principal.ORDENES_DE_TECLA))
+def test_cada_orden_del_navegador_hace_lo_mismo_que_su_tecla(pipeline, monkeypatch, tecla):
+    """Botón y tecla acaban en el mismo ejecutor. Se comprueba con lo que sale,
+    no mirando el código: las mismas poses, los mismos gestos, las mismas
+    calibraciones, los mismos frames leídos."""
+    secuencia = [-1, tecla, -1, -1, tecla, -1, -1, -1]
+    assert pipeline.correr(frames=10, teclas=secuencia,
+                           backend=BackendRelativo([("feliz", 0.9), ("triste", 0.8)])) == 0
+    con_teclas = _resultado(pipeline)
+
+    pipeline.publicados.clear()
+    pipeline.eventos_mqtt.clear()
+    pipeline.neutros = pipeline.calibraciones = 0
+    orden = principal.ORDENES_DE_TECLA[tecla]
+    navegador = principal.Orden(orden.nombre, orden.valor, origen="navegador")
+    ordenes = [[navegador] if t == tecla else [] for t in secuencia]
+    assert pipeline.correr(frames=10, ordenes=ordenes,
+                           backend=BackendRelativo([("feliz", 0.9), ("triste", 0.8)])) == 0
+    assert _resultado(pipeline) == con_teclas
+    assert con_teclas["frames"] == (2 if orden.nombre == "salir" else 10)
+
+
+@pytest.fixture
+def cuentos(tmp_path, monkeypatch):
+    from test_historias import _pdf
+
+    carpeta = tmp_path / "cuentos"
+    carpeta.mkdir()
+    _pdf(carpeta / "El túnel.pdf", 3)
+    _pdf(carpeta / "Cambios.pdf", 2, ancho=612, alto=840)
+    monkeypatch.setenv("TELMEOW_STORIES_DIR", str(carpeta))
+    return carpeta
+
+
+def _abrir(nombre="El túnel.pdf"):
+    return principal.Orden("historia", nombre, origen="navegador")
+
+
+def _filas_sesion(ruta):
+    import csv
+
+    with open(ruta, encoding="utf-8") as archivo:
+        return list(csv.DictReader(archivo))
+
+
+def test_abrir_un_cuento_lo_anuncia_retenido_con_su_pagina(pipeline, cuentos):
+    assert pipeline.correr(frames=4, ordenes=[[], [_abrir()]]) == 0
+    assert pipeline.eventos_mqtt == [
+        ("telmeow/teleop/story", {"story": "El túnel.pdf", "page": 1}, True),
+        ("telmeow/teleop/page", {"page": 1, "total": 3}, True),
+    ]
+    assert not any("gesture" in m for m in pipeline.publicados)   # abrir no hace gesto
+
+
+def test_con_cuento_cada_pagina_sale_con_su_gesto_y_queda_en_la_fila(pipeline, cuentos):
+    ruta = pipeline.tmp / "sesion.csv"
+    teclas = [-1, -1, ord("l"), -1, ord("l"), -1, ord("j"), -1]
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=9, teclas=teclas,
+                           ordenes=[[], [_abrir()]]) == 0
+    con_gesto = [(m["gesture"], m["page"]) for m in pipeline.publicados if "gesture" in m]
+    assert con_gesto == [("page_next", 2), ("page_next", 3), ("page_prev", 2)]
+    paginas = [d for topic, d, _ in pipeline.eventos_mqtt if topic == "telmeow/teleop/page"]
+    assert paginas == [{"page": n, "total": 3} for n in (1, 2, 3, 2)]
+    filas = _filas_sesion(ruta)
+    # La página cambia exactamente en las filas con gesto: en la del frame en
+    # que salió, no en la siguiente.
+    previa = ""
+    for fila in filas:
+        assert (fila["pagina"] != previa) == (fila["gesto"] != "" or fila["orden"].startswith(
+            "historia")), fila
+        previa = fila["pagina"]
+    assert [f["gesto"] for f in filas if f["gesto"]] == ["page_next", "page_next", "page_prev"]
+    assert filas[1]["historia"] == "El túnel.pdf" and filas[1]["pagina"] == "1"
+    assert filas[1]["orden"] == "historia=El túnel.pdf@navegador"
+    assert filas[2]["orden"] == "pagina_siguiente@tecla"
+
+
+def test_en_pausa_no_se_pasa_de_pagina(pipeline, cuentos):
+    """Decisión del operador (2026-11-08): página y gesto siempre juntos."""
+    ruta = pipeline.tmp / "sesion.csv"
+    teclas = [-1, -1, ord("k"), ord("l"), ord("k"), ord("l"), -1]
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=8, teclas=teclas,
+                           ordenes=[[], [_abrir()]]) == 0
+    filas = _filas_sesion(ruta)
+    assert [f["pagina"] for f in filas] == ["", "1", "1", "1", "1", "2", "2", "2"]
+    assert not any(f["pausa"] == "1" and f["gesto"] for f in filas)
+    assert [(m["gesture"], m["page"]) for m in pipeline.publicados if "gesture" in m] == [
+        ("page_next", 2)]
+
+
+def test_en_los_bordes_del_libro_no_sale_nada(pipeline, cuentos):
+    teclas = [-1, -1, ord("j"), ord("l"), ord("l"), -1]
+    assert pipeline.correr(frames=7, teclas=teclas, ordenes=[[], [_abrir("Cambios.pdf")]]) == 0
+    assert [(m["gesture"], m["page"]) for m in pipeline.publicados if "gesture" in m] == [
+        ("page_next", 2)]
+
+
+@pytest.mark.parametrize("nombre", ["../El túnel.pdf", "no_existe.pdf", None])
+def test_un_cuento_que_no_esta_en_la_lista_no_abre_nada(pipeline, cuentos, nombre):
+    teclas = [-1, -1, ord("l")]
+    assert pipeline.correr(frames=4, teclas=teclas, ordenes=[[], [_abrir(nombre)]]) == 0
+    assert pipeline.eventos_mqtt == []
+    # Sin cuento, l sigue siendo solo el gesto, como en el P7.
+    assert [m.get("page") for m in pipeline.publicados if "gesture" in m] == [None]
+
+
+def test_otro_cuento_vuelve_a_la_pagina_1(pipeline, cuentos):
+    teclas = [-1, -1, ord("l"), -1, -1]
+    assert pipeline.correr(frames=6, teclas=teclas,
+                           ordenes=[[], [_abrir()], [], [_abrir("Cambios.pdf")]]) == 0
+    assert pipeline.eventos_mqtt[-2:] == [
+        ("telmeow/teleop/story", {"story": "Cambios.pdf", "page": 1}, True),
+        ("telmeow/teleop/page", {"page": 1, "total": 2}, True),
+    ]
+
+
+def test_salir_desde_el_navegador_cierra_limpio(pipeline):
+    salir = principal.Orden("salir", origen="navegador")
+    assert pipeline.correr(frames=50, ordenes=[[], [], [salir]]) == 0
+    assert len(pipeline.estado["camara"].leidos) == 3
+    assert pipeline.estado["publicador"].desconectado
+    assert pipeline.estado["camara"].liberada
+
+
+def test_varias_ordenes_en_un_frame_quedan_todas_en_la_fila(pipeline, cuentos):
+    ruta = pipeline.tmp / "sesion.csv"
+    varias = [_abrir(), principal.Orden("pagina_siguiente", origen="navegador")]
+    assert pipeline.correr(argv=["--record", str(ruta)], frames=3, ordenes=[[], varias]) == 0
+    fila = _filas_sesion(ruta)[1]
+    assert fila["orden"] == "historia=El túnel.pdf@navegador|pagina_siguiente@navegador"
+    assert (fila["pagina"], fila["gesto"]) == ("2", "page_next")
 
 
 # --------------------------------------------------------------------------

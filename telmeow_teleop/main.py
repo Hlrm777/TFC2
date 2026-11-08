@@ -72,6 +72,7 @@ from .emotion_classifier import (
 from .head_tracker import COLUMNAS_CSV as COLUMNAS_CABEZA
 from .head_tracker import HeadTracker, RuidoMalla, apartar_si_existe
 from .head_tracker import fila_csv as fila_cabeza
+from .historias import Biblioteca, Lector
 from .limits import Side
 
 __all__ = [
@@ -134,6 +135,11 @@ COLUMNAS_SESION = (
     "malla_falla", "ruido_malla", "zona_muerta", "pausa_luz",
     # Desde el 2026-11-07 (P7.7): la pausa por cara perdida sin manos encima.
     "pausa_cara",
+    # Desde el 2026-11-08 (P10): el cuento y la página vigentes al acabar el
+    # frame, y las órdenes ejecutadas en él ("nombre=valor@origen", varias
+    # separadas por "|"). Desde el P10 el gesto se anota en el frame en que
+    # salió; antes caía en el siguiente.
+    "historia", "pagina", "orden",
 )
 
 TECLA_SALIR = ord("q")
@@ -156,18 +162,24 @@ class Orden:
     el P10, con un botón o una tecla en el navegador. Las dos vías acaban en el
     mismo ``ejecutar_orden``, así que hacen exactamente lo mismo.
 
-    ``valor`` es la expresión de ``expresion``. ``origen`` queda en la
-    grabación: ``tecla`` u otro (``navegador``).
+    ``valor`` es la expresión de ``expresion`` y el nombre del archivo de
+    ``historia``. ``origen`` queda en la grabación: ``tecla`` u otro
+    (``navegador``).
     """
 
     nombre: str
     valor: str | None = None
     origen: str = "tecla"
 
+    def para_registro(self) -> str:
+        """Cómo queda en la columna ``orden``: ``nombre=valor@origen``."""
+        valor = f"={self.valor}" if self.valor is not None else ""
+        return f"{self.nombre}{valor}@{self.origen}"
+
 
 #: Las órdenes que existen. Lo que no esté aquí no se ejecuta.
 ORDENES = ("salir", "etiqueta", "calibrar", "expresion", "automatico", "pausa",
-           "pagina_anterior", "pagina_siguiente")
+           "pagina_anterior", "pagina_siguiente", "historia")
 
 #: La tecla de cada orden en la ventana de OpenCV. El modo narración del visor
 #: lleva la misma tabla en JavaScript, y una prueba exige que coincidan.
@@ -194,11 +206,17 @@ class Sesion:
     cabeza: object
     hilo: object
     periodico: object
+    #: Los cuentos (P10): de dónde se eligen y en qué página va la lectura.
+    biblioteca: Biblioteca | None = None
+    lector: Lector = field(default_factory=Lector)
+    topic_cuento: str = MQTTConfig.topic_story
     etiqueta: int = 0
     aviso: str = ""
     aviso_hasta: float = 0.0
     #: El gesto que salió en este frame, para la columna ``gesto``.
     gesto_registrado: str = ""
+    #: Las órdenes ejecutadas en este frame, para la columna ``orden``.
+    orden_registrada: str = ""
     salir: bool = False
 
     def avisar(self, texto: str, segundos: float = 2.0) -> None:
@@ -214,6 +232,9 @@ def ejecutar_orden(sesion: Sesion, orden: Orden) -> None:
     """Hace lo que pide la orden. Solo desde el hilo del bucle."""
     nombre = orden.nombre
     cabeza, hilo, periodico = sesion.cabeza, sesion.hilo, sesion.periodico
+    registro = orden.para_registro()
+    sesion.orden_registrada = (f"{sesion.orden_registrada}|{registro}"
+                               if sesion.orden_registrada else registro)
     if nombre == "salir":
         sesion.salir = True
     elif nombre == "etiqueta":
@@ -247,13 +268,57 @@ def ejecutar_orden(sesion: Sesion, orden: Orden) -> None:
         print("publicacion en PAUSA" if periodico.alternar_pausa() else "publicacion reanudada")
     elif nombre in ("pagina_anterior", "pagina_siguiente"):
         gesto = "page_prev" if nombre == "pagina_anterior" else "page_next"
-        if periodico.gesto(gesto):
+        if sesion.lector.abierto:
+            _pasar_pagina(sesion, gesto, -1 if nombre == "pagina_anterior" else +1)
+        elif periodico.gesto(gesto):
+            # Sin cuento, como en el P7: solo el gesto.
             sesion.gesto_registrado = gesto
             print(f"gesto {gesto}")
         else:
             sesion.avisar("en pausa: gesto no enviado")
+    elif nombre == "historia":
+        _abrir_cuento(sesion, orden.valor)
     else:
         raise ValueError(f"orden desconocida: {nombre!r}")
+
+
+def _pasar_pagina(sesion: Sesion, gesto: str, paso: int) -> None:
+    """Con un cuento abierto: la página y su gesto salen juntos o no sale nada
+    (``evento_pagina``). En pausa no se pasa de página (decisión del operador,
+    2026-11-08)."""
+    lector, periodico = sesion.lector, sesion.periodico
+    destino = lector.destino(paso)
+    if destino is None:
+        sesion.avisar("es la ultima pagina" if paso > 0 else "es la primera pagina")
+    elif periodico.evento_pagina(gesto, destino, lector.total):
+        lector.ir(destino)
+        sesion.gesto_registrado = gesto
+        print(f"pagina {destino}/{lector.total} ({gesto})")
+    elif periodico.pausado:
+        sesion.avisar("en pausa: no se puede pasar de pagina")
+    else:
+        sesion.avisar("sin enlace: la pagina no salio")
+
+
+def _abrir_cuento(sesion: Sesion, nombre: str | None) -> None:
+    """Abre el cuento en la página 1 y lo anuncia, retenido, por el topic del
+    cuento y por el de la página: así la página retenida no se queda con la del
+    cuento anterior. No lleva gesto, así que también vale en pausa."""
+    historia = (sesion.biblioteca.buscar(nombre)
+                if sesion.biblioteca is not None and nombre else None)
+    if historia is None or not historia.legible:
+        sesion.avisar(f"cuento no disponible: {nombre}")
+        return
+    sesion.lector.elegir(historia)
+    periodico = sesion.periodico
+    salio = periodico.publicar_evento(sesion.topic_cuento,
+                                      {"story": historia.nombre, "page": 1}, retain=True)
+    salio = periodico.publicar_evento(periodico.topic_pagina,
+                                      {"page": 1, "total": historia.paginas},
+                                      retain=True) and salio
+    if not salio:
+        sesion.avisar("sin enlace: el cuento no se anuncio")
+    print(f"cuento: {historia.titulo} ({historia.paginas} paginas)")
 
 
 # --------------------------------------------------------------------------
@@ -390,6 +455,11 @@ class PublicadorPeriodico:
                 return False
             self._gestos.append(nombre)
             return True
+
+    def publicar_evento(self, topic: str, datos: dict, *, retain: bool = False) -> bool:
+        """Un evento por otro topic (el cuento), sin pisar el envío del hilo."""
+        with self._envio:
+            return bool(self.publicador.publicar_evento(topic, datos, retain=retain))
 
     def evento_pagina(self, gesto: str, pagina: int, total: int) -> bool:
         """Cambio de página de un cuento (P10): la pose vigente con ``gesture`` y
@@ -1430,7 +1500,10 @@ def _grabar_inferencia(clasificador, grabacion):
     return grabar
 
 
-def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> None:
+def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
+           pendientes=None) -> None:
+    """El bucle de visión. ``pendientes``, si se da, devuelve en cada frame las
+    órdenes que llegaron del navegador (P10)."""
     import mediapipe as mp
 
     dibujo = mp.solutions.drawing_utils
@@ -1439,7 +1512,9 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
     marcas: deque[float] = deque(maxlen=30)
     previo = None
     duplicados = 0
-    sesion = Sesion(cabeza, hilo, periodico)
+    sesion = Sesion(cabeza, hilo, periodico,
+                    biblioteca=Biblioteca(cfg.paths.stories_dir),
+                    topic_cuento=cfg.mqtt.topic_story)
     inferencias_vistas = 0
     calibraciones_vistas = 0
     t_anterior = None
@@ -1488,6 +1563,7 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
             ms_brazos = 1000.0 * (time.perf_counter() - inicio)
 
         t = ahora - t0
+        etiqueta_frame = sesion.etiqueta
         manos = (manos_de_blazepose(brazos.landmarks_imagen, ancho, alto)
                  if brazos is not None else None)
         # La cara tapada por las manos (H58): con la caja de la malla de este
@@ -1620,9 +1696,20 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
         # estimadores, grabación y dibujo.
         ms_bucle = ms_bucle_previo = 1000.0 * (time.perf_counter() - ahora)
 
+        cv2.imshow(VENTANA, lienzo)
+        tecla = cv2.waitKey(1) & 0xFF
+        orden = ORDENES_DE_TECLA.get(tecla)
+        if orden is not None:
+            ejecutar_orden(sesion, orden)
+        # Las del navegador (P10), por el mismo camino que las teclas.
+        for orden in (pendientes() if pendientes is not None else ()):
+            ejecutar_orden(sesion, orden)
+
+        # Después de las órdenes: el gesto y la página quedan en la fila del
+        # frame en que salieron.
         if grabacion is not None:
             grabacion.escribir("sesion", [
-                f"{t:.4f}", f"{t_captura_ms:.1f}", sesion.etiqueta, _f(dt_ms, ".2f"),
+                f"{t:.4f}", f"{t_captura_ms:.1f}", etiqueta_frame, _f(dt_ms, ".2f"),
                 int(duplicado), _f(ms_cabeza, ".2f"), _f(ms_brazos, ".2f"),
                 _f(ms_emocion, ".2f"), _f(ms_bucle, ".2f"),
                 _f(pan), _f(tilt),
@@ -1638,14 +1725,12 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
                 int(malla_falla), _f(ruido.sigma, ".3f"), f"{zona:.2f}",
                 int(periodico.pausado_por_luz),
                 int(periodico.pausado_sin_cara),
+                sesion.lector.historia.nombre if sesion.lector.abierto else "",
+                sesion.lector.pagina if sesion.lector.abierto else "",
+                sesion.orden_registrada,
             ])
         sesion.gesto_registrado = ""
-
-        cv2.imshow(VENTANA, lienzo)
-        tecla = cv2.waitKey(1) & 0xFF
-        orden = ORDENES_DE_TECLA.get(tecla)
-        if orden is not None:
-            ejecutar_orden(sesion, orden)
+        sesion.orden_registrada = ""
         if sesion.salir:
             break
 

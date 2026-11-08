@@ -3644,7 +3644,8 @@ parar la operación y avisar que no se puede continuar». Hecho así:
 
 Lo que sigue sin explicar del H60: el demo solo tiembla hoy 0.92° con la cámara a 32
 ms, como en el P4, y el P4 dio 0.36. No es el pipeline ni, solo, la luz: cambió algo
-del puesto desde septiembre.
+del puesto desde septiembre. Tampoco son los efectos de la cámara de Windows: el
+operador los revisó el 2026-11-08 y no había ninguno encendido.
 
 ### P7.7 — Lo que salió de la sesión p76 ✅ **hecho el 2026-11-07 y confirmado el 2026-11-08** (p77, p78)
 
@@ -3761,7 +3762,7 @@ que queda, con quién lo lleva y qué lo reabriría:
 | **Latencia total frente a los < 150 ms** (§3.2.2) | el programa, de la captura al mensaje: **64 ms** (p95 100); la cámara del portátil con la pantalla: **203 ms** medidos a oscuras, que es su peor caso; con la luz de trabajo el destello no da contraste y no hay cifra fiable. Total, ~270 ms en el peor caso. Lo que pasa de 150 ms es el hardware de la cámara, no el código | se declara; el P9 lo reporta con estas cifras. Lo reabriría tener una medida con luz por otro método (una sesión más) |
 | **H65**: la profundidad en «yo no fui» y al estirar | saltos grandes que la zona de 5° reduce y no quita (77-115 por minuto al estirar en p77) | se declara; el P9 lo reporta. Lo reabriría que en las pruebas con niños se note: un ajuste aparte del arm tracker |
 | **H68**: la tristeza con la cabeza muy baja | a más de 8° abajo el modelo deja de leerla; los vistazos de hasta 3 s conservan la expresión | se declara; los vistazos lo cubren al narrar |
-| **H60**: la malla tiembla más que en septiembre | crudo 0.9 frente a 0.36 en el P4, sin explicar (no es el pipeline; la luz pesa) | se declara; la zona que crece con el ruido y la pausa por poca luz lo cubren. Prueba gratis: revisar en Windows los efectos de la cámara (encuadre automático, contacto visual), que una actualización pudo encender |
+| **H60**: la malla tiembla más que en septiembre | crudo 0.9 frente a 0.36 en el P4, sin explicar (no es el pipeline; la luz pesa) | se declara; la zona que crece con el ruido y la pausa por poca luz lo cubren. Descartados los efectos de la cámara de Windows: el operador los revisó el 2026-11-08 y no había ninguno encendido |
 | Feliz al 66 % en `p7_final` | no se volvió a medir | el P9, al evaluar cada expresión |
 
 ### Enunciado original
@@ -4396,10 +4397,9 @@ de diagnóstico.
 **Del cierre del P7 (2026-11-08).** La primera sesión del P10 comprueba también,
 en vivo, lo último del P7 (P7.8), que solo se midió reproduciendo grabaciones:
 que el brazo quieto ya no tiembla con la zona de 5° y que, al apartar la mirada
-un par de segundos narrando con la expresión puesta, el robot la conserva. Antes
-de esa sesión, el operador revisa en Windows los efectos de la cámara
-(encuadre automático, contacto visual, desenfoque), por el H60; si había alguno
-encendido, la sesión dice si el temblor de la malla baja.
+un par de segundos narrando con la expresión puesta, el robot la conserva. (Los
+efectos de la cámara de Windows, sospechosos del H60, ya están revisados: el
+operador no tenía ninguno encendido.)
 
 ```
 Crea `telmeow_teleop/control_panel.py`. Elige entre Tkinter o una página HTML
@@ -6586,6 +6586,11 @@ apagada la cámara cae a 10 fps y el crudo sube a 2.2°. Lo que queda sin explic
 el 0.36 del P4 frente al 0.91 del demo de hoy, los dos a 32 ms. La zona muerta que
 crece con el ruido y la pausa por poca luz están en el P7.6.
 
+*Descartado el 2026-11-08*: los efectos de la cámara de Windows (encuadre
+automático, contacto visual, desenfoque), que una actualización pudo encender y que
+retocan la imagen antes de que llegue al programa. El operador los revisó y no había
+ninguno. El H60 se cierra el P7 como límite declarado.
+
 **H61 — Con la mano en la cara, el brazo salta porque BlazePose la pierde y la
 recupera.** 2.6-5.1°/frame de mediana y 8° en el p95, frente a 0.1° con la mano en
 otro sitio. En `p7_final`, con la cara tapada y el protocolo pidiendo estar quieto,
@@ -6714,7 +6719,7 @@ esta, ninguna. Corregido en el P7.7: sin cara, cabeza al frente y pausa.
 | **H57** | **La tristeza con el ceño fruncido se lee como enojo** (triste 0.68 con puchero, enojado 0.72 con puchero y ceño) | P7, §7.21 · reentrenado en el P6.5: con ceño 32-38 % → 61-72 % |
 | **H58** | **Con la cara tapada, Face Mesh se inventa la pose de la cabeza** (saltos de 6-13° por frame): `GuardaCabeza` la retiene y la lleva al frente | P7, §7.22 |
 | **H59** | **La regla de 3 s no ve una calibración reiniciada a mitad** (tecla `c`): el ancla cayó a 148 de 1171; reconstruida, 1171 de 1171. El CSV trae ahora `inicio_calibracion` | P6.5, §7.22 |
-| **H60** | **La Face Mesh tiembla 3-4 veces más en todas las sesiones del pipeline que en la del P4** (crudo 0.36 → 0.9-1.4°/frame; publicado 0.07 → 1.06), causa sin determinar: el demo solo en la misma sesión la separa. Zona muerta de 1° y `beta` 0.2: 0.07 offline | P7.4, §7.23 |
+| **H60** | **La Face Mesh tiembla 3-4 veces más en todas las sesiones del pipeline que en la del P4** (crudo 0.36 → 0.9-1.4°/frame; publicado 0.07 → 1.06), causa sin determinar: el demo solo en la misma sesión la separa. Zona muerta de 1° y `beta` 0.2: 0.07 offline. No es el pipeline (p75) ni los efectos de la cámara de Windows (revisados el 2026-11-08): límite declarado | P7.4, §7.23 |
 | **H61** | **Con la mano en la cara el brazo salta** (2.6-5.1°/frame) porque BlazePose la pierde y la recupera: el gesto se reconoce, no se copia. 6.35 → 0.00 reproducido | P7.5, §7.23 |
 | **H63** | **Las manos en las mejillas no tapan la cara**: la malla la ve el 100 % (p90 2.5°) frente al 41 % y 13° tapada. La guarda entra solo si la malla falla: en las mejillas, de 86-91 % a 0-6 % | P7.6, §7.24 |
 | **H64** | **El neutral se lee como enojo con la cabeza baja** (0 % a nivel, 60-100 % más de 6° abajo en `p7_final`). Umbral que sube 0.03 por grado: enojo falso 23 → 8 %, el de verdad 93 → 84 % | P7.6, §7.24 |

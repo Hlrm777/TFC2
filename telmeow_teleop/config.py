@@ -416,6 +416,15 @@ class HeadConfig:
     zona_por_ruido: float = 1.0
     pausa_ruido_s: float = 1.0
     reanuda_ruido_s: float = 3.0
+    # P7.7 (2026-11-07). Con la luz apagada del todo la malla pierde la cara
+    # (p76: a los ~20 s, y ya no la recuperó) y no hay temblor que medir: la
+    # cabeza se quedaba 20 s mirando a un lado. Sin cara y sin manos encima la
+    # cabeza se queda y a los 2 s va al frente (GuardaCabeza), y si la cara no
+    # vuelve en ``pausa_sin_cara_s`` el robot se pausa con SIN CARA; reanuda
+    # solo cuando la cara lleva ``reanuda_cara_s`` de vuelta. Lo decidió el
+    # operador.
+    pausa_sin_cara_s: float = 3.0
+    reanuda_cara_s: float = 1.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "HeadConfig":
@@ -433,6 +442,8 @@ class HeadConfig:
             zona_por_ruido=_env_float(env, "HEAD_ZONA_POR_RUIDO", cls.zona_por_ruido),
             pausa_ruido_s=_env_float(env, "HEAD_PAUSA_RUIDO_S", cls.pausa_ruido_s),
             reanuda_ruido_s=_env_float(env, "HEAD_REANUDA_RUIDO_S", cls.reanuda_ruido_s),
+            pausa_sin_cara_s=_env_float(env, "HEAD_PAUSA_SIN_CARA_S", cls.pausa_sin_cara_s),
+            reanuda_cara_s=_env_float(env, "HEAD_REANUDA_CARA_S", cls.reanuda_cara_s),
         )
 
 
@@ -755,7 +766,11 @@ class EmotionConfig:
     60-100 % con la cabeza más de 6° abajo; en p75, 12 % a nivel y 31 % entre
     2 y 6° abajo. Así que un voto de enojo pide ``min_confidence`` más
     ``enojo_por_grado`` por cada grado de cabeceo más allá de ``enojo_desde``
-    hacia abajo, y si no llega vota neutral. Reproducido con las predicciones
+    hacia abajo, y si no llega vota neutral. El cabeceo es respecto al neutro
+    de la cabeza, que desde el P7.7 el pipeline toma al acabar la calibración de
+    la cara: en p76 lo era respecto al primer frame, y como el operador trabajaba
+    8° más bajo, el enojo de verdad cayó al 35 % (66 % reproducido respecto a la
+    calibración). Reproducido con las predicciones
     grabadas: el enojo falso en el neutral de p75 baja de 23 a 8 % y el enojo de
     verdad de p7_final de 93 a 84 %; el neutral sube de 93 a 99 %. Un umbral fijo
     no sirve: con 0.6 el falso baja a 2 % pero el de verdad cae a 35 %. Decidido

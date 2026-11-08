@@ -11,7 +11,7 @@ retención va a 0). Da, por etiqueta:
   publicada (mediana, p95 y máximo), para ver que en las mejillas la cabeza sigue
   y que tapada no salta;
 - la σ de la malla, la zona muerta que se usaría y si el robot se pausaría por
-  poca luz.
+  poca luz o, desde el P7.7, por haber perdido la cara sin manos encima.
 
 Uso::
 
@@ -32,8 +32,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from telmeow_teleop.config import AppConfig  # noqa: E402
 from telmeow_teleop.head_tracker import RuidoMalla  # noqa: E402
 from telmeow_teleop.main import (  # noqa: E402
+    SIN_MANOS_RUIDO_S,
     GuardaCabeza,
     MallaInestable,
+    VigiaCara,
     VigiaRuido,
     cuenta_para_ruido,
 )
@@ -54,6 +56,7 @@ def simular(base: Path, cfg: AppConfig | None = None) -> list[dict]:
     malla = MallaInestable()
     ruido = RuidoMalla()
     vigia = VigiaRuido.desde_config(cfg)
+    vigia_cara = VigiaCara.desde_config(cfg)
     ultima_mano = None
     filas = []
     for f in sesion:
@@ -70,11 +73,13 @@ def simular(base: Path, cfg: AppConfig | None = None) -> list[dict]:
         else:
             ruido.cortar()
         zona, pausa = vigia.paso(t, ruido.sigma)
+        recientes = ultima_mano is not None and t - ultima_mano < SIN_MANOS_RUIDO_S
+        pausa_cara = vigia_cara.paso(t, pose is not None, recientes)
         filas.append({
             "t": t, "etiqueta": int(f["etiqueta"]), "pose": pose,
             "antes": antes.paso(t, pose, manos), "tapada_antes": antes.tapada,
-            "ahora": ahora_g.paso(t, pose, manos, falla), "tapada_ahora": ahora_g.tapada,
-            "sigma": ruido.sigma, "zona": zona, "pausa": pausa,
+            "ahora": ahora_g.paso(t, pose, manos, falla, malla.sin_cara), "tapada_ahora": ahora_g.tapada,
+            "sigma": ruido.sigma, "zona": zona, "pausa": pausa, "pausa_cara": pausa_cara,
         })
     return filas
 
@@ -93,7 +98,7 @@ def _cifras(s: list[float]) -> str:
 
 def informe(filas: list[dict], nombre: str) -> str:
     lineas = [f"== {nombre}", "etiq | guarda antes / ahora | cabeza publicada antes / ahora (mediana/p95/max) "
-              "| sigma p50 | zona max | pausa %"]
+              "| sigma p50 | zona max | pausa luz % | pausa sin cara %"]
     for e in sorted({f["etiqueta"] for f in filas}):
         g = [f for f in filas if f["etiqueta"] == e]
         sig = [f["sigma"] for f in g if f["sigma"] is not None]
@@ -102,7 +107,8 @@ def informe(filas: list[dict], nombre: str) -> str:
             f"{100 * sum(f['tapada_ahora'] for f in g) / len(g):4.0f} % | "
             f"{_cifras(_saltos(f['antes'] for f in g)):>15s} / {_cifras(_saltos(f['ahora'] for f in g)):>15s} | "
             f"{statistics.median(sig) if sig else float('nan'):5.2f} | {max(f['zona'] for f in g):4.1f} | "
-            f"{100 * sum(f['pausa'] for f in g) / len(g):3.0f}")
+            f"{100 * sum(f['pausa'] for f in g) / len(g):3.0f} | "
+            f"{100 * sum(f['pausa_cara'] for f in g) / len(g):3.0f}")
     return "\n".join(lineas)
 
 

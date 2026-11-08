@@ -60,14 +60,24 @@ def muestra_de_fila(fila: dict, lado: str) -> tuple[tuple[float, float] | None, 
     return muestra, de_fiar
 
 
+def reproducir_ambos(filas: list[dict], **kwargs) -> dict[str, list[bool]]:
+    """Si el gesto está reconocido en cada fila, para los dos brazos a la vez:
+    desde el P7.7 cada detector mira si el otro sigue en la cara (una mano
+    perdida aguanta más si la otra sigue), como en ``ArmTracker``, que mira
+    primero el izquierdo y luego el derecho."""
+    detectores = {lado: DetectorManoCara(**kwargs) for lado in "LR"}
+    salida: dict[str, list[bool]] = {"L": [], "R": []}
+    for fila in filas:
+        for lado, otro in (("L", "R"), ("R", "L")):
+            muestra, de_fiar = muestra_de_fila(fila, lado)
+            salida[lado].append(detectores[lado].actualizar(
+                float(fila["t"]), muestra, de_fiar, otra_en_la_cara=detectores[otro].activo))
+    return salida
+
+
 def reproducir(filas: list[dict], lado: str, **kwargs) -> list[bool]:
     """Si el gesto está reconocido en cada fila, para un brazo."""
-    detector = DetectorManoCara(**kwargs)
-    salida = []
-    for fila in filas:
-        muestra, de_fiar = muestra_de_fila(fila, lado)
-        salida.append(detector.actualizar(float(fila["t"]), muestra, de_fiar))
-    return salida
+    return reproducir_ambos(filas, **kwargs)[lado]
 
 
 def por_etiqueta(filas: list[dict], activo: list[bool]) -> dict[int, tuple[float, int]]:

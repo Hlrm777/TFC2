@@ -298,8 +298,10 @@ def test_el_escorzo_deja_constancia_de_los_pixeles():
     tracker = _con_mundo(mundo, imagen, zona_reposo=0.0)
     tracker.process(np.zeros((480, 640, 3), dtype=np.uint8))
     puntos = tracker.puntos_imagen[Side.L]
-    assert set(puntos) == {"hombro", "codo", "mano"}
+    # Desde el P7.7 va también el tamaño aparente de la mano.
+    assert set(puntos) == {"hombro", "codo", "mano", "tam_mano"}
     assert puntos["hombro"] == pytest.approx((208.0, 276.0), abs=0.5)
+    assert puntos["tam_mano"] >= 0.0          # la escena pone los cuatro puntos juntos
 
 
 def test_sin_imagen_el_escorzo_no_cambia_nada():

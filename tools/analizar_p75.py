@@ -9,12 +9,15 @@ Tres, uno por cosa que vio el operador:
 - ``yo-no-fui``: por qué oscila el brazo izquierdo (H65): los codos fuera del
   cuadro y la profundidad corregida que salta entre dos soluciones; con
   ``--variante`` reproduce además la de no corregir el codo fuera de cuadro.
+- ``referencia`` (tras p76, H66): la regla del enojo con el cabeceo medido
+  desde el primer frame, como se grabó p76, o desde la calibración de la cara.
 
 Uso::
 
     python tools/analizar_p75.py cabeceo
     python tools/analizar_p75.py mejillas
     python tools/analizar_p75.py yo-no-fui [--variante]
+    python tools/analizar_p75.py referencia
 """
 
 from __future__ import annotations
@@ -227,12 +230,52 @@ def _variante_codo_fuera() -> None:
         at.ArmTracker._escorzo_brazo = original
 
 
+def regla_con_referencia(base: str, desde_calibracion: bool, por_grado: float = 0.03,
+                         desde: float = 2.0) -> tuple[list[dict], list[str]]:
+    """Las filas de emoción de una sesión y lo que haría el robot con la regla
+    del enojo, con el cabeceo desde el primer frame (la referencia de la malla)
+    o desde la mediana del cabeceo mientras se calibraba la cara."""
+    import analizar_registro_emocion as are
+
+    filas = are.cargar(PROJECT_ROOT / f"{base}_emocion.csv")
+    pitch = cabeceos(base, filas)
+    cal = [p for f, p in zip(filas, pitch) if f["calibrando"] and p is not None]
+    ref = statistics.median(cal) if (desde_calibracion and cal) else 0.0
+    copia = []
+    for f, p in zip(filas, pitch):
+        g = dict(f)
+        g["cabeceo"] = None if p is None else p - ref
+        g["enojo_por_grado"], g["enojo_desde"] = por_grado, desde
+        copia.append(g)
+    emos, _ = are.reproducir(copia, 5, 0.5)
+    return filas, emos
+
+
+def _pct_tramo(filas, emos, etiquetas, objetivo) -> float:
+    idx = [i for i, f in enumerate(filas) if f["etiqueta"] in etiquetas and f["rostro"] and not f["calibrando"]]
+    return 100 * float(np.mean([emos[i] == objetivo for i in idx]))
+
+
+def _referencia() -> None:
+    print("La regla del enojo (0.03 por grado desde 2), con el cabeceo desde:")
+    print("  referencia     | p76 neutral (1) enojo | p76 enojo real (2) | p75 neutral enojo | p7_final enojo real")
+    for texto, cal in (("el primer frame", False), ("la calibracion", True)):
+        f76, e76 = regla_con_referencia("p76", cal)
+        f75, e75 = regla_con_referencia("p75", cal)
+        f7, e7 = regla_con_referencia("p7_final", cal)
+        print(f"  {texto:14s} | {_pct_tramo(f76, e76, {1}, 'enojado'):20.0f} % | "
+              f"{_pct_tramo(f76, e76, {2}, 'enojado'):17.0f} % | "
+              f"{_pct_tramo(f75, e75, {0, 2, 4, 6, 10, 11, 12}, 'enojado'):16.0f} % | "
+              f"{_pct_tramo(f7, e7, {3, 7}, 'enojado'):18.0f} %")
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("analisis", choices=("cabeceo", "mejillas", "yo-no-fui"))
+    p.add_argument("analisis", choices=("cabeceo", "mejillas", "yo-no-fui", "referencia"))
     p.add_argument("--variante", action="store_true", help="con yo-no-fui: reproduce la variante (minutos)")
     a = p.parse_args(argv)
-    {"cabeceo": _cabeceo, "mejillas": _mejillas}.get(a.analisis, lambda: _yo_no_fui(a.variante))()
+    {"cabeceo": _cabeceo, "mejillas": _mejillas, "referencia": _referencia}.get(
+        a.analisis, lambda: _yo_no_fui(a.variante))()
     return 0
 
 

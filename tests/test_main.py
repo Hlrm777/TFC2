@@ -335,13 +335,17 @@ def test_publica_un_solo_mensaje_con_los_seis_angulos_y_la_emocion(pipeline):
     assert ultimo["emo"] in VIEWER_EMOTIONS
 
 
-def test_sin_rostro_se_omiten_pan_y_tilt(pipeline, monkeypatch):
+def test_sin_rostro_la_cabeza_mira_al_frente(pipeline, monkeypatch):
+    """Hasta el P7.7, sin cara se omitían pan y tilt y el robot se quedaba con la
+    última pose: con la luz apagada, en p76, 20 s mirando a un lado. Desde el
+    P7.7 la guarda la lleva al frente; sin haber visto nunca una cara, el frente
+    es lo único que se puede mandar."""
     import telmeow_teleop.head_tracker as ht
 
     monkeypatch.setattr(ht.HeadTracker, "process", lambda self, rgb: None)
     assert pipeline.correr(frames=3) == 0
     for mensaje in pipeline.publicados:
-        assert "pan" not in mensaje and "tilt" not in mensaje
+        assert (mensaje["pan"], mensaje["tilt"]) == (0.0, 0.0)
         assert "armL" in mensaje           # los brazos nunca tienen huecos
 
 
@@ -355,6 +359,18 @@ def test_c_calibra_la_cabeza_y_la_emocion_a_la_vez(pipeline):
     assert pipeline.correr(frames=6, teclas=[-1, -1, ord("c")], backend=backend) == 0
     assert pipeline.neutros == 1
     assert pipeline.calibraciones == 1
+
+
+def test_al_acabar_la_calibracion_la_cabeza_toma_su_neutro(pipeline, monkeypatch):
+    """P7.7. Sin pulsar c: la calibración automática del arranque, al acabar,
+    toma también el neutro de la cabeza, con la misma cara relajada. Antes la
+    cabeza tomaba el primer frame, y en p76 se quedaba mirando ~15° abajo."""
+    monkeypatch.setenv("TELMEOW_EMOTION_CALIBRACION_S", "0")
+    backend = BackendRelativo([("neutral", 0.9)])
+    backend.calibrado = False                                  # como el combinado al arrancar
+    assert pipeline.correr(frames=5, backend=backend) == 0
+    assert backend.calibrado
+    assert pipeline.neutros == 1
 
 
 def test_con_un_backend_que_no_se_calibra_c_solo_calibra_la_cabeza(pipeline):

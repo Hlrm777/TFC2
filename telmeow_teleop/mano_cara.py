@@ -64,6 +64,7 @@ __all__ = [
     "ZONA_SALIDA",
     "T_ENTRADA",
     "T_SALIDA",
+    "T_SALIDA_PERDIDA",
 ]
 
 #: ``(abduccion, flexion)`` del brazo del robot con la mano en la cara, en la
@@ -87,6 +88,14 @@ T_ENTRADA: float = 0.3
 #: BlazePose: en ``p7_final`` el derecho se pierde a ratos durante los 23 s de cara
 #: tapada y el gesto no se corta ni una vez, igual que con 1.0.
 T_SALIDA: float = 0.5
+
+#: Segundos que aguanta el gesto una mano que BlazePose ha perdido (no es de
+#: fiar, o no hay muestra) si la OTRA mano sigue en la cara (P7.7). En «el grito»
+#: de p76 perdió la izquierda ~2 s, la vio abajo, y el brazo bajó y volvió a
+#: subir. Con las dos bajando se suelta en ``T_SALIDA``: al bajar las manos,
+#: BlazePose también las pierde, y no hay forma de distinguirlo de una pérdida
+#: si no es por la otra mano. 1.5 s lo eligió el operador.
+T_SALIDA_PERDIDA: float = 1.5
 
 #: Entrada y salida del brazo en la pose, en segundos (la del saludo).
 RAMPA: float = 0.9
@@ -123,8 +132,9 @@ class DetectorManoCara:
         zona_salida: tuple[float, float, float, float] = ZONA_SALIDA,
         t_entrada: float = T_ENTRADA,
         t_salida: float = T_SALIDA,
+        t_salida_perdida: float = T_SALIDA_PERDIDA,
     ) -> None:
-        if not (t_entrada >= 0.0 and t_salida >= 0.0):
+        if not (t_entrada >= 0.0 and t_salida >= 0.0 and t_salida_perdida >= 0.0):
             raise ValueError("los tiempos del detector no pueden ser negativos")
         contenida = (
             zona_salida[0] <= zona_entrada[0] and zona_entrada[1] <= zona_salida[1]
@@ -138,6 +148,7 @@ class DetectorManoCara:
         self.zona_salida = zona_salida
         self.t_entrada = float(t_entrada)
         self.t_salida = float(t_salida)
+        self.t_salida_perdida = float(t_salida_perdida)
         self.reiniciar()
 
     def reiniciar(self) -> None:
@@ -150,11 +161,13 @@ class DetectorManoCara:
         return self._activo
 
     def actualizar(
-        self, t: float, muestra: tuple[float, float] | None, de_fiar: bool = True
+        self, t: float, muestra: tuple[float, float] | None, de_fiar: bool = True,
+        otra_en_la_cara: bool = False,
     ) -> bool:
         """Una muestra de ``senales_mano_cara``, o ``None`` si no se pudo medir
-        la mano en este frame. ``de_fiar`` solo cuenta para entrar. Devuelve si
-        la mano está en la cara."""
+        la mano en este frame. ``de_fiar`` cuenta para entrar y, con
+        ``otra_en_la_cara``, para salir: una mano perdida con la otra aún en la
+        cara aguanta ``t_salida_perdida``. Devuelve si la mano está en la cara."""
         if not self._activo:
             if muestra is not None and de_fiar and _en_zona(muestra, self.zona_entrada):
                 if self._dentro_desde is None:
@@ -171,7 +184,9 @@ class DetectorManoCara:
             return True
         if self._fuera_desde is None:
             self._fuera_desde = t
-        if t - self._fuera_desde >= self.t_salida:
+        perdida = muestra is None or not de_fiar
+        espera = self.t_salida_perdida if (perdida and otra_en_la_cara) else self.t_salida
+        if t - self._fuera_desde >= espera:
             self._activo = False
             self._dentro_desde = None
         return self._activo

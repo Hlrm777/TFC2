@@ -30,11 +30,17 @@ Con ``--ajustes`` hace la del P7.6 (``PROTOCOLO_AJUSTES``): el neutral con la
 cabeza baja, la cabeza que sigue con las manos en las mejillas, el «yo no fui»
 con los codos dentro del cuadro (la prueba que decide el H65) y la luz apagada.
 
+Con ``--entrenar`` graba la del P7.7 (``PROTOCOLO_ENTRENAR``): las caras del
+operador, neutral, enojada y triste, mirando al frente, abajo y arriba, para
+reentrenar la emoción con ``tools/reentrenar_p77.py``; y «yo no fui» y estirar
+los brazos, para ver si el tamaño de la mano los separa (H65).
+
 Uso, desde la raíz del repositorio::
 
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --gestos
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --ajustes
+    .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --entrenar
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --analizar      # rehace el informe
 """
 
@@ -161,6 +167,30 @@ PROTOCOLO_AJUSTES: tuple[tuple[int, str, int, str], ...] = (
     (11, "Vuelve a tu sitio, manos abajo, quieto. APAGA LA LUZ", 20,
      "la cabeza no vibra (la zona sube); si no basta, el panel dice POCA LUZ y el robot se para"),
     (12, "Prende la luz, quieto", 15, "si se paró, sigue solo a los ~3 s"),
+)
+
+#: La sesión del P7.7 (2026-11-07), para reentrenar la emoción con la cara del
+#: operador a varias alturas de cabeza. Las etiquetas 0-11 son las de
+#: ``reentrenar_p77.ESPERADAS_P77``; 12-15, los brazos.
+PROTOCOLO_ENTRENAR: tuple[tuple[int, str, int, str], ...] = (
+    (0, "Cara relajada mirando la pantalla, quieto, manos abajo. NO pulses c", 15,
+     "calibra 3 s, cabeza y cara"),
+    (1, "Cara neutral mirando la pantalla", 15, "NEUTRAL"),
+    (2, "Cara neutral mirando el teclado (la cabeza baja)", 15, "NEUTRAL"),
+    (3, "Cara neutral mirando arriba (encima de la pantalla)", 10, "NEUTRAL"),
+    (4, "Cara neutral leyendo en voz alta un texto, mirando la pantalla", 20, "NEUTRAL"),
+    (5, "Enojado: ceño fruncido, como al regañar, mirando la pantalla", 15, "ENOJADO"),
+    (6, "Enojado mirando el teclado (la cabeza baja)", 15, "ENOJADO"),
+    (7, "Cara neutral", 5, "NEUTRAL"),
+    (8, "Triste con puchero, SIN fruncir el ceño, mirando la pantalla", 15, "TRISTE"),
+    (9, "Triste con puchero Y el ceño fruncido, mirando la pantalla", 15, "TRISTE"),
+    (10, "Triste mirando el teclado (la cabeza baja)", 15, "TRISTE"),
+    (11, "Cara neutral mirando la pantalla", 10, "NEUTRAL"),
+    (12, "«Yo no fui» desde tu sitio: manos abiertas a los lados de la cabeza, por fuera "
+         "de los hombros, palmas a la cámara", 15, "brazos hacia la cruz"),
+    (13, "Estira los brazos hacia la cámara", 15, "brazos al frente"),
+    (14, "«Yo no fui» otra vez", 10, "brazos hacia la cruz"),
+    (15, "Estira los brazos otra vez", 10, "brazos al frente"),
 )
 
 #: Criterios del P7.6, fijados antes de grabar. Enojo del robot con la cabeza
@@ -520,6 +550,45 @@ def analizar_ajustes(base: Path) -> str:
     return "\n".join(lineas)
 
 
+def tamano_de_mano(filas_brazos: list[dict], etiquetas: set[int]) -> dict[str, float | None]:
+    """Tamaño aparente mediano de cada mano, en píxeles, en esas etiquetas."""
+    salida = {}
+    for lado in "LR":
+        v = sorted(x for x in (_num(f.get(f"tam_mano_{lado}")) for f in filas_brazos
+                               if int(f["etiqueta"]) in etiquetas) if x is not None)
+        salida[lado] = v[len(v) // 2] if v else None
+    return salida
+
+
+def analizar_entrenamiento(base: Path) -> str:
+    """El informe de la sesión del P7.7: lo que hizo el robot con los pesos de
+    ahora, tramo a tramo, y el tamaño de la mano en «yo no fui» y al estirar.
+    El reentrenamiento va aparte (``tools/reentrenar_p77.py``), porque tarda."""
+    import filtros_cabeza as fc
+    import reentrenar_p77 as rp
+    from telmeow_teleop.main import rutas_de_grabacion
+
+    rutas = rutas_de_grabacion(base.with_suffix(".csv"))
+    emocion = fc.leer(rutas["emocion"]) if rutas["emocion"].is_file() else []
+    for f in emocion:
+        f["etiqueta"] = int(f["etiqueta"])
+        f["calibrando"] = f.get("calibrando") == "1"
+    lineas = [f"INFORME DEL P7.7 DE {base.name}", "=" * 60, "",
+              "Emocion con los pesos de ahora (robot, % del tramo):"]
+    for nombre, valor in rp.resumir(emocion).items():
+        lineas.append(f"  {nombre:20s} {'--' if valor is None else f'{valor:.0f} %'}")
+    brazos = fc.leer(rutas["brazos"])
+    yo, estirar = tamano_de_mano(brazos, {12, 14}), tamano_de_mano(brazos, {13, 15})
+    lineas += ["", "Tamano aparente de la mano (px, mediana), para el H65:"]
+    for lado in "LR":
+        a, b = yo[lado], estirar[lado]
+        razon = f", estirar / yo no fui = {b / a:.2f}" if a and b else ""
+        lineas.append(f"  {lado}: yo no fui {a or 0:.0f}, estirar {b or 0:.0f}{razon}")
+    lineas += ["", "Siguiente paso: python tools/reentrenar_p77.py (entrena con lo de antes y "
+                   "evalua en esta sesion)"]
+    return "\n".join(lineas)
+
+
 def analizar_gestos(base: Path) -> str:
     """El informe de la sesión de los gestos, con los criterios fijados antes."""
     import filtros_cabeza as fc
@@ -603,12 +672,16 @@ def main(argv: list[str] | None = None) -> int:
     modo = parser.add_mutually_exclusive_group()
     modo.add_argument("--gestos", action="store_true", help="la sesion corta de la cabeza y la mano a la cara")
     modo.add_argument("--ajustes", action="store_true", help="la del P7.6: enojo, mejillas, codos y luz")
+    modo.add_argument("--entrenar", action="store_true", help="la del P7.7: caras para reentrenar la emocion")
     parser.add_argument("--analizar", action="store_true", help="solo el informe, sin grabar")
     args = parser.parse_args(argv)
-    base = PROJECT_ROOT / (args.base or ("p75" if args.gestos else "p76" if args.ajustes else "p7_final"))
+    modo_ = "gestos" if args.gestos else "ajustes" if args.ajustes else "entrenar" if args.entrenar else ""
+    base = PROJECT_ROOT / (args.base or {"gestos": "p75", "ajustes": "p76", "entrenar": "p77"}.get(modo_, "p7_final"))
     py = sys.executable
-    analisis = analizar_gestos if args.gestos else analizar_ajustes if args.ajustes else analizar
-    protocolo = PROTOCOLO_GESTOS if args.gestos else PROTOCOLO_AJUSTES if args.ajustes else PROTOCOLO
+    analisis = {"gestos": analizar_gestos, "ajustes": analizar_ajustes,
+                "entrenar": analizar_entrenamiento}.get(modo_, analizar)
+    protocolo = {"gestos": PROTOCOLO_GESTOS, "ajustes": PROTOCOLO_AJUSTES,
+                 "entrenar": PROTOCOLO_ENTRENAR}.get(modo_, PROTOCOLO)
 
     if args.analizar:
         informe = analisis(base)
@@ -665,7 +738,7 @@ def main(argv: list[str] | None = None) -> int:
             monitor.terminate()
             monitor.wait(timeout=5)
 
-        if args.ajustes:
+        if args.ajustes or args.entrenar:
             pass
         elif args.gestos:
             _esperar("Por ultimo, 20 s con el demo de la cabeza solo, para saber de donde sale\n"

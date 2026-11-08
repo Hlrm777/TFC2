@@ -1405,12 +1405,21 @@ class ArmTracker:
             lm = imagen[LANDMARKS[etiqueta][nombre]]
             return (float(lm.x) * ancho, float(lm.y) * alto)
 
+        puntos_mano = [pixel(n) for n in PUNTOS_MANO]
         return {
             "hombro": pixel("hombro"),
             "codo": pixel("codo"),
             "mano": tuple(
                 float(np.mean([pixel(n)[k] for n in nombres_mano])) for k in (0, 1)
             ),
+            # P7.7: el lado mayor de la caja de los cuatro puntos de la mano, en
+            # píxeles. La mano que se acerca a la cámara se ve más grande, y eso
+            # es una medida de profundidad que sale de la imagen, la coordenada
+            # buena: lo que podría separar «yo no fui» de estirar los brazos (H65).
+            "tam_mano": float(max(
+                max(p[0] for p in puntos_mano) - min(p[0] for p in puntos_mano),
+                max(p[1] for p in puntos_mano) - min(p[1] for p in puntos_mano),
+            )),
         }
 
     def _dentro(self, punto: tuple[float, float], margen: float = 0.0) -> bool:
@@ -1867,12 +1876,15 @@ class ArmTracker:
                 pixeles["hombro"],
                 (float(contrario.x) * ancho, float(contrario.y) * alto),
             )
-        self._detectores_cara[canal].actualizar(timestamp, muestra, de_fiar)
+        self._detectores_cara[canal].actualizar(
+            timestamp, muestra, de_fiar,
+            otra_en_la_cara=self._detectores_cara[canal.opposite].activo)
 
     def _perder_mano_cara(self, canal: Side, timestamp: float) -> None:
         """Un frame sin pose. No corta el gesto: tapándose la cara BlazePose
         se pierde a ratos, y el gesto acaba cuando eso dura ``T_SALIDA``."""
-        self._detectores_cara[canal].actualizar(timestamp, None)
+        self._detectores_cara[canal].actualizar(
+            timestamp, None, otra_en_la_cara=self._detectores_cara[canal.opposite].activo)
         self._soltar_mano_cara(canal)
 
     def _soltar_mano_cara(self, canal: Side) -> None:
@@ -2349,6 +2361,8 @@ COLUMNAS_CSV = (
     "saludo_L", "saludo_R",
     # P7.5. mano_cara_*: cuánto mandaba la pose de la mano a la cara (0..1).
     "mano_cara_L", "mano_cara_R",
+    # P7.7. tam_mano_*: tamaño aparente de la mano en píxeles (ver _pixeles).
+    "tam_mano_L", "tam_mano_R",
 )
 
 
@@ -2444,6 +2458,8 @@ def fila_csv(tracker: "ArmTracker", mando: ArmAngles, t: float, etiqueta: int,
         _f(pesos_saludo.get(Side.R)),
         _f(pesos_cara.get(Side.L)),
         _f(pesos_cara.get(Side.R)),
+        *(f"{puntos_imagen[c]['tam_mano']:.1f}" if c in puntos_imagen and "tam_mano" in puntos_imagen[c]
+          else "" for c in (Side.L, Side.R)),
     ]
 
 

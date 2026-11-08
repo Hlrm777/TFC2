@@ -1,0 +1,14 @@
+INFORME DE CONFIRMACION DE p78
+============================================================
+
+Emocion en vivo (pesos y regla de operacion; robot, % del tramo):
+  neutral al frente    75 %
+  neutral abajo        100 %
+  neutral arriba       94 %
+  neutral hablando     99 %
+  enojado al frente    79 %
+  enojado abajo        3 %
+  triste al frente     96 %
+  triste abajo         9 %
+
+Siguiente paso: python tools/confirmar_p78.py (pesos reentrenados y regla suave)

@@ -24,6 +24,10 @@ pyflakes==3.2.0
 # Cliente MQTT, necesario para las pruebas del publisher.
 paho-mqtt==2.1.0
 
+# Para las pruebas de la lista de cuentos (P10): cuenta las páginas y fabrica
+# PDF en blanco, porque los libros de verdad no van en git.
+pypdf==6.21.4
+
 # Broker MQTT en Python puro (tools/dev_broker.py). Levanta los mismos dos
 # listeners que mosquitto.conf (1883 TCP + 9001 WebSocket) sin requerir
 # privilegios de administrador.

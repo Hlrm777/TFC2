@@ -897,11 +897,20 @@ class PathConfig:
     emotion_blendshapes: Path = field(
         default_factory=lambda: PROJECT_ROOT / "emotion_blendshapes_facs_relativo_p65.json"
     )
+    #: La carpeta de los cuentos en PDF (P10). Por defecto, la de los libros
+    #: álbum de la tesis, RELATIVA al repositorio (02_Tesis/02_Informacion/...)
+    #: y no escrita para una máquina concreta, que era el bug 16 del legacy.
+    #: Los PDF no van en git: tienen derechos de autor. ``TELMEOW_STORIES_DIR``
+    #: o ``--stories-dir``, el mismo nombre que usará el servicio del P11.
+    stories_dir: Path = field(
+        default_factory=lambda: (PROJECT_ROOT.parent.parent / "02_Informacion"
+                                 / "02_Libro Album" / "Libros Album")
+    )
 
     def __post_init__(self) -> None:
         # Frozen: hay que saltarse el __setattr__ bloqueado para normalizar.
         object.__setattr__(self, "emotion_model", _resolve(Path(self.emotion_model)))
-        for campo in ("emotion_onnx", "face_landmarker", "emotion_blendshapes"):
+        for campo in ("emotion_onnx", "face_landmarker", "emotion_blendshapes", "stories_dir"):
             object.__setattr__(self, campo, _resolve(Path(getattr(self, campo))))
         if self.face_cascade is not None:
             object.__setattr__(self, "face_cascade", _resolve(Path(self.face_cascade)))
@@ -917,6 +926,7 @@ class PathConfig:
             face_landmarker=_env_path(env, "FACE_LANDMARKER_PATH", default.face_landmarker),
             emotion_blendshapes=_env_path(
                 env, "EMOTION_BLENDSHAPES_PATH", default.emotion_blendshapes),
+            stories_dir=_env_path(env, "STORIES_DIR", default.stories_dir),
         )
 
 
@@ -980,6 +990,7 @@ _CLI_MAP: dict[str, tuple[str | None, str]] = {
     "camera_backend": ("camera", "backend"),
     "emotion_model": ("paths", "emotion_model"),
     "face_cascade": ("paths", "face_cascade"),
+    "stories_dir": ("paths", "stories_dir"),
     "emotion_backend": ("emotion", "backend"),
     "log_level": (None, "log_level"),
     "abduccion_policy": (None, "abduccion_policy"),
@@ -1033,6 +1044,8 @@ def add_cli_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     grp = parser.add_argument_group("Rutas")
     grp.add_argument("--model", dest="emotion_model", type=Path, default=sup)
     grp.add_argument("--cascade", dest="face_cascade", type=Path, default=sup)
+    grp.add_argument("--stories-dir", dest="stories_dir", type=Path, default=sup,
+                     help="Carpeta de los cuentos en PDF (P10).")
 
     grp = parser.add_argument_group("Emoción")
     grp.add_argument(

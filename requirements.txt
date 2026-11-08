@@ -28,6 +28,7 @@ tensorflow==2.16.1
 paho-mqtt==2.1.0
 protobuf==4.25.3
 onnxruntime==1.20.1
+pypdf==6.21.4
 
 # --- Por qué estos paquetes y no otros -------------------------------------
 #
@@ -63,3 +64,9 @@ onnxruntime==1.20.1
 #   exige un protobuf nuevo: con ella, pip check limpio y la suite en verde.
 #   Los .onnx y face_landmarker.task se descargan a modelos_externos/ (plan
 #   maestro, P6.4, con URL y SHA-256).
+#
+# pypdf 6.21.4
+#   Solo para saber cuántas páginas tiene cada cuento (P10, telmeow_teleop/
+#   historias.py): el PDF lo dibuja el navegador con pdf.js. Python puro, sin
+#   dependencias. Contar con una expresión regular no vale: dos de los veinte
+#   libros álbum llevan el índice comprimido y salían con cero páginas.

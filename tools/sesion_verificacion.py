@@ -236,7 +236,8 @@ PROTOCOLO_P10_SIN_INTERFAZ: tuple[tuple[int, str, int, str], ...] = (
     (0, "Cara relajada mirando la pantalla, quieto, antebrazos apoyados en la mesa. "
         "NO pulses nada", 10,
      "la ventana de Python dice CALIBRANDO unos 3 s"),
-    (1, _HABLAR_P10, 60, "la ventana de Python sigue tu cabeza (aquí no hay robot a la vista)"),
+    (1, _HABLAR_P10, 60, "la ventana de Python sigue tu cabeza (aquí no hay robot a la vista). "
+                         "Al acabar, q en esa ventana: esta grabación termina aquí"),
 )
 
 #: La segunda, con la interfaz de narración: TODAS las teclas en el navegador.
@@ -826,8 +827,9 @@ LA SESIÓN DEL P10: dos grabaciones, unos 6 minutos en total, con buena luz.
 """
 
 CABECERA_P10_SIN_INTERFAZ = (
-    "PRIMERA GRABACIÓN, sin la interfaz. ESPACIO en la ventana de Python pasa de\n"
-    "etiqueta (la 0 empieza sola); al acabar la 1, q en esa ventana.")
+    "PRIMERA GRABACIÓN, sin la interfaz: SOLO 2 etiquetas, la 0 y la 1, y luego q.\n"
+    "Aquí no hay navegador ni botones, solo la ventana de Python: ESPACIO en ella pasa\n"
+    "de etiqueta (la 0 empieza sola). Las etiquetas 2 a 13 son de la SEGUNDA grabación.")
 CABECERA_P10_NARRACION = (
     "SEGUNDA GRABACIÓN, con la interfaz de narración: TODAS las teclas en el navegador.\n"
     "ESPACIO pasa de etiqueta (la 0 empieza sola); la etiqueta en curso sale abajo en\n"

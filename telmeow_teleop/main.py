@@ -87,6 +87,11 @@ __all__ = [
     "dibujar_panel",
     "COLUMNAS_SESION",
     "ANCHO_PANEL",
+    "Orden",
+    "ORDENES",
+    "ORDENES_DE_TECLA",
+    "Sesion",
+    "ejecutar_orden",
     "main",
 ]
 
@@ -138,6 +143,117 @@ TECLA_PAUSA = ord("k")
 TECLA_PAGINA_ANTERIOR = ord("j")
 TECLA_PAGINA_SIGUIENTE = ord("l")
 TECLA_ETIQUETA = ord(" ")
+
+
+# --------------------------------------------------------------------------
+# Órdenes: lo que hacen las teclas, y desde el P10 también los botones
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Orden:
+    """Algo que el operador pide: con una tecla en la ventana de OpenCV o, desde
+    el P10, con un botón o una tecla en el navegador. Las dos vías acaban en el
+    mismo ``ejecutar_orden``, así que hacen exactamente lo mismo.
+
+    ``valor`` es la expresión de ``expresion``. ``origen`` queda en la
+    grabación: ``tecla`` u otro (``navegador``).
+    """
+
+    nombre: str
+    valor: str | None = None
+    origen: str = "tecla"
+
+
+#: Las órdenes que existen. Lo que no esté aquí no se ejecuta.
+ORDENES = ("salir", "etiqueta", "calibrar", "expresion", "automatico", "pausa",
+           "pagina_anterior", "pagina_siguiente")
+
+#: La tecla de cada orden en la ventana de OpenCV. El modo narración del visor
+#: lleva la misma tabla en JavaScript, y una prueba exige que coincidan.
+ORDENES_DE_TECLA: dict[int, Orden] = {
+    TECLA_SALIR: Orden("salir"),
+    TECLA_ETIQUETA: Orden("etiqueta"),
+    TECLA_CALIBRAR: Orden("calibrar"),
+    **{tecla: Orden("expresion", expresion) for tecla, expresion in TECLAS_MANUAL.items()},
+    TECLA_AUTOMATICO: Orden("automatico"),
+    TECLA_PAUSA: Orden("pausa"),
+    TECLA_PAGINA_ANTERIOR: Orden("pagina_anterior"),
+    TECLA_PAGINA_SIGUIENTE: Orden("pagina_siguiente"),
+}
+
+
+@dataclass
+class Sesion:
+    """Lo que las órdenes leen y cambian, compartido con el bucle de visión.
+
+    Solo lo toca el hilo del bucle: las órdenes del navegador llegan por una
+    cola y se ejecutan aquí, como las teclas.
+    """
+
+    cabeza: object
+    hilo: object
+    periodico: object
+    etiqueta: int = 0
+    aviso: str = ""
+    aviso_hasta: float = 0.0
+    #: El gesto que salió en este frame, para la columna ``gesto``.
+    gesto_registrado: str = ""
+    salir: bool = False
+
+    def avisar(self, texto: str, segundos: float = 2.0) -> None:
+        self.aviso = texto
+        self.aviso_hasta = time.perf_counter() + segundos
+
+    def caducar_aviso(self) -> None:
+        if time.perf_counter() > self.aviso_hasta:
+            self.aviso = ""
+
+
+def ejecutar_orden(sesion: Sesion, orden: Orden) -> None:
+    """Hace lo que pide la orden. Solo desde el hilo del bucle."""
+    nombre = orden.nombre
+    cabeza, hilo, periodico = sesion.cabeza, sesion.hilo, sesion.periodico
+    if nombre == "salir":
+        sesion.salir = True
+    elif nombre == "etiqueta":
+        sesion.etiqueta += 1
+        print(f"--- etiqueta {sesion.etiqueta} ---")
+    elif nombre == "calibrar":
+        # Las dos piden lo mismo al operador —mirar la pantalla con la cara
+        # relajada—, así que una orden calibra las dos (punto 19).
+        de_cabeza = cabeza.set_neutral()
+        if de_cabeza:
+            periodico.suavizar()
+        de_emocion = (hilo is not None
+                      and getattr(hilo.clasificador.backend, "relativo", False))
+        if de_emocion:
+            hilo.ordenar("calibrar_neutro")
+        print(f"calibrar: cabeza {'si' if de_cabeza else 'sin rostro'}, "
+              f"emocion {'en curso' if de_emocion else 'no aplica'}")
+    elif nombre == "expresion":
+        if hilo is None:
+            sesion.avisar("sin emocion: tecla ignorada")
+        else:
+            hilo.ordenar("toggle_manual", orden.valor)
+            # La misma tecla otra vez la suelta (toggle_manual).
+            vigente = None if hilo.estado.manual == orden.valor else orden.valor
+            print(f"expresion forzada: {vigente or 'ninguna (automatico)'}")
+    elif nombre == "automatico":
+        if hilo is not None:
+            hilo.ordenar("clear_manual")
+            print("expresion: automatico")
+    elif nombre == "pausa":
+        print("publicacion en PAUSA" if periodico.alternar_pausa() else "publicacion reanudada")
+    elif nombre in ("pagina_anterior", "pagina_siguiente"):
+        gesto = "page_prev" if nombre == "pagina_anterior" else "page_next"
+        if periodico.gesto(gesto):
+            sesion.gesto_registrado = gesto
+            print(f"gesto {gesto}")
+        else:
+            sesion.avisar("en pausa: gesto no enviado")
+    else:
+        raise ValueError(f"orden desconocida: {nombre!r}")
 
 
 # --------------------------------------------------------------------------
@@ -1323,13 +1439,10 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
     marcas: deque[float] = deque(maxlen=30)
     previo = None
     duplicados = 0
-    etiqueta = 0
+    sesion = Sesion(cabeza, hilo, periodico)
     inferencias_vistas = 0
     calibraciones_vistas = 0
     t_anterior = None
-    gesto_registrado = ""
-    aviso = ""
-    aviso_hasta = 0.0
     lienzo = None
     muestras_hz: deque[tuple[float, int]] = deque()
     ms_bucle_previo = None
@@ -1412,7 +1525,7 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
         if hilo is not None:
             # El BGR volteado y SIN dibujar (punto 14): es el convenio del
             # entrenamiento, y el recorte que se graba tiene que ser lo que vio.
-            hilo.entregar(frame, ahora, t, etiqueta, manos,
+            hilo.entregar(frame, ahora, t, sesion.etiqueta, manos,
                           cabeceo=crudo[1] if crudo is not None else None,
                           giro=crudo[0] if crudo is not None else None)
             emocion = hilo.estado
@@ -1441,9 +1554,9 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
         brillo = brillo_medio(muestra)
         if grabacion is not None:
             if pose_cabeza is not None:
-                grabacion.escribir("cabeza", fila_cabeza(cabeza, t, etiqueta, pose_cabeza, ancho, alto))
+                grabacion.escribir("cabeza", fila_cabeza(cabeza, t, sesion.etiqueta, pose_cabeza, ancho, alto))
             if brazos is not None:
-                grabacion.escribir("brazos", fila_brazos(brazos, mando, t, etiqueta, ancho, alto))
+                grabacion.escribir("brazos", fila_brazos(brazos, mando, t, sesion.etiqueta, ancho, alto))
 
         # -- dibujo: video limpio a la izquierda, panel a la derecha --------
         if lienzo is None or lienzo.shape[:2] != (alto, ancho + ANCHO_PANEL):
@@ -1457,8 +1570,7 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
                           (0, 190, 255) if emocion.manos_en_cara else (230, 220, 90), 2)
         lienzo[:, :ancho] = video
 
-        if time.perf_counter() > aviso_hasta:
-            aviso = ""
+        sesion.caducar_aviso()
         hz = _hz(muestras_hz, ahora, publicador.message_count)
         estado = EstadoPanel(
             cabeza=pose_publicada,
@@ -1500,8 +1612,8 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
             zona_muerta=zona,
             brillo=brillo,
             grabando=grabacion is not None,
-            etiqueta=etiqueta,
-            aviso=aviso,
+            etiqueta=sesion.etiqueta,
+            aviso=sesion.aviso,
         )
         dibujar_panel(lienzo, ancho, estado)
         # Todo lo del frame salvo esperar a la cámara y el imshow/waitKey:
@@ -1510,14 +1622,14 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
 
         if grabacion is not None:
             grabacion.escribir("sesion", [
-                f"{t:.4f}", f"{t_captura_ms:.1f}", etiqueta, _f(dt_ms, ".2f"),
+                f"{t:.4f}", f"{t_captura_ms:.1f}", sesion.etiqueta, _f(dt_ms, ".2f"),
                 int(duplicado), _f(ms_cabeza, ".2f"), _f(ms_brazos, ".2f"),
                 _f(ms_emocion, ".2f"), _f(ms_bucle, ".2f"),
                 _f(pan), _f(tilt),
                 *(_f(getattr(mando, c)) if mando is not None else ""
                   for c in ("armL", "armLtw", "armR", "armRtw")),
                 emocion.etiqueta if emocion is not None else "",
-                gesto_registrado, int(periodico.pausado),
+                sesion.gesto_registrado, int(periodico.pausado),
                 publicador.message_count, publicador.dropped_count,
                 publicador.failed_count, f"{hz:.1f}",
                 f"{brillo:.1f}", ancho, alto,
@@ -1527,49 +1639,15 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
                 int(periodico.pausado_por_luz),
                 int(periodico.pausado_sin_cara),
             ])
-        gesto_registrado = ""
+        sesion.gesto_registrado = ""
 
         cv2.imshow(VENTANA, lienzo)
         tecla = cv2.waitKey(1) & 0xFF
-        if tecla == TECLA_SALIR:
+        orden = ORDENES_DE_TECLA.get(tecla)
+        if orden is not None:
+            ejecutar_orden(sesion, orden)
+        if sesion.salir:
             break
-        elif tecla == TECLA_ETIQUETA:
-            etiqueta += 1
-            print(f"--- etiqueta {etiqueta} ---")
-        elif tecla == TECLA_CALIBRAR:
-            # Las dos piden lo mismo al operador —mirar la pantalla con la cara
-            # relajada—, así que una tecla calibra las dos (punto 19).
-            de_cabeza = cabeza.set_neutral()
-            if de_cabeza:
-                periodico.suavizar()
-            de_emocion = (hilo is not None
-                          and getattr(hilo.clasificador.backend, "relativo", False))
-            if de_emocion:
-                hilo.ordenar("calibrar_neutro")
-            print(f"calibrar: cabeza {'si' if de_cabeza else 'sin rostro'}, "
-                  f"emocion {'en curso' if de_emocion else 'no aplica'}")
-        elif tecla in TECLAS_MANUAL:
-            if hilo is None:
-                aviso, aviso_hasta = "sin emocion: tecla ignorada", time.perf_counter() + 2.0
-            else:
-                pedida = TECLAS_MANUAL[tecla]
-                hilo.ordenar("toggle_manual", pedida)
-                # La misma tecla otra vez la suelta (toggle_manual).
-                vigente = None if hilo.estado.manual == pedida else pedida
-                print(f"expresion forzada: {vigente or 'ninguna (automatico)'}")
-        elif tecla == TECLA_AUTOMATICO:
-            if hilo is not None:
-                hilo.ordenar("clear_manual")
-                print("expresion: automatico")
-        elif tecla == TECLA_PAUSA:
-            print("publicacion en PAUSA" if periodico.alternar_pausa() else "publicacion reanudada")
-        elif tecla in (TECLA_PAGINA_ANTERIOR, TECLA_PAGINA_SIGUIENTE):
-            gesto = "page_prev" if tecla == TECLA_PAGINA_ANTERIOR else "page_next"
-            if periodico.gesto(gesto):
-                gesto_registrado = gesto
-                print(f"gesto {gesto}")
-            else:
-                aviso, aviso_hasta = "en pausa: gesto no enviado", time.perf_counter() + 2.0
 
 
 if __name__ == "__main__":

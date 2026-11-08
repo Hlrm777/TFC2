@@ -108,6 +108,19 @@ condicional, latencia medida en el P7.3) y un hallazgo:
 de ajustes salidas de sus sesiones (P7.1-P7.8) y con los límites declarados en
 «Los límites con que se cierra el P7». Lo siguiente es el P10.
 
+**La sesión del 2026-11-08 escribe el PROMPT 10** —la interfaz de narración—,
+pero no como pedía el enunciado (un panel aparte con campos, contadores y
+latencias): como pidió el operador el 2026-11-02, **dentro del visor**, con el
+robot, su cámara y el libro a la vista y sin cifras de diagnóstico. Cuatro
+decisiones del operador antes de escribir código (libro a la derecha, el panel
+«lo que ve el robot» para el robot físico, todas las teclas con el navegador
+delante, y en pausa no se pasa de página) y un hallazgo:
+
+- **H69** — **en Windows, `http.server` deja abrir dos servidores en el mismo
+  puerto sin error** (`SO_REUSEADDR`): una segunda sesión habría compartido el
+  8001 con la primera en silencio. Lo destapó una prueba; el servidor de la
+  interfaz ya no reutiliza el puerto.
+
 Cómo leerlo:
 
 - **Partes 0 a 5** — el plan propiamente dicho, con los hallazgos ya integrados
@@ -135,11 +148,11 @@ cambia respecto al plan original.
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral · **2026-11-03 (P6.5)**: las gafas no pesan; los blendshapes, reentrenados con el dataset y cuatro sesiones del operador (tristeza con ceño 32-38 % → 61-72 % en validación cruzada), y la regla «sin cejas arriba no es sorpresa» encendida, por decisión del operador | `1e3b6c1`, `de4827a` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ✅ **cerrado el 2026-11-08** · código hecho el 2026-10-26, sesión con el operador el 2026-11-02 · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cerrado el 2026-11-08 por decisión del operador** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7»; el P7.8 se ve en vivo en la primera sesión del P10 | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a`, `3bd2be8` |
-| P10 — Panel del operador | ⬜ | |
+| P10 — Interfaz de narración | 🟡 **código hecho el 2026-11-08** · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **falta la sesión con el operador** (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1449 pruebas en verde** (desde el 2026-11-08: 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1566 pruebas en verde** (desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración—; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -191,7 +204,10 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── head_tracker.py       ✅ Face Mesh + solvePnP
 │   ├── arm_tracker.py        🟡 BlazePose · signos verificados · falta medir
 │   ├── emotion_classifier.py 🟡 Haar + CNN propia, DeepFace, HSEmotion · falta el visor
-│   ├── control_panel.py      ⬜ P10
+│   ├── control_panel.py      🟡 P10: el servidor de la interfaz, --demo y el comando de la sesión
+│   ├── historias.py          ✅ P10: los cuentos en PDF y la página en que va la lectura
+│   ├── ordenes.py            ✅ P10: teclas y órdenes, las mismas en OpenCV y en el navegador
+│   ├── broker.py             ✅ P10: comprobar y levantar el broker (salió de tools/)
 │   └── main.py               ✅ P7 · una cámara, los tres, 20 Hz · cerrado el 2026-11-08
 ├── raspberry/
 │   └── story_display.py      ⬜ P11
@@ -230,7 +246,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── train_fer2013.py      ✅ P8: FER-2013 verificado, partición oficial,
 │   │                            entrenamiento determinista, --evaluar
 │   └── eval_emotion.py       ⬜ P9
-├── tests/                    ✅ 1449 pruebas
+├── tests/                    ✅ 1566 pruebas
 ├── mosquitto.conf            ✅ los dos listeners
 ├── emotion_model.meta.json   ✅ orden de clases del modelo propio (el .keras no va en git)
 ├── emotion_model_fer2013.meta.json, .historial.csv   ✅ el de FER-2013 (P8), y el
@@ -258,6 +274,12 @@ de TensorFlow. Mantener esa propiedad al añadir código.
 | `telmeow/teleop/pose` | El visor 3D | Continua, 20 Hz |
 | `telmeow/teleop/page` | El servicio de pantalla externa (RPi) | Evento discreto |
 | `telmeow/teleop/story` | El servicio de pantalla externa (RPi) | Evento discreto |
+
+**Desde el P10 (2026-11-08)** el pipeline publica los dos topics de eventos, y
+**retenidos** (el broker guarda el último y se lo da a quien se suscriba
+después): al abrir un cuento, `{"story": "nombre.pdf", "page": 1}` en `story` y
+`{"page": 1, "total": M}` en `page`; en cada cambio de página, la pose con
+`gesture` y `page` y, en el mismo instante, `{"page": N, "total": M}` en `page`.
 
 ```json
 {"pan": -12.4, "tilt": 8.1, "armL": -20.0, "armLtw": 15.0,
@@ -4370,7 +4392,7 @@ Commit: "test: evaluacion comparativa de reconocimiento de emociones"
 
 ---
 
-## PROMPT 10 — Panel de control del operador ⬜
+## PROMPT 10 — Interfaz de narración 🟡 **código hecho el 2026-11-08** · falta la sesión con el operador
 
 **Ideas del operador (2026-09-27), para cuando llegue este prompt.** El narrador
 **no sostiene un libro físico**: ve el libro digitalizado en la interfaz,
@@ -4400,6 +4422,159 @@ que el brazo quieto ya no tiembla con la zona de 5° y que, al apartar la mirada
 un par de segundos narrando con la expresión puesta, el robot la conserva. (Los
 efectos de la cámara de Windows, sospechosos del H60, ya están revisados: el
 operador no tenía ninguno encendido.)
+
+### Las decisiones, tomadas con el operador antes de escribir código (2026-11-08)
+
+| Tema | Decisión | Por qué |
+|---|---|---|
+| Distribución | **Libro a la derecha**: columna izquierda con el robot arriba y su cámara abajo; a la derecha, grande, la página con los botones debajo | los 20 libros mezclan páginas apaisadas (la mayoría, 720×540) y verticales («Cambios», 612×840); en un monitor 16:9 la página sale grande de las dos maneras. Es su distribución de tres columnas sin la del centro |
+| «Lo que ve el robot» | **Para el robot físico**: no se pone ahora | el robot virtual no tiene cámara; ese panel solo podría enseñar la escena 3D vista desde su cabeza, sin nadie delante. Queda como pendiente con dueño (abajo) |
+| Ventana de OpenCV | **Abierta aparte**, pero **todas las teclas funcionan con el navegador delante**, también terminar, fijar una expresión y pausar | lo pidió el operador: no se le puede pedir a quien narra que haga clic primero en la ventana de Python para que las teclas funcionen |
+| Pausa y página | **En pausa no se pasa de página** | página y gesto van siempre juntos. Consecuencia aceptada: con la pausa por poca luz no se puede seguir leyendo hasta que vuelva la luz |
+
+### Cómo funciona
+
+En Windows solo un programa puede abrir la cámara, y ese programa es `main.py`:
+la página no puede abrirla por su cuenta. Así que **`main.py --interfaz` le
+sirve todo en `http://localhost:8001`** (solo desde la propia máquina): el visor
+en modo narración, el estado ya en palabras, la cámara en MJPEG (fotos JPEG
+seguidas por una conexión, que el navegador enseña como video; siempre la
+última, así que no acumula retraso), la lista de cuentos y sus PDF. Los botones
+y las teclas del navegador mandan órdenes que entran a una cola y el bucle
+ejecuta **con el mismo código que las teclas de OpenCV** (`ejecutar_orden`). El
+libro lo dibuja el navegador con pdf.js; Python solo cuenta las páginas, con
+pypdf. El robot 3D se sigue moviendo por MQTT, como lo recibiría el robot real.
+
+### Lo hecho el 2026-11-08
+
+- **P10.1 · página y gesto en el mismo envío** (`7ad590a`).
+  `PosePublisher.publicar_evento` manda la página y el cuento por sus topics,
+  **retenidos** (el broker guarda el último: la pantalla del P11, o una página
+  recargada, sabe en qué página va el cuento nada más conectarse).
+  `PublicadorPeriodico.evento_pagina` manda en el acto la pose con `gesture` y
+  `page` y, si salió, `{"page", "total"}` por `topic_page`, con la pausa
+  comprobada bajo el mismo candado: no existe el instante en que una pausa entra
+  entre la página y su gesto. Un candado de envío lo serializa con el hilo de 20 Hz.
+- **P10.2 · los cuentos** (`e9c7010`). `historias.py`: `Biblioteca` lista los PDF
+  de `stories_dir` con sus páginas (pypdf, ~0.2 s los veinte; con caché) y solo
+  acepta nombres exactos de su lista; `Lector` lleva el cuento y la página
+  (`destino` calcula, `ir` mueve, para que la página solo avance si el mensaje
+  salió). `TELMEOW_STORIES_DIR` / `--stories-dir`; por defecto la carpeta de los
+  libros álbum, relativa al repositorio. Una expresión regular no valía: dos de
+  los veinte libros salían con cero páginas (índice comprimido).
+- **Teclas como órdenes, sin cambio de comportamiento** (`741ac4d`). Comprobado
+  antes de tocar nada: una sesión simulada con todas las teclas publica y graba
+  lo mismo antes y después.
+- **P10.3 · las órdenes nuevas** (`7e8f119`): `historia` (abre el cuento en la
+  página 1 y lo anuncia retenido, también la página; vale en pausa porque no
+  lleva gesto), `pagina_*` con cuento por `evento_pagina` (en pausa, aviso y
+  nada), y `salir`. Sin cuento, `j`/`l` siguen como en el P7. `sesion.csv` gana
+  `historia`, `pagina` y `orden` (`nombre=valor@origen`); desde ahora el gesto
+  queda en la fila del frame en que salió, no en la siguiente.
+- **P10.4 · el servidor y el comando** (`9f59c41`). `control_panel.py`:
+  `ServidorInterfaz` (rechaza hosts ajenos, órdenes de otro origen y las que no
+  son JSON; solo sirve PDF de la lista) y `EmisorVideo` (codifica en su hilo la
+  última imagen, solo con alguien mirando y a 15 fps como mucho). `--demo` sin
+  cámara ni broker. `python -m telmeow_teleop.control_panel` comprueba o levanta
+  el broker (`broker.py`, que sale de `tools/sesion_verificacion.py`), lanza
+  `main.py --interfaz --abrir-navegador` y abre el navegador después de la
+  ventana de OpenCV. `ordenes.py` (solo biblioteca estándar) tiene las teclas y
+  la validación del JSON. Y el **H69**.
+- **P10.5 · el modo narración del visor** (`9e2eb2a`): `?modo=narracion`; sin el
+  parámetro el visor es el de siempre. Los seis botones de expresión de siempre,
+  movidos a la barra y mandando la orden a `main.py`; Automático, Calibrar,
+  Pausa/Reanudar y la vista Detrás/Frente (recordada en el navegador). La
+  página real también en la pantalla externa del robot 3D. `q` hay que
+  pulsarla dos veces en 3 s (Esc cancela); las flechas ←/→ hacen de `j`/`l`.
+  Las páginas vecinas se dibujan de antemano. MQTT se conecta solo.
+
+**Comprobado en el navegador integrado con `--demo`** (2026-11-08, a 1366×768):
+la distribución con una página apaisada («El túnel») y una vertical
+(«Cambios»), entera y sin deformar; las teclas `l`, `k` y `6` con el navegador
+delante; en pausa los botones de página desactivados y el botón diciendo
+«Reanudar»; la expresión fijada marcada; la vista de frente con la portada real
+en la pantalla externa del robot 3D; y la doble `q`, que cierra la demo y deja
+la página en «La sesión terminó». La doble `q` funcionó con eventos simulados
+en la página; con la herramienta de automatización la segunda pulsación no
+llegó como tecla aparte, así que se confirma con el teclado en la sesión
+(etiqueta 12).
+
+**1566 pruebas en verde** tras el P10 (117 nuevas: el envío de página y gesto,
+la lista de cuentos, cada orden del navegador frente a su tecla, el servidor de
+verdad en un puerto libre —estado, órdenes válidas e inválidas, PDF, rutas con
+`..`, el MJPEG—, el broker, el comando de la sesión y el HTML: la tabla de
+teclas de JavaScript igual a la de Python, el módulo último y el importmap
+intacto para `barrido_colisiones.mjs`, y que todo lo que la página pide lo sirve
+el servidor).
+
+### Lo que no se hace del enunciado, y por qué
+
+| Enunciado | En su lugar | Por qué |
+|---|---|---|
+| Tkinter o una página aparte en el 8001 | Un modo del visor, servido por `main.py` en el 8001 | lo pidió el operador el 2026-11-02 |
+| Campos de host, puerto y topic, y botón Conectar | `main.py` se conecta por línea de comandos, como siempre; la página se conecta sola al puerto que dice `main.py` | para narrar no hacen falta campos |
+| Contador de mensajes, Hz, latencia, fps y `failed_count` en la barra | un indicador en palabras («Robot conectado», «En pausa (k)», «Pausa: poca luz», «Pausa: no te veo», «Sin enlace») que **se pone en rojo si `failed_count` crece** («Se están perdiendo mensajes», 3 s); las cifras siguen en la ventana de OpenCV y en `tools/` | el operador no quiere diagnóstico, y el v2 exige que los mensajes perdidos se vean (P7, punto 9) |
+| Iniciar o detener la captura | la captura dura lo que dura `main.py` | un solo dueño de la cámara |
+| Vista previa con landmarks | la cámara limpia, como un espejo | el esqueleto es diagnóstico |
+| Selector de cámara | `--camera`, como siempre; elegir por nombre queda pendiente (abajo) | |
+
+### Pendientes, con quién los lleva
+
+| Pendiente | Quién | Qué lo dispara | Qué cuesta |
+|---|---|---|---|
+| Panel «lo que ve el robot» | el paso que integre la cámara del robot físico | que el robot tenga cámara | un panel y un segundo video |
+| Elegir la cámara por nombre (§4.4) | un P10.x | que en una sesión se abra la cámara equivocada por el índice | una dependencia para leer los nombres de DirectShow |
+| El visor depende de internet (three, mqtt.js y pdf.js por CDN) | antes de las sesiones con niños, o un P10.x si una sesión falla por la red | una sesión sin internet fiable | ~3 MB de JavaScript copiados al repositorio |
+
+### Criterios fijados antes de medir
+
+- **No le roba tiempo al bucle**: con la página abierta y el video corriendo,
+  los fps medios de la etiqueta 1 son al menos el 90 % de los de la misma
+  etiqueta sin interfaz, y la publicación sigue a 19.9 Hz
+  (`tools/analizar_sesion.py --comparar`).
+- **Página y gesto juntos**: en el CSV, cada cambio de `pagina` tiene su `gesto`
+  en la misma fila, y hay 0 cambios de página con `pausa` = 1.
+- **Las teclas, sin clic en la ventana de Python**: cada tecla funciona con el
+  navegador delante. Lo marca el operador: sí o no por tecla.
+
+### La sesión con el operador — el protocolo (p10; comprueba también el P7.8 en vivo)
+
+Buena luz, y antes, que haya un solo broker (§4.1). Dos grabaciones, que se pasan
+de etiqueta con ESPACIO (en el navegador, en la segunda):
+
+```
+.venv\Scripts\python.exe -m telmeow_teleop.main --record p10_sin_interfaz.csv
+.venv\Scripts\python.exe -m telmeow_teleop.control_panel --record p10_narracion.csv
+```
+
+`p10_sin_interfaz.csv`: solo la etiqueta 1, y se cierra con `q` en la ventana de
+OpenCV.
+
+| # | Qué hacer | Tiempo | Qué debe hacer el robot |
+|---|---|---|---|
+| 1 | Leer en voz alta una página sin pasarla, mirando la pantalla y con los brazos en la mesa | 60 s | seguir la cabeza; brazos quietos |
+| 2 | Pulsar `c` en el navegador con la cara relajada, mirando la pantalla | 5 s | cabeza al frente, neutral |
+| 3 | Brazos apoyados en la mesa, como al leer, sin moverlos (P7.8) | 30 s | brazos quietos, **sin temblor** |
+| 4 | Brazo derecho estirado al lado, «señalando la ventana», quieto (P7.8) | 20 s | brazo quieto, sin temblor |
+| 5 | Elegir «El túnel». Leer y pasar 5 páginas con `l` (o →), una cada ~6 s, moviendo la cabeza con normalidad | 40 s | gesto de página en cada cambio; la pantalla externa del visor muestra la misma página |
+| 6 | `j` dos veces | 10 s | gesto hacia el otro lado y página anterior |
+| 7 | `k` (pausa); intentar pasar con `l`; `k` otra vez; pasar con `l` | 15 s | en pausa no cambia la página ni se mueve; tras reanudar, cambia con gesto |
+| 8 | Sonrisa clara leyendo; mirar 2 s el libro abajo a la derecha, «buscando la línea siguiente», y volver. Tres veces (P7.8) | 20 s | **conserva feliz** durante el vistazo |
+| 9 | Lo mismo con cara triste, «cuando el personaje se pierde» (P7.8) | 20 s | conserva triste |
+| 10 | `6` (concentrado) 3 s; luego `0` | 10 s | ojos concentrados y vuelta a lo que lee |
+| 11 | Elegir un cuento de páginas verticales («Cambios») y pasar 2 páginas | 15 s | la página se ve entera y sin deformar |
+| 12 | `q` dos veces | — | `main.py` cierra limpio; la página dice «La sesión terminó» |
+
+También en esta sesión: el operador elige la vista del robot (Detrás o Frente).
+Desde atrás, el brazo que levanta sale del mismo lado en su cámara y en el
+robot; desde el frente, del lado contrario, como lo ven los niños. Se comprueba
+en vivo, no se deduce.
+
+Al analizar, primero se comprueba en los datos qué se hizo de verdad en cada
+etiqueta. El temblor de las etiquetas 3 y 4, con `tools/zona_brazos.py`; los
+vistazos, con la columna de emoción.
+
+### Enunciado original
 
 ```
 Crea `telmeow_teleop/control_panel.py`. Elige entre Tkinter o una página HTML
@@ -4582,6 +4757,10 @@ emoción en operación, que abrió el P8, se cerró el 2026-10-25 (punto 4).
    mandan `page_prev`/`page_next` mientras el operador mueve la cabeza
    (etiquetas 8 y 9 de `p7_movimiento`). El P10 solo lo disparará desde sus
    botones de página.
+   **Desde el P10 (2026-11-08)** lo disparan los botones y las teclas del
+   navegador, por el mismo `ejecutar_orden` que `j`/`l`; con un cuento abierto
+   la página y el gesto salen en el mismo mensaje (`evento_pagina`). Lo valida
+   la etiqueta 5 del protocolo p10.
 
 4. ~~**Qué modelo de emoción usa el robot en operación**~~ — **cerrada el
    2026-10-25**: el operador eligió el `combinado` (`mbf_va_mtl` + blendshapes
@@ -5033,7 +5212,18 @@ instancia del repositorio en otro puerto TCP, apuntando el pipeline con
    vez, publicando a 20 Hz. Al arrancar, mirar la pantalla con la cara relajada
    3 s. Teclas y opciones en el README («Lanzar el pipeline completo») y en el
    P7. *(código hecho; falta verlo con el operador)*
-9. `python -m telmeow_teleop.control_panel`. *(tras P10)*
+9. **La sesión de narración, en un solo comando** (P10):
+
+   ```
+   .venv\Scripts\python.exe -m telmeow_teleop.control_panel [--record sesion.csv]
+   ```
+
+   Comprueba el broker y lo levanta si falta (con el aviso de la trampa del
+   §4.1), lanza `main.py --interfaz` y abre el navegador en
+   `http://localhost:8001` (modo narración del visor). La ventana de OpenCV se
+   abre aparte, como diagnóstico. Los demás argumentos van a `main.py`
+   (`--camera`, `--no-arms`...); `--stories-dir` cambia la carpeta de los
+   cuentos. Sin cámara: `--demo`.
 10. En la Raspberry: `python raspberry/story_display.py --windowed`. *(tras P11)*
 
 Sin Mosquitto disponible: `python tools/dev_broker.py` levanta un broker
@@ -5644,6 +5834,8 @@ with PosePublisher(cfg.mqtt, cfg.rates) as pub:
                 emo="feliz", gesture=None, page=None,
                 t=None)              # P7.3: hora Unix en ms de la CAPTURA -> campo t
 pub.message_count / .dropped_count / .failed_count / .effective_hz / .connected
+pub.publicar_evento(topic, datos, retain=False) -> bool   # P10: page y story, sin tasa
+pub.event_count                     # eventos que salieron (no cuentan en message_count)
 ```
 
 Los `None` se omiten del JSON. Los mensajes con `gesture` o `page` nunca se
@@ -5669,6 +5861,14 @@ p.arrancar() ; p.parar() ; p.tick()       # tick: un envío, sin hilo (pruebas)
 
 manos_de_blazepose(arm.landmarks_imagen, ancho, alto) -> [(x, y)]   # 15-22, dentro del cuadro
 rutas_de_grabacion("sesion.csv") -> {"sesion", "cabeza", "brazos", "emocion": Path}
+
+# Desde el P10:
+p.evento_pagina("page_next", pagina, total) -> bool  # pose+gesture+page y la página, en el acto;
+                                                     # False en pausa o si no sale (no avanzar)
+p.publicar_evento(topic, datos, retain=True)         # un evento sin pisar el envío del hilo
+p.pausado_por_tecla                                  # la pausa de k, aparte de las automáticas
+ejecutar_orden(sesion, Orden("pagina_siguiente"))    # lo que hacen teclas y botones
+main(["--interfaz", "8001", "--abrir-navegador"])    # con el servidor de la interfaz
 ```
 
 Lo que el pipeline reutiliza de cada tracker, y que comparten con sus demos a
@@ -5682,6 +5882,67 @@ etiqueta, ancho, alto)` y `emotion_classifier.COLUMNAS_CSV`/
 Herramientas: `python tools/analizar_sesion.py sesion.csv [--comparar
 sin_emocion.csv --etiqueta N]`, `python tools/mqtt_monitor.py --latencia
 CSV`, `python tools/medir_latencia_camara.py [--csv CSV]`.
+
+## `ordenes.py` (P10)
+
+```python
+from telmeow_teleop.ordenes import Orden, ORDENES, ORDENES_DE_TECLA, orden_desde_json
+
+Orden("expresion", "feliz", origen="navegador").para_registro()  # "expresion=feliz@navegador"
+ORDENES            # salir, etiqueta, calibrar, expresion, automatico, pausa,
+                   # pagina_anterior, pagina_siguiente, historia
+ORDENES_DE_TECLA   # {ord("q"): Orden("salir"), ..., ord("1"): Orden("expresion", "neutral"), ...}
+orden_desde_json({"orden": "historia", "valor": "x.pdf"})  # ValueError con el motivo si no vale
+```
+
+Solo biblioteca estándar: el servidor valida las órdenes sin cargar MediaPipe.
+La tabla de teclas del visor (`TECLAS_NARRACION`) tiene que ser igual a
+`ORDENES_DE_TECLA`; lo exige `tests/test_visor_narracion.py`.
+
+## `historias.py` (P10)
+
+```python
+from telmeow_teleop.historias import Biblioteca, Historia, Lector, contar_paginas
+
+b = Biblioteca(cfg.paths.stories_dir)  # TELMEOW_STORIES_DIR / --stories-dir
+b.existe ; b.listar() -> [Historia]   # por orden alfabético; un PDF roto sale con .error
+b.buscar("El túnel - Anthony Browne.pdf") -> Historia | None   # solo nombres EXACTOS de la lista
+h.nombre ; h.titulo ; h.paginas ; h.legible ; h.como_dict()
+
+l = Lector()
+l.elegir(h)          # página 1
+l.destino(+1)        # a qué página llevaría, o None (sin cuento o fuera del libro); no mueve
+l.ir(n)              # mueve: solo después de que el mensaje salió
+l.abierto ; l.historia ; l.pagina ; l.total
+```
+
+## `control_panel.py` (P10)
+
+```python
+from telmeow_teleop.control_panel import ServidorInterfaz, EmisorVideo, estado_interfaz
+
+s = ServidorInterfaz(CARPETA_VISOR, Biblioteca(...), puerto=8001)  # 0 = uno libre; OSError si ocupado
+s.arrancar() ; s.parar() ; s.url ; s.puerto
+s.emisor.entregar(frame_bgr)   # cada frame: solo guarda la referencia
+s.pendientes() -> [Orden]      # lo que pidió la página desde la última vez
+s.publicar_estado(estado_interfaz(enlace=..., pausa_tecla=..., lector=..., ...))
+```
+
+Rutas: `/` (al modo narración), `/api/estado`, `POST /api/orden`,
+`/api/historias`, `/historias/<nombre>`, `/video.mjpg`, y la carpeta del visor.
+Solo en `127.0.0.1`; rechaza hosts ajenos, órdenes de otro origen y las que no
+son JSON. `python -m telmeow_teleop.control_panel [--demo] [--puerto N]
+[--sin-navegador] [--stories-dir D] [args de main]`.
+
+## `broker.py` (P10)
+
+```python
+from telmeow_teleop.broker import asegurar_broker, estado_broker, puerto_abierto
+
+arrancados = []
+asegurar_broker(arrancados)   # True si quedó listo en 1883 y 9001; lo que levantó, en la lista
+estado_broker(tcp, ws)        # "listo" | "arrancar" | "servicio" (la trampa del §4.1)
+```
 
 ---
 
@@ -6658,6 +6919,21 @@ medir, y la cabeza del robot se quedó 20 s mirando a un lado (lo último que ha
 dado la malla, 69°). La toma oscura de p75 tenía algo de luz y la malla temblaba;
 esta, ninguna. Corregido en el P7.7: sin cara, cabeza al frente y pausa.
 
+## 7.25 El P10 (H69)
+
+**H69 — En Windows, `http.server` deja abrir dos servidores en el mismo puerto.**
+`HTTPServer` activa `SO_REUSEADDR` (`allow_reuse_address = 1`), y en Windows esa
+opción NO impide abrir un segundo socket en un puerto que ya escucha: lo
+permite, sin error. Lo destapó la prueba
+`test_un_puerto_ocupado_se_dice_al_construir` del P10.4, que esperaba un
+`OSError` al abrir el servidor de la interfaz dos veces en el mismo puerto y no
+lo obtuvo. En una sesión real, lanzar el comando dos veces habría dejado dos
+`main.py` sirviendo el 8001, cada petición del navegador yendo a uno u otro, y
+uno de los dos sin cámara. Corregido: `control_panel._ServidorHTTP` pone
+`allow_reuse_address = False` y, en Windows, `SO_EXCLUSIVEADDRUSE`; el segundo
+falla al abrir y `main.py` lo dice («¿Hay otra sesión abierta?»). El visor de
+siempre (`python -m http.server 8000`) tiene el mismo comportamiento, pero ahí
+no lleva a nada peor que dos copias de los mismos archivos.
 
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
@@ -6727,6 +7003,7 @@ esta, ninguna. Corregido en el P7.7: sin cara, cabeza al frente y pausa.
 | **H66** | **La referencia del cabeceo era el primer frame, no la calibración**: el enojo de verdad cayó al 35 % (66 % medido desde la calibración) y la cabeza del robot miraba ~15° abajo. La cabeza toma el neutro al acabar la calibración | P7.7, §7.24 |
 | **H68** | **Con la cabeza muy baja (−25°) la tristeza no se lee**: el modelo dice tristeza el 16 % (96 % a nivel); el reentrenamiento no lo arregla. Límite declarado | P7.7, §7.24 |
 | **H67** | **Con la luz apagada del todo la malla pierde la cara, no tiembla**: el índice de ruido no se entera y la cabeza se quedaba mirando a un lado. Sin cara, cabeza al frente y pausa SIN CARA | P7.7, §7.24 |
+| **H69** | **En Windows, `http.server` deja abrir dos servidores en el mismo puerto** (`SO_REUSEADDR`): una segunda sesión habría compartido el 8001 en silencio. El servidor de la interfaz ya no reutiliza el puerto | P10, §7.25 |
 | **H62** | **Ni las tablas ni el visor comprueban el brazo contra la cabeza**: medido con las mallas, 32 mm como mínimo en toda la envolvente admisible, y 33 en la pose de la mano a la cara | P7.5, §7.23 |
 | **H51** | **El modelo propio no reconoce la tristeza, ni con buena luz**: en la grabación del 2026-10-24 acierta 4 de 5, pero con la tristeza el robot pone neutral el 88 % y el modelo crudo nunca dice triste. Los modelos abiertos que podrían mejorarlo, y los descartados, en §7.19 | P6.1, P6.4, §7.19 |
 | **H50** | **Las etiquetas del operador no bastan para verificar el orden de clases de un modelo que confunde sus caras**: con el de FER-2013, de 120 permutaciones, una equivocada cuadró mejor que la buena con 183 caras. Fijan `feliz` y descartan las rotaciones; el resto lo atan las cifras canónicas | P8, §7.18 |

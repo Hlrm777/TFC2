@@ -402,6 +402,42 @@ con el pipeline en la misma máquina, y lo que tarda la propia cámara, de
 
 ---
 
+## Sesión de narración (la interfaz final, P10)
+
+Un solo comando, desde la raíz del repositorio:
+
+```bash
+.venv/Scripts/python.exe -m telmeow_teleop.control_panel --record sesion.csv
+```
+
+Comprueba el broker y lo levanta si falta (avisando si es el servicio de
+Mosquitto sin WebSocket), lanza el pipeline con la interfaz y abre el navegador
+en `http://localhost:8001`. Ahí está el **visor en modo narración**: el robot y
+tu cámara (en espejo) a la izquierda, el libro a la derecha y los botones
+debajo, sin cifras de diagnóstico. La ventana de OpenCV se abre aparte, por si
+hace falta mirar qué falla; no hace falta tocarla.
+
+**Todas las teclas funcionan con el navegador delante**: las mismas de la tabla
+de arriba, más las flechas ←/→ para pasar de página. La `q` hay que pulsarla dos
+veces seguidas (Esc cancela), para que una pulsación suelta no corte la sesión.
+En pausa no se puede pasar de página: página y gesto van siempre juntos.
+
+Los cuentos son los PDF de `02_Informacion/02_Libro Album/Libros Album`, al lado
+del repositorio (no van en git: tienen derechos de autor). Otra carpeta:
+`--stories-dir CARPETA` o `TELMEOW_STORIES_DIR`. Los demás argumentos van al
+pipeline (`--camera 1`, `--no-arms`...).
+
+Sin cámara ni broker, para ver la página:
+
+```bash
+.venv/Scripts/python.exe -m telmeow_teleop.control_panel --demo
+```
+
+El pipeline también la sirve por su cuenta con `--interfaz [PUERTO]`. El visor
+de siempre, en el 8000 y sin `?modo=narracion`, no cambia.
+
+---
+
 ## Contrato MQTT
 
 Un único mensaje JSON en `telmeow/teleop/pose`:
@@ -432,6 +468,12 @@ Los tres topics tienen consumidores distintos:
 | `telmeow/teleop/page` | El servicio de pantalla externa (Raspberry) | Evento discreto |
 | `telmeow/teleop/story` | El servicio de pantalla externa (Raspberry) | Evento discreto |
 
+Desde el P10, al abrir un cuento el pipeline publica `{"story": "nombre.pdf",
+"page": 1}` en `story` y `{"page": 1, "total": M}` en `page`, y en cada cambio
+de página la pose con `gesture` y `page` y, en el mismo instante,
+`{"page": N, "total": M}` en `page`. Los de `story` y `page` van **retenidos**:
+quien se conecte después recibe el último.
+
 Se mantienen separados para que la Raspberry no tenga que analizar 20 mensajes
 por segundo cuando solo le interesa uno cada varios segundos.
 
@@ -452,7 +494,11 @@ por segundo cuando solo le interesa uno cada varios segundos.
 │   ├── retarget.py, escorzo.py, saludo.py   # piezas del arm tracker
 │   ├── emotion_classifier.py  # Haar, histéresis, manos, calibración; CNN propia, DeepFace, HSEmotion (P6)
 │   ├── emotion_backends.py    # el combinado: HSEmotion ONNX + blendshapes de MediaPipe (P6.4)
-│   └── main.py         # el pipeline integrado: una cámara, los tres, 20 Hz (P7)
+│   ├── main.py         # el pipeline integrado: una cámara, los tres, 20 Hz (P7)
+│   ├── control_panel.py # la interfaz de narración: servidor, --demo y el comando de la sesión (P10)
+│   ├── historias.py    # los cuentos en PDF y la página en que va la lectura (P10)
+│   ├── ordenes.py      # teclas y órdenes, las mismas en OpenCV y en el navegador (P10)
+│   └── broker.py       # comprobar y levantar el broker (P10)
 ├── tools/
 │   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/# · --latencia (P7.3)
 │   ├── analizar_sesion.py, medir_latencia_camara.py  # tasas, costes y latencia (P7)

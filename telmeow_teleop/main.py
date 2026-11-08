@@ -59,7 +59,7 @@ from .arm_tracker import CANALES, LANDMARKS, PUNTOS_MANO, ArmAngles, ArmTracker,
 from .arm_tracker import COLUMNAS_CSV as COLUMNAS_BRAZOS
 from .arm_tracker import fila_csv as fila_brazos
 from .camera import abrir_camara, brillo_medio, describir
-from .config import AppConfig, add_cli_args, from_args
+from .config import AppConfig, MQTTConfig, add_cli_args, from_args
 from .emotion_classifier import COLUMNAS_CSV as COLUMNAS_EMOCION
 from .emotion_classifier import (
     MARGEN_MANOS,
@@ -161,6 +161,11 @@ class PublicadorPeriodico:
     vigente; el publisher nunca descarta un mensaje con ``gesture``. En pausa no
     sale nada, tampoco un gesto.
 
+    Con un cuento abierto (P10) la página va por ``evento_pagina``, que no
+    encola: manda en el acto la pose con el gesto y la página, y la página por
+    su topic, con la pausa comprobada bajo el mismo candado. Página y gesto van
+    siempre juntos o no va ninguno (decisión del operador, 2026-11-08).
+
     Al reanudar, los ángulos no saltan: durante ``rampa_s`` segundos se mezclan
     la última pose enviada y la del operador, con un paso suave (arranque y
     frenado), y si el operador se mueve mientras tanto la rampa lo sigue. Lo
@@ -172,13 +177,20 @@ class PublicadorPeriodico:
     ANGULOS = ("pan", "tilt", "armL", "armLtw", "armR", "armRtw")
 
     def __init__(self, publicador, periodo: float, *, rampa_s: float = 1.0,
+                 topic_pagina: str | None = None,
                  reloj=time.perf_counter, dormir=time.sleep) -> None:
         self.publicador = publicador
         self.periodo = float(periodo)
         self.rampa_s = max(0.0, float(rampa_s))
+        self.topic_pagina = topic_pagina or MQTTConfig.topic_page
         self._reloj = reloj
         self._dormir = dormir
         self._lock = threading.Lock()
+        # Serializa los envíos: el del hilo de 20 Hz y el de evento_pagina, que
+        # sale del bucle. El publisher no tiene candado propio y sus contadores
+        # no aguantan dos hilos a la vez. Orden: _lock antes que _envio, nunca
+        # al revés (tick suelta _lock antes de tomar _envio).
+        self._envio = threading.Lock()
         self._pose: dict = {}
         self._gestos: deque[str] = deque()
         self._pausado = False
@@ -263,6 +275,33 @@ class PublicadorPeriodico:
             self._gestos.append(nombre)
             return True
 
+    def evento_pagina(self, gesto: str, pagina: int, total: int) -> bool:
+        """Cambio de página de un cuento (P10): la pose vigente con ``gesture`` y
+        ``page`` por el topic de pose y, si salió, ``{"page", "total"}``
+        retenido por el de página. Todo en el acto, desde quien llama.
+
+        Devuelve ``False`` sin mandar nada si hay pausa (de cualquier motivo), y
+        también si el mensaje de pose no sale a la red: quien llama no avanza
+        la página. La pausa se comprueba con el mismo candado con que se envía,
+        así que no puede entrar entre las dos cosas.
+        """
+        with self._lock:
+            if self.pausado:
+                return False
+            pose = dict(self._pose)
+            if self._rampa_desde is not None:
+                pose = self._mezclar(pose)
+            with self._envio:
+                salio = bool(self.publicador.publish(**pose, gesture=gesto, page=pagina))
+                if salio:
+                    self.publicador.publicar_evento(
+                        self.topic_pagina, {"page": int(pagina), "total": int(total)},
+                        retain=True)
+            if salio:
+                self._enviada.update(
+                    {k: pose[k] for k in self.ANGULOS if isinstance(pose.get(k), (int, float))})
+        return salio
+
     def tick(self) -> bool:
         """Un envío. Devuelve si salió un mensaje."""
         with self._lock:
@@ -272,7 +311,8 @@ class PublicadorPeriodico:
             gesto = self._gestos.popleft() if self._gestos else None
             if self._rampa_desde is not None:
                 pose = self._mezclar(pose)
-        salio = bool(self.publicador.publish(**pose, gesture=gesto))
+        with self._envio:
+            salio = bool(self.publicador.publish(**pose, gesture=gesto))
         with self._lock:
             self._enviada.update(
                 {k: pose[k] for k in self.ANGULOS if isinstance(pose.get(k), (int, float))})
@@ -1226,7 +1266,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"AVISO: sin enlace con {cfg.mqtt.host}:{cfg.mqtt.port}. Se sigue "
                   f"reintentando; mira 'perdidos' en el panel.\n")
         periodico = PublicadorPeriodico(publicador, cfg.rates.publish_period,
-                                        rampa_s=cfg.rates.resume_ramp_s)
+                                        rampa_s=cfg.rates.resume_ramp_s,
+                                        topic_pagina=cfg.mqtt.topic_page)
         periodico.arrancar()
 
         if clasificador is not None:

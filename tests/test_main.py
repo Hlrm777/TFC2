@@ -691,6 +691,109 @@ def test_en_pausa_no_sale_nada_y_un_gesto_sale_una_sola_vez():
     assert [c["gesture"] for c in pub.campos] == ["page_next", None, None]
 
 
+def _periodico_real(rc=None):
+    """Un PublicadorPeriodico sobre el PosePublisher de verdad y su cliente falso."""
+    cliente = ClienteFalso() if rc is None else ClienteFalso(rc=rc)
+    reloj = RelojFalso()
+    pub = PosePublisher(client_factory=lambda: cliente, clock=reloj)
+    periodico = principal.PublicadorPeriodico(pub, 0.05, reloj=reloj,
+                                              topic_pagina="telmeow/teleop/page")
+    return periodico, pub, cliente, reloj
+
+
+def test_una_pagina_sale_en_el_acto_con_su_gesto_y_por_su_topic():
+    """P10.1: la pose vigente con gesture y page, y después la página retenida
+    por su topic. Sin esperar al tick: desde quien llama."""
+    periodico, pub, cliente, _ = _periodico_real()
+    periodico.actualizar(pan=5.0, tilt=-2.0, emo="feliz")
+    assert periodico.evento_pagina("page_next", 4, 32) is True
+    assert [p["topic"] for p in cliente.publicaciones] == [
+        "telmeow/teleop/pose", "telmeow/teleop/page"]
+    pose = json.loads(cliente.publicaciones[0]["payload"])
+    assert pose == {"pan": 5.0, "tilt": -2.0, "emo": "feliz", "gesture": "page_next", "page": 4}
+    assert cliente.publicaciones[0]["retain"] is False
+    assert json.loads(cliente.publicaciones[1]["payload"]) == {"page": 4, "total": 32}
+    assert cliente.publicaciones[1]["retain"] is True
+    assert (pub.message_count, pub.event_count) == (1, 1)
+
+
+@pytest.mark.parametrize("motivo", ["tecla", "luz", "cara"])
+def test_en_pausa_no_sale_ni_la_pagina_ni_el_gesto(motivo):
+    """Decisión del operador (2026-11-08): en pausa no se pasa de página. Ni la
+    pose con el gesto ni el mensaje de página."""
+    periodico, _, cliente, _ = _periodico_real()
+    periodico.actualizar(pan=1.0)
+    if motivo == "tecla":
+        periodico.alternar_pausa()
+    else:
+        periodico.fijar_pausa(motivo, True)
+    assert periodico.evento_pagina("page_next", 2, 9) is False
+    assert cliente.publicaciones == []
+
+
+def test_si_la_pose_no_sale_tampoco_sale_la_pagina():
+    import paho.mqtt.client as mqtt
+
+    periodico, pub, cliente, _ = _periodico_real(rc=mqtt.MQTT_ERR_NO_CONN)
+    periodico.actualizar(pan=1.0)
+    assert periodico.evento_pagina("page_prev", 1, 9) is False
+    assert [p["topic"] for p in cliente.publicaciones] == ["telmeow/teleop/pose"]
+    assert pub.failed_count == 1 and pub.event_count == 0
+
+
+def test_la_pagina_respeta_la_rampa_de_reanudar():
+    """Recién salido de una pausa, la pose del gesto va mezclada como la del
+    tick: si no, el mensaje de página daría el salto que la rampa evita."""
+    periodico, _, cliente, reloj = _periodico_real()
+    periodico.rampa_s = 1.0
+    periodico.actualizar(pan=0.0)
+    periodico.tick()
+    periodico.alternar_pausa()
+    periodico.actualizar(pan=40.0)
+    periodico.alternar_pausa()
+    reloj.avanzar(0.5)
+    assert periodico.evento_pagina("page_next", 2, 9)
+    pan = json.loads(cliente.publicaciones[-2]["payload"])["pan"]
+    assert 0.0 < pan < 40.0
+
+
+def test_la_pagina_espera_a_que_acabe_el_envio_del_hilo():
+    """El publisher no tiene candado: si el tick del hilo de 20 Hz está a mitad
+    de un envío, la página espera a que acabe en vez de pisarle los contadores."""
+    import threading
+
+    dentro = threading.Event()
+    soltar = threading.Event()
+    orden = []
+
+    class PubLento:
+        def publish(self, **campos):
+            if campos.get("gesture") is None:
+                dentro.set()
+                soltar.wait(2.0)
+            orden.append(campos.get("gesture") or "pose")
+            return True
+
+        def publicar_evento(self, topic, datos, retain=False):
+            orden.append(topic)
+            return True
+
+    periodico = principal.PublicadorPeriodico(PubLento(), 0.05)
+    periodico.actualizar(pan=1.0)
+    hilo_tick = threading.Thread(target=periodico.tick)
+    hilo_tick.start()
+    assert dentro.wait(2.0)
+    hilo_pagina = threading.Thread(target=periodico.evento_pagina, args=("page_next", 2, 5))
+    hilo_pagina.start()
+    hilo_pagina.join(0.2)
+    assert hilo_pagina.is_alive()             # esperando el candado de envío
+    assert orden == []
+    soltar.set()
+    hilo_tick.join(2.0)
+    hilo_pagina.join(2.0)
+    assert orden == ["pose", "page_next", "telmeow/teleop/page"]
+
+
 def test_publicar_en_cada_frame_a_30_fps_da_15_hz_y_el_hilo_da_20():
     """H54. El publisher descarta lo que llega a menos de 45 ms del anterior: un
     bucle que publica en cada frame a 30 fps pasa uno sí y otro no. Es lo que

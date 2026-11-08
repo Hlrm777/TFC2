@@ -129,6 +129,7 @@ class PosePublisher:
         self._sent = 0
         self._dropped = 0
         self._failed = 0
+        self._events = 0
         self._recent: deque[float] = deque()
         self._connected = False
 
@@ -333,6 +334,42 @@ class PosePublisher:
         self._recent.append(now)
         self._trim_window(now)
         return True
+
+    def publicar_evento(self, topic: str, datos: dict[str, Any], *,
+                        retain: bool = False) -> bool:
+        """Emite un evento discreto (P10): la página en ``topic_page``, el
+        cuento en ``topic_story``.
+
+        No pasa por el limitador de tasa ni cuenta en ``message_count`` ni en la
+        tasa efectiva, que son del flujo de poses; sí cuenta en
+        ``failed_count`` si no sale, para que el indicador de la interfaz lo vea.
+        ``event_count`` lleva los que salieron.
+
+        ``retain``: el broker guarda el último mensaje del topic y se lo da a
+        quien se suscriba después. Para la página y el cuento es lo correcto: la
+        pantalla de la Raspberry (P11), o una página recargada, sabe en qué
+        página va el cuento nada más conectarse.
+
+        Returns:
+            True si el mensaje salió a la red.
+        """
+        info = self._client.publish(
+            topic,
+            json.dumps(datos, separators=(",", ":")),
+            qos=self.config.qos,
+            retain=retain,
+        )
+        rc = getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS)
+        if rc != mqtt.MQTT_ERR_SUCCESS:
+            self._failed += 1
+            return False
+        self._events += 1
+        return True
+
+    @property
+    def event_count(self) -> int:
+        """Eventos discretos (``publicar_evento``) que salieron a la red."""
+        return self._events
 
 
 # --------------------------------------------------------------------------

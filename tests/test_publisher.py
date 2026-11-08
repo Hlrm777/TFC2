@@ -42,8 +42,9 @@ class ClienteFalso:
         self.retardo_reconexion = None
         self.rc = rc  # código que devolverá publish()
 
-    def publish(self, topic, payload, qos=0):
-        self.publicaciones.append({"topic": topic, "payload": payload, "qos": qos})
+    def publish(self, topic, payload, qos=0, retain=False):
+        self.publicaciones.append({"topic": topic, "payload": payload, "qos": qos,
+                                   "retain": retain})
         return InfoPublicacion(self.rc)
 
     def connect_async(self, host, port, keepalive):
@@ -430,7 +431,7 @@ def test_un_cliente_sin_codigo_de_retorno_se_considera_exito():
     """Tolerancia con dobles de prueba que devuelven None."""
 
     class ClienteMudo(ClienteFalso):
-        def publish(self, topic, payload, qos=0):
+        def publish(self, topic, payload, qos=0, retain=False):
             self.publicaciones.append({"topic": topic, "payload": payload, "qos": qos})
             return None
 
@@ -440,6 +441,50 @@ def test_un_cliente_sin_codigo_de_retorno_se_considera_exito():
     )
     assert pub.publish(**POSE) is True
     assert pub.message_count == 1
+
+
+# --------------------------------------------------------------------------
+# Eventos discretos por otros topics (P10)
+# --------------------------------------------------------------------------
+
+
+def test_un_evento_sale_por_su_topic_retenido(entorno):
+    pub, cliente, _ = entorno
+    assert pub.publicar_evento("telmeow/teleop/page", {"page": 3, "total": 32},
+                               retain=True) is True
+    ultimo = cliente.publicaciones[-1]
+    assert ultimo["topic"] == "telmeow/teleop/page"
+    assert ultimo["retain"] is True
+    assert ultimo["qos"] == 0
+    assert json.loads(ultimo["payload"]) == {"page": 3, "total": 32}
+
+
+def test_un_evento_no_lo_frena_la_tasa_ni_cuenta_como_pose(entorno):
+    """Los eventos no son del flujo de 20 Hz: no se descartan aunque lleguen
+    justo detrás de una pose, y no inflan los Hz que enseña el panel."""
+    pub, cliente, reloj = entorno
+    pub.publish(**POSE)
+    reloj.avanzar(0.001)
+    assert pub.publicar_evento("telmeow/teleop/story", {"story": "a.pdf", "page": 1})
+    assert pub.message_count == 1 and pub.event_count == 1
+    assert pub.dropped_count == 0
+    assert pub.effective_hz == 1.0
+    assert cliente.publicaciones[-1]["retain"] is False   # retenido solo si se pide
+
+
+def test_un_evento_que_no_sale_cuenta_como_perdido():
+    pub, _, _ = _publisher_que_falla()
+    assert pub.publicar_evento("telmeow/teleop/page", {"page": 2, "total": 9}) is False
+    assert pub.failed_count == 1
+    assert pub.event_count == 0
+
+
+def test_el_evento_conserva_las_tildes_del_nombre_del_cuento(entorno):
+    pub, cliente, _ = entorno
+    pub.publicar_evento("telmeow/teleop/story", {"story": "El túnel - Anthony Browne.pdf",
+                                                 "page": 1})
+    assert json.loads(cliente.publicaciones[-1]["payload"])["story"] == (
+        "El túnel - Anthony Browne.pdf")
 
 
 # --------------------------------------------------------------------------

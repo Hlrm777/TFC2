@@ -1,0 +1,19 @@
+INFORME DEL P7.7 DE p77
+============================================================
+
+Emocion con los pesos de ahora (robot, % del tramo):
+  neutral al frente    75 %
+  neutral abajo        100 %
+  neutral arriba       90 %
+  neutral hablando     98 %
+  enojado al frente    97 %
+  enojado abajo        12 %
+  triste sin ceño      100 %
+  triste con ceño      100 %
+  triste abajo         73 %
+
+Tamano aparente de la mano (px, mediana), para el H65:
+  L: yo no fui 62, estirar 49, estirar / yo no fui = 0.79
+  R: yo no fui 62, estirar 58, estirar / yo no fui = 0.94
+
+Siguiente paso: python tools/reentrenar_p77.py (entrena con lo de antes y evalua en esta sesion)

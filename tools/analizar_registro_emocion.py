@@ -182,6 +182,8 @@ def cargar(ruta: Path) -> list[dict]:
         fila["cabeceo"] = float(cabeceo) if cabeceo else None
         fila["enojo_por_grado"] = float(fila.get("enojo_por_grado") or 0.0)
         fila["enojo_desde"] = float(fila.get("enojo_desde") or 2.0)
+        # 'mirada_fuera' llegó el 2026-11-08 (P7.8): esa cara no votó.
+        fila["mirada_fuera"] = int(fila.get("mirada_fuera") or 0)
     return filas
 
 
@@ -223,7 +225,7 @@ def voto(fila: dict) -> tuple[str, float] | None:
     """
     if not fila["rostro"] or not fila["prediccion"] or fila["confianza_pred"] is None:
         return None
-    if fila.get("manos") or fila.get("calibrando"):
+    if fila.get("manos") or fila.get("calibrando") or fila.get("mirada_fuera"):
         return None
     etiqueta = voto_con_cabeceo(
         fila["prediccion"], fila["confianza_pred"], fila.get("cabeceo"),

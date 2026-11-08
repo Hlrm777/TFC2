@@ -228,10 +228,10 @@ def pipeline(monkeypatch, tmp_path):
             k["detector"] = lambda frame: (200, 120, 160, 160)
             super().__init__(*a, **k)
 
-        def process(self, frame_bgr, timestamp=None, manos=None, cabeceo=None):
+        def process(self, frame_bgr, timestamp=None, manos=None, cabeceo=None, giro=None):
             r.emocion.append((frame_bgr, manos))
             r.cabeceos.append(cabeceo)
-            return super().process(frame_bgr, timestamp, manos=manos, cabeceo=cabeceo)
+            return super().process(frame_bgr, timestamp, manos=manos, cabeceo=cabeceo, giro=giro)
 
         def calibrar_neutro(self):
             r.calibraciones += 1
@@ -965,9 +965,9 @@ def test_si_llegan_frames_mientras_infiere_se_queda_con_el_ultimo():
     vistos = []
     original = clasificador.process
 
-    def process(frame, ts=None, manos=None, cabeceo=None):
+    def process(frame, ts=None, manos=None, cabeceo=None, giro=None):
         vistos.append(ts)
-        return original(frame, ts, manos=manos, cabeceo=cabeceo)
+        return original(frame, ts, manos=manos, cabeceo=cabeceo, giro=giro)
 
     clasificador.process = process
     hilo = principal.HiloEmocion(clasificador)

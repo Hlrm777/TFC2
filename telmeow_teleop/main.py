@@ -721,10 +721,10 @@ class HiloEmocion:
         )
 
     def entregar(self, frame, ahora: float, t: float, etiqueta: int, manos,
-                 cabeceo: float | None = None) -> None:
+                 cabeceo: float | None = None, giro: float | None = None) -> None:
         """El frame (BGR volteado, sin dibujar), los puntos de las manos y el
         cabeceo del head tracker en ese frame (P7.6)."""
-        trabajo = (frame, ahora, t, etiqueta, manos, cabeceo)
+        trabajo = (frame, ahora, t, etiqueta, manos, cabeceo, giro)
         if not self.en_hilo:
             self._paso(trabajo)
             return
@@ -747,8 +747,8 @@ class HiloEmocion:
             metodo, argumentos = self._ordenes.popleft()
             getattr(self.clasificador, metodo)(*argumentos)
         if trabajo is not None:
-            frame, ahora, t, etiqueta, manos, cabeceo = trabajo
-            self.clasificador.process(frame, ahora, manos=manos, cabeceo=cabeceo)
+            frame, ahora, t, etiqueta, manos, cabeceo, giro = trabajo
+            self.clasificador.process(frame, ahora, manos=manos, cabeceo=cabeceo, giro=giro)
             if self.clasificador.inferencias != self._inferencias:
                 self._inferencias = self.clasificador.inferencias
                 if self._al_inferir is not None:
@@ -1372,7 +1372,8 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion) -> 
             # El BGR volteado y SIN dibujar (punto 14): es el convenio del
             # entrenamiento, y el recorte que se graba tiene que ser lo que vio.
             hilo.entregar(frame, ahora, t, etiqueta, manos,
-                          cabeceo=crudo[1] if crudo is not None else None)
+                          cabeceo=crudo[1] if crudo is not None else None,
+                          giro=crudo[0] if crudo is not None else None)
             emocion = hilo.estado
             if emocion.inferencias != inferencias_vistas:
                 inferencias_vistas = emocion.inferencias

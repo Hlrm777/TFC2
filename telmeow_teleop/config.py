@@ -627,6 +627,12 @@ class ArmConfig:
     # de ese lado, y con las dos, los dos (P7.5). Tampoco se copia: se reconoce,
     # porque copiado el brazo saltaba 2.6-5.1° por frame. Ver mano_cara.py.
     mano_cara: bool = True
+    # ``zona_muerta`` (P7.8, decidida por el operador el 2026-11-08): grados que
+    # tiene que alejarse el comando para que el brazo del robot se mueva, como la
+    # cabeza. Quita el temblor pequeño del brazo quieto (en «yo no fui» de p77,
+    # de 413 a 49 cambios por minuto) por +30-40 ms al moverse. No actúa en el
+    # reposo, el saludo ni la mano a la cara. 0 la apaga.
+    zona_muerta: float = 5.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "ArmConfig":
@@ -670,6 +676,7 @@ class ArmConfig:
             rampa_mano=_env_float(env, "ARM_RAMPA_MANO", cls.rampa_mano),
             saludo=_env_bool(env, "ARM_SALUDO", cls.saludo),
             mano_cara=_env_bool(env, "ARM_MANO_CARA", cls.mano_cara),
+            zona_muerta=_env_float(env, "ARM_ZONA_MUERTA", cls.zona_muerta),
         )
 
 
@@ -796,6 +803,19 @@ class EmotionConfig:
     umbral_cejas: float = 0.15
     enojo_por_grado: float = 0.015
     enojo_desde: float = 2.0
+    # P7.8 (decidido por el operador el 2026-11-08): con la cabeza más de 8°
+    # abajo o 20° a un lado el modelo deja de leer la expresión (la
+    # tristeza, del 98 % a nivel al 42 % entre 8 y 15° abajo, en p77 y p78), así
+    # que esas caras no votan y el robot conserva la expresión que tenía, hasta
+    # ``mirada_fuera_s`` segundos seguidos: los vistazos fuera de la pantalla al
+    # narrar no la pierden. 0 lo apaga. Hacia arriba no se aplica (90°): el
+    # modelo lee bien las caras mirando arriba (el neutral, 74-78 %), y con 15°
+    # el neutral mirando arriba de p77 bajaba de 90 a 80 %; sin esa condición
+    # ningún tramo empeora (tools/simular_vistazos.py).
+    mirada_abajo: float = -8.0
+    mirada_arriba: float = 90.0
+    mirada_lado: float = 20.0
+    mirada_fuera_s: float = 3.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "EmotionConfig":
@@ -821,6 +841,10 @@ class EmotionConfig:
             umbral_cejas=_env_float(env, "EMOTION_UMBRAL_CEJAS", cls.umbral_cejas),
             enojo_por_grado=_env_float(env, "EMOTION_ENOJO_POR_GRADO", cls.enojo_por_grado),
             enojo_desde=_env_float(env, "EMOTION_ENOJO_DESDE", cls.enojo_desde),
+            mirada_abajo=_env_float(env, "EMOTION_MIRADA_ABAJO", cls.mirada_abajo),
+            mirada_arriba=_env_float(env, "EMOTION_MIRADA_ARRIBA", cls.mirada_arriba),
+            mirada_lado=_env_float(env, "EMOTION_MIRADA_LADO", cls.mirada_lado),
+            mirada_fuera_s=_env_float(env, "EMOTION_MIRADA_FUERA_S", cls.mirada_fuera_s),
         )
 
 

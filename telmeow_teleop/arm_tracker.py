@@ -94,7 +94,7 @@ import numpy as np
 from .camera import abrir_camara, brillo_medio, describir
 from .config import AppConfig
 from .escorzo import FOCAL_RELATIVA, Camara, anclar_hombros, interseccion
-from .filters import EMAFilter, OneEuroFilter, OneEuroVector, SlewLimiter, SlewLimiterND
+from .filters import EMAFilter, OneEuroFilter, OneEuroVector, SlewLimiter, SlewLimiterND, ZonaMuerta
 from .head_tracker import apartar_si_existe
 from .limits import (
     ARM_ABDUCCION_1D,
@@ -780,6 +780,7 @@ class ArmTracker:
         rampa_mano: float = RAMPA_MANO_S,
         saludo: bool = True,
         mano_cara: bool = False,
+        zona_muerta: float = 0.0,
         pose_estimator=None,
         clock=time.perf_counter,
     ) -> None:
@@ -926,6 +927,11 @@ class ArmTracker:
         self._t_saludo: dict[Side, float] = {}
         # -- la mano a la cara (P7.5) ----------------------------------------------
         self.mano_cara = bool(mano_cara)
+        # -- la zona muerta del comando (P7.8) --------------------------------------
+        self.zona_muerta = float(zona_muerta)
+        self._zonas: dict[Side, tuple[ZonaMuerta, ZonaMuerta]] = {
+            lado: (ZonaMuerta(self.zona_muerta), ZonaMuerta(self.zona_muerta)) for lado in (Side.L, Side.R)
+        }
         self._detectores_cara: dict[Side, DetectorManoCara] = {
             lado: DetectorManoCara() for lado in (Side.L, Side.R)
         }
@@ -1011,6 +1017,7 @@ class ArmTracker:
             rampa_mano=cfg.arm.rampa_mano,
             saludo=cfg.arm.saludo,
             mano_cara=cfg.arm.mano_cara,
+            zona_muerta=cfg.arm.zona_muerta,
         )
 
     # -- estado para el HUD y la calibración -------------------------------
@@ -2199,6 +2206,7 @@ class ArmTracker:
             self._objetivo[canal] = objetivo
             if self._mapeo != "articular":
                 abd, flex = self._limitadores_nd[canal](objetivo, ahora)
+                abd, flex = self._aplicar_zona(canal, abd, flex, objetivo)
                 setattr(salida, campo_abd, abd)
                 setattr(salida, campo_flex, flex)
             else:
@@ -2206,6 +2214,34 @@ class ArmTracker:
                 setattr(salida, campo_abd, limitador_abd(objetivo[0], ahora))
                 setattr(salida, campo_flex, limitador_flex(objetivo[1], ahora))
         return salida
+
+    def _aplicar_zona(self, canal: Side, abd: float, flex: float,
+                      objetivo: tuple[float, float]) -> tuple[float, float]:
+        """La zona muerta del comando (P7.8, decidida por el operador el
+        2026-11-08): el brazo del robot no se mueve mientras el comando no se
+        aleje más de ``zona_muerta`` grados, como la cabeza desde el P7.4.
+
+        Quita el temblor pequeño del brazo quieto, que en «yo no fui» y con los
+        brazos estirados era constante, y solo parte de los saltos grandes, que
+        son la profundidad dudando entre dos posturas (H65). Medido sobre los
+        comandos grabados con 5°: en «yo no fui» de p77, de 413 a 49 cambios de
+        más de 1° por minuto; al estirar, los saltos de más de 5° de 209 a 76; al
+        mover el brazo, +30-40 ms.
+
+        No actúa cuando el comando va a una pose fija —el reposo, el saludo, la
+        mano a la cara—: ahí se quedaría corto de la pose, y el saludo perdería
+        su vaivén. Al soltar, la zona arranca desde donde está el brazo, sin salto.
+        """
+        zona_abd, zona_flex = self._zonas[canal]
+        fija = (self.zona_muerta <= 0.0
+                or tuple(objetivo) == tuple(self._reposo[canal])
+                or self._pesos_saludo.get(canal, 0.0) > 0.0
+                or self._pesos_cara.get(canal, 0.0) > 0.0)
+        if fija:
+            zona_abd.reset()
+            zona_flex.reset()
+            return abd, flex
+        return zona_abd(abd), zona_flex(flex)
 
     @property
     def estimado(self) -> dict[Side, bool]:

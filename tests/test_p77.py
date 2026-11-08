@@ -330,3 +330,80 @@ def test_con_entrenar_el_informe_y_la_base_son_los_suyos(monkeypatch, tmp_path):
     monkeypatch.setattr(sv, "analizar_entrenamiento", lambda base: f"ENTRENAR {base.name}")
     assert sv.main(["--analizar", "--entrenar"]) == 0
     assert (tmp_path / "p77_informe.txt").read_text(encoding="utf-8") == "ENTRENAR p77"
+
+
+# --------------------------------------------------------------------------
+# 5. La confirmación en p78 (decidida el 2026-11-08)
+# --------------------------------------------------------------------------
+
+import confirmar_p78 as cp  # noqa: E402
+
+
+def test_el_protocolo_de_confirmacion_y_lo_que_pide_cada_etiqueta_casan():
+    etiquetas = [e for e, *_ in sv.PROTOCOLO_CONFIRMAR]
+    assert etiquetas == list(range(11))
+    robot = {e: r for e, _t, _s, r in sv.PROTOCOLO_CONFIRMAR}
+    for e, esperada in cp.ESPERADAS_P78.items():
+        assert e == 0 or esperada.upper()[:5] in robot[e].upper()
+    assert "2 min 15 s" in sv.tabla_protocolo(sv.PROTOCOLO_CONFIRMAR)
+
+
+def _tabla(**cambios):
+    base = {"neutral al frente": 80.0, "neutral abajo": 100.0, "neutral arriba": 90.0,
+            "neutral hablando": 98.0, "enojado al frente": 97.0, "enojado abajo": 12.0,
+            "triste al frente": 100.0, "triste abajo": 73.0}
+    base.update(cambios)
+    return base
+
+
+def test_el_criterio_de_la_regla_suave():
+    fuerte = _tabla()
+    assert cp.criterio_regla(fuerte, _tabla(**{"enojado abajo": 74.0})).vale
+    v = cp.criterio_regla(fuerte, _tabla(**{"enojado abajo": 30.0}))
+    assert not v.vale and "sube" in v.motivos[0]
+    v = cp.criterio_regla(fuerte, _tabla(**{"enojado abajo": 74.0, "neutral abajo": 80.0}))
+    assert not v.vale and any("neutral mirando abajo" in m for m in v.motivos)
+    v = cp.criterio_regla(fuerte, _tabla(**{"enojado abajo": 74.0, "triste abajo": 60.0}))
+    assert not v.vale and any("triste abajo" in m for m in v.motivos)
+
+
+def test_el_criterio_de_los_pesos_con_los_tramos_de_p78():
+    v = rp.criterio(_tabla(), _tabla(**{"neutral al frente": 95.0}), cp.NEUTRALES, cp.ENOJO, cp.TRISTEZA)
+    assert v.vale                                              # todos los neutrales ya >= 90
+    v = rp.criterio(_tabla(), _tabla(**{"triste abajo": 60.0, "neutral al frente": 95.0}),
+                    cp.NEUTRALES, cp.ENOJO, cp.TRISTEZA)
+    assert not v.vale
+
+
+@pytest.mark.skipif(not (RAIZ / "p77_emocion.csv").exists(), reason="falta la sesión p77")
+def test_en_p77_la_regla_suave_recupera_el_enojo_mirando_abajo():
+    """Lo que hizo proponerla, con las predicciones grabadas de p77: a 0.03 el
+    enojo mirando abajo se queda en el 12 %; a 0.015, en el 74 %, y el neutral
+    mirando abajo sigue al 100 % con las dos."""
+    import analizar_registro_emocion as are
+
+    filas = are.cargar(RAIZ / "p77_emocion.csv")
+    fuerte = rp.resumir(cp.con_regla(filas, 0.03))
+    suave = rp.resumir(cp.con_regla(filas, 0.015))
+    assert fuerte["enojado abajo"] < 15.0 and suave["enojado abajo"] > 70.0
+    assert fuerte["neutral abajo"] == suave["neutral abajo"] == 100.0
+
+
+def test_el_informe_de_confirmacion(tmp_path):
+    from telmeow_teleop.emotion_classifier import COLUMNAS_CSV as EMOCION
+
+    filas = [{"t": 0.1 * k, "etiqueta": e, "rostro": 1, "emocion": cp.ESPERADAS_P78[e], "calibrando": 0}
+             for e in range(11) for k in range(5)]
+    with open(tmp_path / "c_emocion.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=EMOCION, restval="")
+        w.writeheader()
+        w.writerows(filas)
+    informe = sv.analizar_confirmacion(tmp_path / "c")
+    assert "enojado abajo        100 %" in informe and "confirmar_p78.py" in informe
+
+
+def test_con_confirmar_el_informe_y_la_base_son_los_suyos(monkeypatch, tmp_path):
+    monkeypatch.setattr(sv, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(sv, "analizar_confirmacion", lambda base: f"CONFIRMAR {base.name}")
+    assert sv.main(["--analizar", "--confirmar"]) == 0
+    assert (tmp_path / "p78_informe.txt").read_text(encoding="utf-8") == "CONFIRMAR p78"

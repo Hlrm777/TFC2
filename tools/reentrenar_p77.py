@@ -132,18 +132,20 @@ class Veredicto:
     motivos: tuple[str, ...]
 
 
-def criterio(base: dict[str, float | None], candidato: dict[str, float | None]) -> Veredicto:
+def criterio(base: dict[str, float | None], candidato: dict[str, float | None],
+             neutrales=NEUTRALES, enojo=ENOJO, tristeza=TRISTEZA) -> Veredicto:
+    """Los tramos se pueden cambiar para otra sesión con otros nombres (p78)."""
     motivos = []
-    nb, nc = _media(base, NEUTRALES), _media(candidato, NEUTRALES)
+    nb, nc = _media(base, neutrales), _media(candidato, neutrales)
     mejora = None if None in (nb, nc) else nc - nb
-    todos = all(candidato.get(n) is not None and candidato[n] >= NEUTRAL_MIN for n in NEUTRALES)
+    todos = all(candidato.get(n) is not None and candidato[n] >= NEUTRAL_MIN for n in neutrales)
     if mejora is None:
         motivos.append("faltan los tramos neutrales")
     elif mejora < MEJORA_NEUTRAL and not todos:
         motivos.append(f"el neutral sube {mejora:+.0f} puntos (< {MEJORA_NEUTRAL:.0f}) y no todos "
                        f"los tramos llegan al {NEUTRAL_MIN:.0f} %")
     caidas = {}
-    for texto, nombres in (("enojo", ENOJO), ("tristeza", TRISTEZA)):
+    for texto, nombres in (("enojo", enojo), ("tristeza", tristeza)):
         b, c = _media(base, nombres), _media(candidato, nombres)
         caidas[texto] = None if None in (b, c) else b - c
         if caidas[texto] is None:

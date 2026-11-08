@@ -133,12 +133,12 @@ cambia respecto al plan original.
 | **P5** — Arm tracker | ✅ **hecho, verificado y cerrado el 2026-10-19** · P5.3 (dirección), P5.4 (posición), P5.5 (híbrido, reposo, escorzo), P5.6 (validación: confianza en la mano, focal, alcance) y P5.7 (el robot saluda solo) · `model_complexity` medido: se queda el 1 (22 ms), el 0 de reserva para el P7 | `271034d`, `3c44883`, `10951e5` |
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral · **2026-11-03 (P6.5)**: las gafas no pesan; los blendshapes, reentrenados con el dataset y cuatro sesiones del operador (tristeza con ceño 32-38 % → 61-72 % en validación cruzada), y la regla «sin cejas arriba no es sorpresa» encendida, por decisión del operador | `1e3b6c1`, `de4827a` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
-| P7 — Integración | 🟡 **código hecho el 2026-10-26, sesión con el operador el 2026-11-02** · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **falta**: el H65 (la profundidad en «yo no fui» y al estirar; el tamaño de la mano no la resuelve) y el H68 (la tristeza con la cabeza muy baja, límite del modelo) | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a` |
+| P7 — Integración | 🟡 **código hecho el 2026-10-26, sesión con el operador el 2026-11-02** · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cierre propuesto el 2026-11-08** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7» | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a` |
 | P10 — Panel del operador | ⬜ | |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1437 pruebas en verde** (desde el 2026-11-08: 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1449 pruebas en verde** (desde el 2026-11-08: 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -213,6 +213,8 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── reentrenar_p77.py     ✅ P7.7: la emoción con la cara del operador a varias alturas
 │   ├── diagnostico_p77.py    ✅ P7.7: el modelo frente a la regla del cabeceo, en p77
 │   ├── confirmar_p78.py      ✅ P7.7: reentrenado y regla suave en una sesión nueva
+│   ├── simular_vistazos.py   ✅ P7.8: los vistazos sobre una sesión grabada
+│   ├── zona_brazos.py        ✅ P7.8: la zona muerta de los brazos, reproducida
 │   ├── medir_latencia_camara.py ✅ P7.3: pantalla + cámara, con destellos
 │   ├── dev_broker.py         ✅ broker sin privilegios de administrador
 │   ├── list_cameras.py       ✅ qué cámara y qué backend usar, con fps REALES
@@ -227,7 +229,7 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── train_fer2013.py      ✅ P8: FER-2013 verificado, partición oficial,
 │   │                            entrenamiento determinista, --evaluar
 │   └── eval_emotion.py       ⬜ P9
-├── tests/                    ✅ 1437 pruebas
+├── tests/                    ✅ 1449 pruebas
 ├── mosquitto.conf            ✅ los dos listeners
 ├── emotion_model.meta.json   ✅ orden de clases del modelo propio (el .keras no va en git)
 ├── emotion_model_fer2013.meta.json, .historial.csv   ✅ el de FER-2013 (P8), y el
@@ -3643,7 +3645,7 @@ Lo que sigue sin explicar del H60: el demo solo tiembla hoy 0.92° con la cámar
 ms, como en el P4, y el P4 dio 0.36. No es el pipeline ni, solo, la luz: cambió algo
 del puesto desde septiembre.
 
-### P7.7 — Lo que salió de la sesión p76 ✅ **código hecho el 2026-11-07** · falta la sesión del reentrenamiento
+### P7.7 — Lo que salió de la sesión p76 ✅ **hecho el 2026-11-07 y confirmado el 2026-11-08** (p77, p78)
 
 Decidido por el operador el 2026-11-07, tras ver los datos de p76.
 
@@ -3702,6 +3704,63 @@ enojo mirando abajo del 3 al 46 %, sin enojo falso con el neutral mirando abajo)
 Queda la tristeza con la cabeza muy baja (H68).
 
 `sesion.csv` gana `pausa_cara`.
+
+### P7.8 — Los brazos que no tiemblan y los vistazos ✅ **hecho el 2026-11-08** · se verá en vivo en la primera sesión del P10
+
+Lo último antes de cerrar el P7, decidido por el operador el 2026-11-08 al repasar
+los límites.
+
+**1. Zona muerta de 5° en el comando de los brazos**, como la de la cabeza: el brazo
+del robot no se mueve mientras el comando no se aleje más de 5°. Va tras el
+limitador de velocidad, y no actúa cuando el comando va a una pose fija —el reposo,
+el saludo, la mano a la cara—, que si no se quedaría corto (o el saludo perdería su
+vaivén). Reproducido con el `ArmTracker` de verdad (`tools/zona_brazos.py`):
+
+| Tramo | Sin zona | Con 5° |
+|---|---|---|
+| p77, «yo no fui», izquierdo: cambios de más de 1° por minuto | 418 | **51** |
+| p77, «yo no fui», izquierdo: saltos de más de 5° por minuto | 49 | 16 |
+| p77, estirar: saltos de más de 5° por minuto (izq. / der.) | 210 / 321 | 77 / 115 |
+| p75, saludo: recorrido del brazo | 31.4° | 30.7° (intacto) |
+| Reposo | (−55, 0) | (−55, 0), exacto |
+| Al mover el brazo | — | +30-40 ms |
+
+Quita casi todo el temblor pequeño y solo una parte de los saltos grandes: esos son
+la profundidad dudando entre dos posturas (H65), que sigue siendo un límite.
+`TELMEOW_ARM_ZONA_MUERTA`; 0 la apaga.
+
+**2. Los vistazos fuera de la pantalla.** El operador, que se sabe el cuento, aparta
+la mirada a ratos con la expresión puesta, un par de segundos, y no quiere que se
+pierda. Medido en p77 y p78: a nivel el modelo acierta la tristeza el 98 %; con la
+cabeza 8-15° abajo, el 42 %; 15-25°, el 57 %; más de 25°, el 8 %. El enojo lo sigue
+leyendo. Así que, **con la cabeza más de 8° abajo o 20° a un lado, la cara no vota y
+el robot conserva la expresión que tenía, hasta 3 s seguidos**; si la mirada se queda
+fuera más tiempo, vuelve a votar (con la regla del enojo). Es una cara utilizable: no
+cuenta para el retorno a neutral de los 2 s. Hacia arriba no se aplica: el modelo lee
+bien las caras mirando arriba, y con un umbral de 15° el neutral mirando arriba de p77
+bajaba de 90 a 80 %. Reproducido (`tools/simular_vistazos.py`):
+
+| Tramo | p78 sin | p78 con | p77 sin | p77 con |
+|---|---|---|---|---|
+| Enojado mirando abajo | 46 % | 55 % | 74 % | 74 % |
+| Triste mirando abajo | 9 % | 19 % | 76 % | 81 % |
+| El resto | igual | igual | igual | igual |
+
+Los protocolos miran abajo 10-15 s seguidos, así que solo cambian sus primeros 3 s:
+los vistazos cortos, que es lo que la regla protege, se verán narrando. El CSV de
+emoción gana `giro` y `mirada_fuera`, y la reproducción no hace votar esas caras.
+
+### Los límites con que se cierra el P7
+
+Lo que queda, con quién lo lleva y qué lo reabriría:
+
+| Límite | Cifras | Quién lo lleva |
+|---|---|---|
+| **Latencia total frente a los < 150 ms** (§3.2.2) | el programa, de la captura al mensaje: **64 ms** (p95 100); la cámara del portátil con la pantalla: **203 ms** medidos a oscuras, que es su peor caso; con la luz de trabajo el destello no da contraste y no hay cifra fiable. Total, ~270 ms en el peor caso. Lo que pasa de 150 ms es el hardware de la cámara, no el código | se declara; el P9 lo reporta con estas cifras. Lo reabriría tener una medida con luz por otro método (una sesión más) |
+| **H65**: la profundidad en «yo no fui» y al estirar | saltos grandes que la zona de 5° reduce y no quita (77-115 por minuto al estirar en p77) | se declara; el P9 lo reporta. Lo reabriría que en las pruebas con niños se note: un ajuste aparte del arm tracker |
+| **H68**: la tristeza con la cabeza muy baja | a más de 8° abajo el modelo deja de leerla; los vistazos de hasta 3 s conservan la expresión | se declara; los vistazos lo cubren al narrar |
+| **H60**: la malla tiembla más que en septiembre | crudo 0.9 frente a 0.36 en el P4, sin explicar (no es el pipeline; la luz pesa) | se declara; la zona que crece con el ruido y la pausa por poca luz lo cubren. Prueba gratis: revisar en Windows los efectos de la cámara (encuadre automático, contacto visual), que una actualización pudo encender |
+| Feliz al 66 % en `p7_final` | no se volvió a medir | el P9, al evaluar cada expresión |
 
 ### Enunciado original
 

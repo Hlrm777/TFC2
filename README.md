@@ -381,6 +381,7 @@ Nada se pisa: lo que ya existiera se conserva con el sufijo `_anterior`.
 python tools/reentrenar_p77.py                                   # y el reentrenamiento, evaluado en p77
 .venv/Scripts/python.exe tools/sesion_verificacion.py --confirmar # la confirmacion, en caras nuevas
 python tools/confirmar_p78.py                                    # reentrenado y regla suave, evaluados en p78
+python tools/simular_vistazos.py p78                             # los vistazos del P7.8 sobre una sesion
 ```
 
 Comprueba el broker (y avisa si es el servicio de Mosquitto sin WebSocket),

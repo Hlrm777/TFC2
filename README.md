@@ -377,6 +377,8 @@ Nada se pisa: lo que ya existiera se conserva con el sufijo `_anterior`.
 .venv/Scripts/python.exe tools/sesion_verificacion.py
 .venv/Scripts/python.exe tools/sesion_verificacion.py --gestos   # la cabeza y la mano a la cara, 3 min
 .venv/Scripts/python.exe tools/sesion_verificacion.py --ajustes  # el P7.6: enojo, mejillas, codos y luz
+.venv/Scripts/python.exe tools/sesion_verificacion.py --entrenar # el P7.7: caras para reentrenar la emocion
+python tools/reentrenar_p77.py                                   # y el reentrenamiento, evaluado en p77
 ```
 
 Comprueba el broker (y avisa si es el servicio de Mosquitto sin WebSocket),

@@ -1,0 +1,21 @@
+INFORME DEL P7.6 DE p76
+============================================================
+
+Emocion (robot, % de la etiqueta):
+   1 enojado: 0 % (criterio <= 10 %) OK
+   2 enojado: 35 % (criterio >= 60 %) NO CUMPLE
+
+Cabeza con las manos en la cara:
+   4 mejillas: guarda 18 % (criterio <= 10 %) NO CUMPLE; el pan recorre 80 grados (criterio >= 20) OK
+   5 tapada: guarda 96 % (criterio >= 60 %) OK
+
+«Yo no fui» (H65): saltos > 5 grados por minuto L / R, angulo mediano a la cruz L / R, codos dentro del cuadro:
+   7 en tu sitio: 33 / 18, 17 / 4 grados, 0 %
+   9 codos a la vista: 89 / 237, 51 / 33 grados, 100 %  (criterio <= 40 con codos >= 80 %) NO CUMPLE
+  10 estirar: 67 / 117, 65 / 55 grados, 98 %
+
+Luz (indice de ruido de la malla, zona muerta, pausa):
+   0 con luz: ruido 0.62, zona 1.0 (max 1.0), pausa 0 %, cabeza publicada sin pausa: salto mediano 0.00
+  11 luz apagada: ruido 0.83, zona 1.0 (max 1.0), pausa 0 %, cabeza publicada sin pausa: salto mediano 0.12
+  12 luz prendida otra vez: ruido 0.83, zona 1.0 (max 1.1), pausa 0 %, cabeza publicada sin pausa: salto mediano 0.08
+  con la luz prendida, pasados 6 s: pausa 0 % (criterio 0 %) OK

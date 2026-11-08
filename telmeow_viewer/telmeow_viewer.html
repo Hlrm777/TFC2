@@ -96,6 +96,51 @@
   .tcell .v.col-hit{color:var(--warn);text-shadow:0 0 8px rgba(245,96,74,.45)}
   .note{font-size:10.5px;color:var(--ink-dim);line-height:1.5;margin-top:12px}
   .err{color:var(--warn);font-size:11px;line-height:1.5;margin-top:8px;display:none}
+
+  /* ---- modo narración (P10): ?modo=narracion, servido por main.py ----
+     Distribución elegida por el operador el 2026-11-08: el robot arriba y su
+     cámara abajo a la izquierda; el libro, grande, a la derecha; debajo, los
+     botones. Sin cifras de diagnóstico: esas siguen en la ventana de OpenCV. */
+  .narr{display:none}
+  body.narracion{
+    grid-template-columns:minmax(300px,32vw) 1fr;
+    grid-template-rows:minmax(0,1fr) minmax(0,1fr) auto;
+    grid-template-areas:"robot libro" "camara libro" "estado controles";
+  }
+  body.narracion #panel{display:none}
+  body.narracion .narr{display:flex}
+  body.narracion #stage{grid-area:robot;height:auto;min-height:0;border-bottom:1px solid var(--line)}
+  body.narracion .stage-tag{font-size:10px;top:10px;left:12px}
+  #n-camara{grid-area:camara;min-height:0;background:#05070c;align-items:center;justify-content:center;position:relative}
+  #n-camara img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+  #n-camara .vacio{position:absolute;color:var(--ink-dim);font-size:12px}
+  #n-libro{grid-area:libro;min-height:0;min-width:0;background:#0a0d16;border-left:1px solid var(--line);
+    align-items:center;justify-content:center;position:relative;overflow:hidden}
+  #n-libro canvas{display:block;box-shadow:0 6px 30px rgba(0,0,0,.55)}
+  #n-libro .vacio{position:absolute;color:var(--ink-dim);font-size:15px;text-align:center;line-height:1.6;padding:24px}
+  #n-estado{grid-area:estado;flex-direction:column;gap:7px;padding:12px 14px;background:var(--panel);
+    border-top:1px solid var(--line);font-size:13px;line-height:1.35}
+  #n-estado .linea{display:flex;align-items:center;gap:8px}
+  #n-estado .dot.pausa{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  #n-estado .tenue{color:var(--ink-dim);font-size:11.5px}
+  #n-estado .grab{color:var(--warn);font-size:12px}
+  #n-aviso{color:var(--accent);font-size:12.5px;min-height:1.3em}
+  #n-controles{grid-area:controles;flex-direction:column;gap:8px;padding:10px 14px;background:var(--panel);
+    border-top:1px solid var(--line);border-left:1px solid var(--line)}
+  #n-controles .fila{display:flex;gap:8px;align-items:center}
+  #n-controles button{font-size:13px;padding:10px 8px}
+  #n-controles button:disabled{opacity:.38;cursor:not-allowed;border-color:var(--line)}
+  #n-controles select{flex:2;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;
+    font-family:var(--mono);font-size:13px;padding:9px}
+  #n-pag{flex:0 0 auto;min-width:9.5em;text-align:center;font-size:14px;color:var(--accent-2)}
+  body.narracion #emo-row{margin-top:0 !important;flex:1;flex-wrap:nowrap}
+  #emo-row .emo.fija{outline:2px solid var(--accent);color:var(--accent)}
+  #n-confirmar{position:fixed;inset:0;z-index:20;background:rgba(5,7,12,.78);align-items:center;justify-content:center;
+    font-size:20px;text-align:center;line-height:1.7;display:none}
+  #n-confirmar.visible{display:flex}
+  #n-fin{position:fixed;inset:0;z-index:30;background:rgba(5,7,12,.92);align-items:center;justify-content:center;
+    font-size:20px;text-align:center;line-height:1.7;display:none}
+  #n-fin.visible{display:flex}
 </style>
 </head>
 <body>
@@ -216,6 +261,41 @@
     </div>
   </aside>
 
+  <!-- Modo narración (P10): ocultos fuera de ?modo=narracion. -->
+  <div id="n-camara" class="narr">
+    <img id="n-video" alt="Tu cámara">
+    <span class="vacio" id="n-video-vacio">Esperando la cámara…</span>
+  </div>
+  <div id="n-libro" class="narr">
+    <canvas id="n-pagina"></canvas>
+    <div class="vacio" id="n-libro-vacio">Elige un cuento en la lista de abajo.</div>
+  </div>
+  <div id="n-estado" class="narr">
+    <div class="linea"><span class="dot" id="n-robot-dot"></span><b id="n-robot">Conectando con el programa…</b></div>
+    <div id="n-expresion">Expresión: —</div>
+    <div class="tenue" id="n-titulo">Sin cuento</div>
+    <div class="tenue" id="n-visor">Visor: sin conexión al broker</div>
+    <div class="grab" id="n-grab"></div>
+    <div id="n-aviso"></div>
+  </div>
+  <div id="n-controles" class="narr">
+    <div class="fila">
+      <select id="n-cuento" title="Cuento"><option value="">Elige un cuento…</option></select>
+      <button id="n-ant" title="Página anterior (j o ←)">◀ Anterior</button>
+      <span id="n-pag">—</span>
+      <button id="n-sig" title="Página siguiente (l o →)">Siguiente ▶</button>
+    </div>
+    <div class="fila" id="n-fila-emo"></div>
+    <div class="fila">
+      <button id="n-auto" title="Volver a la expresión automática (0)">Automático (0)</button>
+      <button id="n-calibrar" title="Calibrar la cara neutra y la cabeza (c)">Calibrar (c)</button>
+      <button id="n-pausa" title="Pausar o reanudar el robot (k)">Pausa (k)</button>
+      <button id="n-vista" title="Ver el robot de frente o desde atrás">Vista: detrás</button>
+    </div>
+  </div>
+  <div id="n-confirmar" class="narr">Pulsa <b>q</b> otra vez para terminar la sesión.<br><span style="font-size:14px;color:var(--ink-dim)">Esc cancela</span></div>
+  <div id="n-fin" class="narr">La sesión terminó.<br><span style="font-size:14px;color:var(--ink-dim)">Puedes cerrar esta pestaña.</span></div>
+
   <script type="importmap">
   { "imports": {
     "three": "https://esm.sh/three@0.160.0",
@@ -229,6 +309,12 @@
   import { STLLoader } from 'three/addons/loaders/STLLoader.js';
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
   import { MeshBVH } from 'three-mesh-bvh';
+
+  /* Modo narración (P10): la interfaz final del operador, servida por main.py
+     en http://localhost:8001 (python -m telmeow_teleop.control_panel). Sin el
+     parámetro, el visor es el banco de pruebas de siempre. */
+  const MODO_NARRACION = new URLSearchParams(location.search).get('modo') === 'narracion';
+  if(MODO_NARRACION) document.body.classList.add('narracion');
 
   /* ============================================================
      RIG de 6 GDL · Telmeow_Split v10 (Fusion 360). UNIDADES: mm.
@@ -1025,6 +1111,7 @@
 
   function drawPage(){
     if(!extCtx) return;
+    if(MODO_NARRACION){ pintarPantallaExterna(); return; }   // la página real (P10)
     const W=extCanvas.width, H=extCanvas.height, c=extCtx;
     // páginas sintéticas de colores distintos: sirven para ver de un vistazo
     // que el cambio ocurrió y en qué momento respecto al gesto de cabeza
@@ -1077,7 +1164,11 @@
   // solo el reloj de pared es común a los dos procesos (en la misma máquina).
   let latAcc=[];
 
-  function setLink(s,msg){ dot.className='dot'+(s==='on'?' on':s==='wait'?' wait':''); state.textContent=msg; }
+  function setLink(s,msg){
+    dot.className='dot'+(s==='on'?' on':s==='wait'?' wait':''); state.textContent=msg;
+    const visor=document.getElementById('n-visor');      // modo narración
+    if(visor) visor.textContent = s==='on' ? 'Visor: recibiendo al robot' : 'Visor: '+msg.toLowerCase();
+  }
   function showErr(m){ errBox.style.display='block'; errBox.textContent=m; }
   function clearErr(){ errBox.style.display='none'; }
 
@@ -1100,7 +1191,9 @@
       if(typeof o.emo==='string') setEmotion(o.emo);
       else if(typeof o.emotion==='string') setEmotion(o.emotion);
       if(o.gesture==='page_next' || o.gesture==='page_prev'){
-        changePage(o.gesture);            // mantiene la maqueta en sincronía
+        // En el modo narración la página la lleva main.py (llega en 'page' y
+        // en su estado); fuera de él, la maqueta de páginas inventadas.
+        if(!MODO_NARRACION) changePage(o.gesture);
         playPageGesture(o.gesture);
       }
       if(typeof o.page==='number'){ pageNum = o.page; drawPage(); }
@@ -1165,13 +1258,279 @@
     lastMsg=0; rateAcc=[]; latAcc=[];
   };
 
+  /* ---------- modo narración (P10) ----------
+     La página la sirve main.py: le pide su estado (ya en palabras), le manda
+     las órdenes de los botones y las teclas, enseña la cámara (MJPEG) y
+     dibuja el libro con pdf.js. Las órdenes las ejecuta main.py con el mismo
+     código que las teclas de la ventana de OpenCV. ------------------------ */
+
+  // La misma tabla que telmeow_teleop/ordenes.py (ORDENES_DE_TECLA); una
+  // prueba exige que coincidan. Una entrada por línea: la prueba la lee así.
+  const TECLAS_NARRACION = {
+    'q': ['salir'],
+    ' ': ['etiqueta'],
+    'c': ['calibrar'],
+    '1': ['expresion', 'neutral'],
+    '2': ['expresion', 'feliz'],
+    '3': ['expresion', 'triste'],
+    '4': ['expresion', 'sorprendido'],
+    '5': ['expresion', 'enojado'],
+    '6': ['expresion', 'concentrado'],
+    '0': ['automatico'],
+    'k': ['pausa'],
+    'j': ['pagina_anterior'],
+    'l': ['pagina_siguiente'],
+  };
+  const ALIAS_TECLAS = { ArrowLeft:'j', ArrowRight:'l' };
+  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  const VISTAS = { 'detrás': [700,-900,550], 'frente': [-250,1150,480] };
+
+  const narr = { estado:null, fallosEstado:0, pdf:null, nombre:null, pagina:null, pedida:null,
+                 cache:new Map(), ficha:0, ultimaPagina:null, confirmarHasta:0,
+                 mqttIniciado:false, vista:'detrás' };
+
+  function pintarPantallaExterna(){
+    // La página real en la pantalla externa del robot 3D: lo que verían los
+    // niños. Ajustada sin deformar, con bandas negras.
+    if(!extCtx) return;
+    const W=extCanvas.width, H=extCanvas.height, c=extCtx;
+    c.fillStyle='#000'; c.fillRect(0,0,W,H);
+    const p=narr.ultimaPagina;
+    if(p){
+      const k=Math.min(W/p.width, H/p.height), w=p.width*k, h=p.height*k;
+      c.drawImage(p, (W-w)/2, (H-h)/2, w, h);
+    }
+    extTex.needsUpdate = true;
+  }
+
+  async function ordenar(orden, valor){
+    try{
+      const r = await fetch('/api/orden', {method:'POST', headers:{'Content-Type':'application/json'},
+                                          body: JSON.stringify(valor===undefined ? {orden} : {orden, valor})});
+      if(!r.ok){ const d = await r.json().catch(()=>({})); avisoLocal(d.error || ('error '+r.status)); }
+    }catch(e){ avisoLocal('sin conexión con el programa'); }
+  }
+
+  let avisoLocalHasta = 0;
+  function avisoLocal(texto){
+    document.getElementById('n-aviso').textContent = texto;
+    avisoLocalHasta = performance.now() + 2500;
+  }
+
+  async function cargarPdfjs(){
+    if(window.pdfjsLib) return window.pdfjsLib;
+    await new Promise((ok, mal)=>{ const s=document.createElement('script');
+      s.src=PDFJS+'pdf.min.js'; s.onload=ok; s.onerror=mal; document.head.appendChild(s); });
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS+'pdf.worker.min.js';
+    return window.pdfjsLib;
+  }
+
+  async function renderizarPagina(n){
+    // Al tamaño del panel del libro, con la densidad de la pantalla.
+    const libro = document.getElementById('n-libro');
+    const caja = libro.getBoundingClientRect();
+    const clave = `${narr.nombre}#${n}#${Math.round(caja.width)}x${Math.round(caja.height)}`;
+    if(narr.cache.has(clave)) return narr.cache.get(clave);
+    const promesa = (async ()=>{
+      const pagina = await narr.pdf.getPage(n);
+      const base = pagina.getViewport({scale:1});
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const escala = Math.min((caja.width-24)/base.width, (caja.height-24)/base.height) * dpr;
+      const vista = pagina.getViewport({scale: Math.max(escala, 0.1)});
+      const lienzo = document.createElement('canvas');
+      lienzo.width = Math.floor(vista.width); lienzo.height = Math.floor(vista.height);
+      await pagina.render({canvasContext: lienzo.getContext('2d'), viewport: vista}).promise;
+      lienzo.dpr = dpr;
+      return lienzo;
+    })();
+    narr.cache.set(clave, promesa);
+    promesa.catch(()=>narr.cache.delete(clave));
+    return promesa;
+  }
+
+  async function mostrarPagina(nombre, n){
+    const ficha = ++narr.ficha;            // solo vale la última petición
+    const vacio = document.getElementById('n-libro-vacio');
+    const visible = document.getElementById('n-pagina');
+    try{
+      if(nombre !== narr.nombre){
+        vacio.textContent = 'Abriendo el cuento…'; vacio.style.display='block';
+        const pdfjs = await cargarPdfjs();
+        const doc = await pdfjs.getDocument('/historias/'+encodeURIComponent(nombre)).promise;
+        if(ficha !== narr.ficha){ doc.destroy(); return; }
+        if(narr.pdf) narr.pdf.destroy();     // el cuento anterior, fuera de memoria
+        narr.pdf = doc; narr.nombre = nombre; narr.cache.clear();
+      }
+      const lienzo = await renderizarPagina(n);
+      if(ficha !== narr.ficha) return;
+      visible.width = lienzo.width; visible.height = lienzo.height;
+      visible.style.width = (lienzo.width/lienzo.dpr)+'px';
+      visible.style.height = (lienzo.height/lienzo.dpr)+'px';
+      visible.getContext('2d').drawImage(lienzo, 0, 0);
+      vacio.style.display = 'none';
+      narr.pagina = n; narr.ultimaPagina = lienzo;
+      pintarPantallaExterna();
+      // La anterior y la siguiente, de antemano: el cambio de página es
+      // justo cuando el robot hace el gesto, y tiene que ser inmediato.
+      [n+1, n-1].filter(p=>p>=1 && p<=narr.pdf.numPages).forEach(p=>renderizarPagina(p).catch(()=>{}));
+    }catch(e){
+      if(ficha !== narr.ficha) return;
+      vacio.textContent = 'No se pudo abrir el cuento ('+(e && e.message || e)+').';
+      vacio.style.display = 'block';
+    }
+  }
+
+  function pintarEstado(e){
+    const robot = e.robot || {clave:'sin_enlace', texto:'—'};
+    document.getElementById('n-robot').textContent = robot.texto;
+    document.getElementById('n-robot-dot').className = 'dot' +
+      (robot.clave==='ok' ? ' on' : robot.clave==='pausa' ? ' pausa' : '');
+    document.getElementById('n-expresion').textContent = e.expresion ? e.expresion.texto : '';
+    const cuento = e.cuento || {};
+    document.getElementById('n-titulo').textContent = cuento.titulo ? 'Cuento: '+cuento.titulo : 'Sin cuento';
+    document.getElementById('n-grab').textContent =
+      (e.demo ? 'DEMO · ' : '') + ((e.grabacion && e.grabacion.texto) || '');
+    if(performance.now() > avisoLocalHasta) document.getElementById('n-aviso').textContent = e.aviso || '';
+    document.getElementById('n-pag').textContent = cuento.pagina ? `Página ${cuento.pagina} de ${cuento.total}` : '—';
+    // En pausa no se pasa de página (decisión del operador, 2026-11-08).
+    document.getElementById('n-ant').disabled = !cuento.pagina || e.pausa || cuento.pagina<=1;
+    document.getElementById('n-sig').disabled = !cuento.pagina || e.pausa || cuento.pagina>=cuento.total;
+    document.getElementById('n-pausa').textContent = e.pausa_tecla ? 'Reanudar (k)' : 'Pausa (k)';
+    const manual = e.expresion ? e.expresion.manual : null;
+    document.querySelectorAll('#emo-row .emo').forEach(b=>b.classList.toggle('fija', b.dataset.emo===manual));
+    const sel = document.getElementById('n-cuento');
+    if(document.activeElement !== sel) sel.value = cuento.nombre || '';
+    // Una sola petición por página: el estado llega cada 200 ms, y abrir un
+    // PDF de 13 MB tarda más que eso.
+    const pedida = cuento.nombre ? cuento.nombre+'#'+cuento.pagina : null;
+    if(pedida && pedida !== narr.pedida && (cuento.nombre !== narr.nombre || cuento.pagina !== narr.pagina)){
+      narr.pedida = pedida;
+      mostrarPagina(cuento.nombre, cuento.pagina);
+    }
+    if(!narr.mqttIniciado && e.mqtt){
+      // El robot 3D se mueve con lo que publica main.py, por MQTT, como lo
+      // recibiría el robot real.
+      narr.mqttIniciado = true;
+      document.getElementById('mq-url').value = `ws://${location.hostname}:${e.mqtt.ws_port}`;
+      document.getElementById('mq-topic').value = e.mqtt.topic_pose;
+      document.getElementById('b-connect').onclick();
+    }
+  }
+
+  async function pedirEstado(){
+    try{
+      const r = await fetch('/api/estado', {cache:'no-store'});
+      if(!r.ok) throw new Error(r.status);
+      const e = await r.json();
+      narr.fallosEstado = 0;
+      if(e.listo){ narr.estado = e; pintarEstado(e); }
+    }catch(err){
+      // main.py cerró (q, Ctrl-C) o se cayó: tras ~1.5 s sin respuesta.
+      if(++narr.fallosEstado >= 8) document.getElementById('n-fin').classList.add('visible');
+    }
+  }
+
+  async function cargarCuentos(){
+    const sel = document.getElementById('n-cuento');
+    try{
+      const d = await (await fetch('/api/historias', {cache:'no-store'})).json();
+      if(!d.existe){
+        document.getElementById('n-libro-vacio').textContent =
+          'No encuentro la carpeta de cuentos: ' + d.carpeta + '. Lanza la sesión con --stories-dir.';
+        return;
+      }
+      d.historias.forEach(h=>{
+        const o = document.createElement('option');
+        o.value = h.nombre;
+        o.textContent = h.paginas ? `${h.titulo} (${h.paginas} pág.)` : `${h.titulo} (no se puede leer)`;
+        o.disabled = !h.paginas;
+        sel.appendChild(o);
+      });
+    }catch(e){ avisoLocal('no se pudo leer la lista de cuentos'); }
+  }
+
+  function ponerVista(nombre){
+    narr.vista = nombre in VISTAS ? nombre : 'detrás';
+    cam.position.set(...VISTAS[narr.vista]);
+    controls.target.set(0,0,180); controls.update();
+    document.getElementById('n-vista').textContent = 'Vista: ' + narr.vista;
+    try{ localStorage.setItem('telmeow.vista', narr.vista); }catch(e){}
+  }
+
+  function teclaNarracion(ev){
+    if(ev.ctrlKey || ev.altKey || ev.metaKey) return;
+    const t = ev.target;
+    if(t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA')) return;
+    // Con la lista de cuentos enfocada (y cerrada), ↑/↓ cambiarían de cuento
+    // a mitad de la lectura: se anulan. Las demás teclas siguen valiendo.
+    if(t && t.tagName==='SELECT' && (ev.key==='ArrowUp' || ev.key==='ArrowDown')){ ev.preventDefault(); return; }
+    if(ev.key==='Escape'){ narr.confirmarHasta=0; document.getElementById('n-confirmar').classList.remove('visible'); return; }
+    const tecla = ALIAS_TECLAS[ev.key] || (ev.key.length===1 ? ev.key.toLowerCase() : ev.key);
+    const entrada = TECLAS_NARRACION[tecla];
+    if(!entrada) return;
+    ev.preventDefault();
+    if(ev.repeat) return;                  // mantener pulsada no repite la orden
+    if(entrada[0]==='salir'){
+      // Una q suelta delante de los niños cortaría la sesión: hay que pulsarla
+      // dos veces en 3 s.
+      const caja = document.getElementById('n-confirmar');
+      if(performance.now() < narr.confirmarHasta){ caja.classList.remove('visible'); ordenar('salir'); }
+      else{ narr.confirmarHasta = performance.now()+3000; caja.classList.add('visible');
+            setTimeout(()=>{ if(performance.now() >= narr.confirmarHasta) caja.classList.remove('visible'); }, 3050); }
+      return;
+    }
+    ordenar(...entrada);
+  }
+
+  function iniciarNarracion(){
+    // La cámara del operador, como un espejo y sin esqueleto. Si se corta, se
+    // reintenta sola.
+    const video = document.getElementById('n-video');
+    video.onload = ()=>{ document.getElementById('n-video-vacio').style.display='none'; };
+    video.onerror = ()=>{ document.getElementById('n-video-vacio').style.display='block';
+      setTimeout(()=>{ video.src = '/video.mjpg?r='+Date.now(); }, 2000); };
+    video.src = '/video.mjpg';
+    // Los seis botones de expresión de siempre pasan a la barra de narración, y
+    // aquí mandan la orden a main.py en vez de cambiar solo los ojos del visor.
+    document.getElementById('n-fila-emo').appendChild(document.getElementById('emo-row'));
+    const conBlur = f => function(){ f(); this.blur(); };   // que ESPACIO no vuelva a pulsarlo
+    document.querySelectorAll('#emo-row .emo').forEach(b=>
+      b.onclick = conBlur(()=>ordenar('expresion', b.dataset.emo)));
+    document.getElementById('n-auto').onclick = conBlur(()=>ordenar('automatico'));
+    document.getElementById('n-calibrar').onclick = conBlur(()=>ordenar('calibrar'));
+    document.getElementById('n-pausa').onclick = conBlur(()=>ordenar('pausa'));
+    document.getElementById('n-ant').onclick = conBlur(()=>ordenar('pagina_anterior'));
+    document.getElementById('n-sig').onclick = conBlur(()=>ordenar('pagina_siguiente'));
+    document.getElementById('n-vista').onclick = conBlur(()=>
+      ponerVista(narr.vista==='detrás' ? 'frente' : 'detrás'));
+    const sel = document.getElementById('n-cuento');
+    sel.onchange = ()=>{ if(sel.value) ordenar('historia', sel.value); sel.blur(); };
+    document.addEventListener('keydown', teclaNarracion);
+    let vista = 'detrás';
+    try{ vista = localStorage.getItem('telmeow.vista') || 'detrás'; }catch(e){}
+    ponerVista(vista);
+    // Si cambia el tamaño del panel del libro, la página se vuelve a dibujar a
+    // la nueva medida.
+    new ResizeObserver(()=>{ if(narr.nombre && narr.pagina){ narr.cache.clear();
+      const n=narr.pagina; narr.pagina=null; narr.pedida=null; mostrarPagina(narr.nombre, n); } })
+      .observe(document.getElementById('n-libro'));
+    cargarCuentos();
+    pedirEstado();
+    setInterval(pedirEstado, 200);
+  }
+  if(MODO_NARRACION) iniciarNarracion();
+
   /* ---------- loop ---------- */
   let fpsT=performance.now(), frames=0;
   function resize(){
     const w=host.clientWidth, h=host.clientHeight;
+    if(!w || !h) return;
     cam.aspect=w/h; cam.updateProjectionMatrix(); renderer.setSize(w,h);
   }
   window.addEventListener('resize',resize); resize();
+  // El panel del robot cambia de tamaño sin que cambie la ventana (modo
+  // narración); el ResizeObserver lo sigue.
+  new ResizeObserver(resize).observe(host);
 
   function tick(){
     requestAnimationFrame(tick);

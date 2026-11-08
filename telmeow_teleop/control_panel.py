@@ -263,6 +263,8 @@ def estado_interfaz(*, enlace: bool, fallo_reciente: bool = False, pausa_tecla: 
         "demo": demo,
         "robot": {"clave": robot[0], "texto": robot[1]},
         "pausa": pausa_tecla or pausa_luz or pausa_cara,
+        # La de la tecla aparte: el botón dice «Reanudar» solo si la quita él.
+        "pausa_tecla": pausa_tecla,
         "expresion": {"texto": texto_expresion, "actual": expresion, "manual": manual,
                       "calibrando": calibrando, "activa": emocion_activa},
         "cuento": {

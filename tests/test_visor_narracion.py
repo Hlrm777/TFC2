@@ -114,3 +114,17 @@ def test_todo_lo_que_la_pagina_pide_lo_sirve_el_servidor(servidor_real):
         conexion = http.client.HTTPConnection("127.0.0.1", servidor_real.puerto, timeout=5)
         conexion.request("HEAD", "/" + archivo)
         assert conexion.getresponse().status == 200, archivo
+
+
+
+def test_la_franja_de_guia_existe_y_solo_se_ve_con_guia():
+    """La guía de las sesiones de verificación: sus elementos, el CSS que la
+    enseña solo con la clase con-guia, y el JS que la pone desde el estado."""
+    html = HTML
+    for ident in ("n-guia", "n-guia-num", "n-guia-tiempo", "n-guia-que", "n-guia-robot"):
+        assert f'id="{ident}"' in html
+    assert re.search(r"#n-guia\{[^}]*display:none", html)
+    assert "body.narracion.con-guia #n-guia{display:flex}" in html
+    assert '"guia guia"' in html
+    assert "pintarGuia(e.guia)" in html
+    assert "classList.toggle('con-guia', !!g)" in html

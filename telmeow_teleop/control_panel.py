@@ -429,18 +429,65 @@ class _ServidorHTTP(ThreadingHTTPServer):
         super().server_bind()
 
 
+# --------------------------------------------------------------------------
+# La guía de una sesión de verificación
+# --------------------------------------------------------------------------
+
+
+def guia_desde_datos(datos, origen: str = "la guia") -> dict:
+    """La guía de una sesión de verificación: la instrucción de cada etiqueta,
+    que la página enseña arriba mientras se graba. ``datos`` es lo que escribe
+    ``tools/sesion_verificacion.py``: ``{"titulo", "etiquetas": [{"etiqueta",
+    "que", "segundos", "robot"}]}``. ``ValueError`` con el motivo si no vale."""
+    etiquetas = datos.get("etiquetas") if isinstance(datos, dict) else None
+    if not isinstance(etiquetas, list) or not etiquetas:
+        raise ValueError(f"{origen} no tiene etiquetas")
+    por_numero = {}
+    for entrada in etiquetas:
+        try:
+            numero = int(entrada["etiqueta"])
+            por_numero[numero] = {"etiqueta": numero, "que": str(entrada["que"]),
+                                  "robot": str(entrada.get("robot", "")),
+                                  "segundos": int(entrada.get("segundos", 0))}
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"etiqueta mal escrita en {origen}: {entrada!r}") from exc
+    return {"titulo": str(datos.get("titulo", "")), "etiquetas": por_numero, "ultima": max(por_numero)}
+
+
+def leer_guia(ruta: Path) -> dict:
+    """``guia_desde_datos`` de un archivo JSON (``--guia-sesion``)."""
+    try:
+        datos = json.loads(Path(ruta).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"no se pudo leer la guia {ruta}: {exc}") from exc
+    return guia_desde_datos(datos, f"la guia {ruta}")
+
+
+def guia_de(guia: dict, etiqueta: int) -> dict:
+    """Lo que la página enseña en una etiqueta; pasada la última, cómo acabar."""
+    base = {"titulo": guia["titulo"], "ultima": guia["ultima"]}
+    paso = guia["etiquetas"].get(etiqueta)
+    if paso is None:
+        paso = {"etiqueta": etiqueta, "que": "Ya no quedan etiquetas: pulsa q dos veces para terminar.",
+                "robot": "", "segundos": 0}
+    return {**base, **paso}
+
+
 class ServidorInterfaz:
     """El servidor de la interfaz: lo arranca ``main.py`` con ``--interfaz``.
 
     ``puerto=0`` elige uno libre (las pruebas); ``puerto`` dice cuál quedó.
-    Lanza ``OSError`` si el puerto está ocupado.
+    Lanza ``OSError`` si el puerto está ocupado. Con ``guia`` (una sesión de
+    verificación, ``leer_guia``), el estado lleva la instrucción de la etiqueta
+    en curso mientras se graba; al narrar de verdad no hay guía.
     """
 
     def __init__(self, carpeta_visor: Path, biblioteca: Biblioteca, *,
                  host: str = "127.0.0.1", puerto: int = PUERTO,
-                 emisor: EmisorVideo | None = None) -> None:
+                 emisor: EmisorVideo | None = None, guia: dict | None = None) -> None:
         self.carpeta_visor = Path(carpeta_visor)
         self.biblioteca = biblioteca
+        self.guia = guia
         self.emisor = emisor or EmisorVideo()
         self.ordenes: queue.SimpleQueue[Orden] = queue.SimpleQueue()
         #: Lo que devuelve ``/api/estado``. Se sustituye entero, nunca se edita.
@@ -487,6 +534,10 @@ class ServidorInterfaz:
                 return ordenes
 
     def publicar_estado(self, estado: dict) -> None:
+        if self.guia is not None:
+            grabacion = estado.get("grabacion") or {}
+            if grabacion.get("activa"):
+                estado = {**estado, "guia": guia_de(self.guia, int(grabacion.get("etiqueta", 0)))}
         self.estado = estado
 
 
@@ -575,11 +626,11 @@ class _PipelineDemo:
 
 
 def ejecutar_demo(puerto: int = PUERTO, carpeta: Path | None = None, abrir: bool = True,
-                  duracion_s: float | None = None) -> int:
+                  duracion_s: float | None = None, guia: dict | None = None) -> int:
     """El servidor con video sintético y un estado falso. Ctrl-C (o la orden
-    salir) termina."""
+    salir) termina. Con ``guia``, el ensayo de una sesión de verificación."""
     carpeta = carpeta or AppConfig.from_env().paths.stories_dir
-    servidor = ServidorInterfaz(CARPETA_VISOR, Biblioteca(carpeta), puerto=puerto)
+    servidor = ServidorInterfaz(CARPETA_VISOR, Biblioteca(carpeta), puerto=puerto, guia=guia)
     demo = _PipelineDemo(servidor)
     servidor.arrancar()
     print(f"DEMO de la interfaz en {servidor.url} (cuentos de {carpeta}). Ctrl-C para salir.")
@@ -620,9 +671,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="no abrir el navegador")
     parser.add_argument("--stories-dir", type=Path, default=None,
                         help="carpeta de los cuentos en PDF")
+    parser.add_argument("--guia-sesion", type=Path, default=None, metavar="JSON",
+                        help="la instruccion de cada etiqueta, arriba en la pagina (sesiones de "
+                             "verificacion; la escribe tools/sesion_verificacion.py)")
     args, resto = parser.parse_known_args(argv)
     if args.demo:
-        return ejecutar_demo(args.puerto, args.stories_dir, abrir=not args.sin_navegador)
+        guia = None
+        if args.guia_sesion is not None:
+            try:
+                guia = leer_guia(args.guia_sesion)
+            except ValueError as exc:
+                print(exc)
+                return 1
+        return ejecutar_demo(args.puerto, args.stories_dir, abrir=not args.sin_navegador, guia=guia)
 
     from .broker import asegurar_broker
 
@@ -637,6 +698,8 @@ def main(argv: list[str] | None = None) -> int:
             argumentos.append("--abrir-navegador")
         if args.stories_dir is not None:
             argumentos += ["--stories-dir", str(args.stories_dir)]
+        if args.guia_sesion is not None:
+            argumentos += ["--guia-sesion", str(args.guia_sesion)]
         return pipeline(argumentos + resto)
     finally:
         for proceso in arrancados:

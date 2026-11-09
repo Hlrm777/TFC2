@@ -42,9 +42,11 @@ mirado, los pesos reentrenados y la regla suave del enojo
 Con ``--narracion`` hace la sesión del P10, en dos grabaciones, y antes de cada
 una enseña su tabla: ``p10_sin_interfaz`` (solo ``main.py``, la referencia de
 los fps) y ``p10_narracion`` (la interfaz en el navegador, con todas las teclas
-ahí). Al final pregunta qué teclas funcionaron y qué vista prefiere el
-operador, y analiza con los criterios del plan. Con ``--guia`` solo enseña las
-tablas, para leerlas con calma antes.
+ahí). En la segunda, la página enseña arriba la instrucción de cada etiqueta
+(``--guia-sesion``), para no tener que volver a la terminal. Al final pregunta
+qué teclas funcionaron y qué vista prefiere el operador, y analiza con los
+criterios del plan. Con ``--guia`` solo enseña las tablas, para leerlas con
+calma antes; con ``--ensayo``, la segunda grabación sin cámara ni grabar nada.
 
 Uso, desde la raíz del repositorio::
 
@@ -55,6 +57,7 @@ Uso, desde la raíz del repositorio::
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --confirmar
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --narracion
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --narracion --guia   # solo las tablas
+    .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --narracion --ensayo # sin camara
     .venv\\Scripts\\python.exe tools\\sesion_verificacion.py --analizar      # rehace el informe
 """
 
@@ -62,9 +65,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -832,9 +837,14 @@ CABECERA_P10_SIN_INTERFAZ = (
     "de etiqueta (la 0 empieza sola). Las etiquetas 2 a 13 son de la SEGUNDA grabación.")
 CABECERA_P10_NARRACION = (
     "SEGUNDA GRABACIÓN, con la interfaz de narración: TODAS las teclas en el navegador.\n"
-    "ESPACIO pasa de etiqueta (la 0 empieza sola); la etiqueta en curso sale abajo en\n"
-    "la página: «Grabando · etiqueta N». La ventana de Python también se abre: déjala,\n"
-    "sin hacer clic en ella. Si el navegador no queda delante, haz clic una vez en el libro.")
+    "ESPACIO pasa de etiqueta (la 0 empieza sola). Esta misma tabla sale ARRIBA en la\n"
+    "página, etiqueta por etiqueta y con el tiempo que llevas: no hace falta volver a\n"
+    "esta terminal (si haces clic en ella, las teclas dejan de llegar al navegador hasta\n"
+    "que hagas clic en el libro). La ventana de Python también se abre: déjala, sin\n"
+    "hacer clic en ella. Si el navegador no queda delante, haz clic una vez en el libro.")
+
+#: El título de la franja de guía en la página.
+TITULO_GUIA_P10 = "Sesión p10 · segunda grabación"
 
 #: Ancho de las tablas del P10 en la terminal.
 ANCHO_P10 = 88
@@ -844,6 +854,31 @@ def rutas_p10(base: Path) -> tuple[Path, Path]:
     """Las dos grabaciones del P10: sin la interfaz y con ella."""
     return (base.with_name(base.name + "_sin_interfaz.csv"),
             base.with_name(base.name + "_narracion.csv"))
+
+
+def guia_p10_datos(protocolo=PROTOCOLO_P10_NARRACION) -> dict:
+    """La guía que la página enseña arriba (``--guia-sesion``), etiqueta por
+    etiqueta: la misma tabla que la terminal."""
+    return {"titulo": TITULO_GUIA_P10,
+            "etiquetas": [{"etiqueta": etiqueta, "que": que, "segundos": segundos, "robot": robot}
+                          for etiqueta, que, segundos, robot in protocolo]}
+
+
+def _escribir_guia() -> Path:
+    """La guía en un JSON temporal, para pasárselo a ``control_panel``."""
+    with tempfile.NamedTemporaryFile("wb", suffix="_guia_p10.json", delete=False) as f:
+        f.write(json.dumps(guia_p10_datos(), ensure_ascii=False, indent=1).encode("utf-8"))
+    return Path(f.name)
+
+
+def _ensayo_p10(abrir: bool = True) -> int:
+    """La segunda grabación sin cámara: la demo de la interfaz con la franja de
+    guía. No graba nada ni necesita el broker."""
+    from telmeow_teleop.control_panel import ejecutar_demo, guia_desde_datos
+
+    print("\nENSAYO de la segunda grabación, sin cámara: la interfaz con la guía arriba.\n"
+          "Nada se graba. Para salir, q dos veces en el navegador (o Ctrl-C aquí).\n")
+    return ejecutar_demo(abrir=abrir, guia=guia_desde_datos(guia_p10_datos()))
 
 
 def guia_p10() -> str:
@@ -1079,7 +1114,12 @@ def _sesion_narracion(base: Path, py: str, entrada=None) -> None:
         print(tabla_protocolo(PROTOCOLO_P10_NARRACION, cabecera=CABECERA_P10_NARRACION, ancho=ANCHO_P10))
         _esperar("Lee la tabla. Al seguir se abre la ventana de Python y, unos segundos después,\n"
                  "  el navegador: desde ahí, todo con el navegador delante.")
-        subprocess.run([py, "-m", "telmeow_teleop.control_panel", "--record", str(con)], cwd=PROJECT_ROOT)
+        guia = _escribir_guia()
+        try:
+            subprocess.run([py, "-m", "telmeow_teleop.control_panel", "--record", str(con),
+                            "--guia-sesion", str(guia)], cwd=PROJECT_ROOT)
+        finally:
+            guia.unlink(missing_ok=True)
         preguntar_p10(base, entrada)
 
 
@@ -1109,6 +1149,9 @@ def main(argv: list[str] | None = None) -> int:
     modo.add_argument("--narracion", action="store_true", help="la del P10: sin y con la interfaz de narracion")
     parser.add_argument("--analizar", action="store_true", help="solo el informe, sin grabar")
     parser.add_argument("--guia", action="store_true", help="solo las tablas del protocolo, sin grabar")
+    parser.add_argument("--ensayo", action="store_true",
+                        help="con --narracion: la segunda grabacion sin camara, con la guia en la pagina")
+    parser.add_argument("--sin-navegador", action="store_true", help="con --ensayo: no abrir el navegador")
     args = parser.parse_args(argv)
     modo_ = ("gestos" if args.gestos else "ajustes" if args.ajustes else "entrenar" if args.entrenar
              else "confirmar" if args.confirmar else "narracion" if args.narracion else "")
@@ -1124,6 +1167,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.guia:
         print(guia_p10() if modo_ == "narracion" else tabla_protocolo(protocolo))
         return 0
+    if args.ensayo:
+        if modo_ != "narracion":
+            parser.error("--ensayo es de la sesion del P10: --narracion --ensayo")
+        return _ensayo_p10(abrir=not args.sin_navegador)
 
     if args.analizar:
         informe = analisis(base)

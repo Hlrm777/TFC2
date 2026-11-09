@@ -152,7 +152,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1595 pruebas en verde** (desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 29 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1610 pruebas en verde** (desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 44 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -4506,16 +4506,31 @@ llegó como tecla aparte, así que se confirma con el teclado en la sesión
   prefiere el operador (`p10_respuestas.csv`) y analiza con los criterios de
   abajo (`p10_informe.txt`). Una grabación que ya existe solo se repite si se
   pide. `--guia` enseña las tablas sin grabar.
+- **La guía, también dentro de la página** (2026-11-08, decisión del operador:
+  leer la tabla en la terminal y volver al navegador no le daba tiempo, y un clic
+  en la terminal le quita las teclas al navegador). En la segunda grabación la
+  página enseña arriba, en una franja, la instrucción de la etiqueta en curso,
+  cuánto lleva («12 s de 20», y «ya puedes pasar» al cumplirse) y qué debe
+  pasar. La herramienta escribe la tabla en un JSON temporal y se lo pasa a
+  `control_panel` (`--guia-sesion`); `main.py` lo lee antes de abrir la cámara y
+  el servidor añade la etiqueta en curso a `/api/estado` mientras se graba. Al
+  narrar de verdad no hay guía y la franja no existe. `--ensayo` abre la
+  segunda grabación sin cámara ni grabar nada, con la franja, para ensayarla
+  (config `ensayo-p10` del navegador integrado; comprobada a 1366×768: la
+  etiqueta 5, la más larga, cabe en dos líneas y el botón «Vista» sigue a la
+  vista).
 
-**1595 pruebas en verde** tras el P10 (146 nuevas: el envío de página y gesto,
+**1610 pruebas en verde** tras el P10 (161 nuevas: el envío de página y gesto,
 la lista de cuentos, cada orden del navegador frente a su tecla, el servidor de
 verdad en un puerto libre —estado, órdenes válidas e inválidas, PDF, rutas con
 `..`, el MJPEG—, el broker, el comando de la sesión y el HTML: la tabla de
 teclas de JavaScript igual a la de Python, el módulo último y el importmap
 intacto para `barrido_colisiones.mjs`, y que todo lo que la página pide lo sirve
-el servidor; y 29 de la guía de la sesión: el protocolo frente a la tabla de
-teclas, el informe con sesiones fabricadas que cumplen y que no, y el orden
-tabla → grabación).
+el servidor; y 44 de la guía de la sesión: el protocolo frente a la tabla de
+teclas, el informe con sesiones fabricadas que cumplen y que no, el orden
+tabla → grabación, y la franja de la página —la guía que escribe la herramienta
+es la que lee el servidor, la etiqueta en curso en el estado y ESPACIO
+pasándola, una guía rota que para antes de abrir la cámara—).
 
 ### Lo que no se hace del enunciado, y por qué
 
@@ -4563,17 +4578,21 @@ tabla → grabación).
 ### La sesión con el operador — el protocolo (p10; comprueba también el P7.8 en vivo)
 
 Un solo comando, como las sesiones del P7. Antes de cada grabación enseña su
-tabla en la terminal; al acabar, pregunta qué teclas funcionaron y qué vista
-prefiere el operador, y deja el informe en `p10_informe.txt`:
+tabla en la terminal, y en la segunda la página la enseña además arriba,
+etiqueta por etiqueta y con el tiempo que lleva; al acabar, pregunta qué teclas
+funcionaron y qué vista prefiere el operador, y deja el informe en
+`p10_informe.txt`:
 
 ```
 .venv\Scripts\python.exe tools\sesion_verificacion.py --narracion
-.venv\Scripts\python.exe tools\sesion_verificacion.py --narracion --guia   # solo las tablas, para leerlas antes
+.venv\Scripts\python.exe tools\sesion_verificacion.py --narracion --guia     # solo las tablas, para leerlas antes
+.venv\Scripts\python.exe tools\sesion_verificacion.py --narracion --ensayo   # la segunda, sin camara ni grabar
 ```
 
 Buena luz, y el comando comprueba antes que haya un solo broker (§4.1). Son dos
-grabaciones, y en las dos la etiqueta 0 (la calibración) empieza sola y ESPACIO
-pasa a la siguiente:
+grabaciones, una detrás de otra y en las mismas condiciones (la misma luz y el
+cargador puesto): el primer criterio compara sus fps. En las dos la etiqueta 0
+(la calibración) empieza sola y ESPACIO pasa a la siguiente:
 
 1. **`p10_sin_interfaz.csv`**: solo `main.py`, como en el P7, con las teclas en
    su ventana. Es la referencia de los fps.
@@ -5962,6 +5981,7 @@ l.abierto ; l.historia ; l.pagina ; l.total
 from telmeow_teleop.control_panel import ServidorInterfaz, EmisorVideo, estado_interfaz
 
 s = ServidorInterfaz(CARPETA_VISOR, Biblioteca(...), puerto=8001)  # 0 = uno libre; OSError si ocupado
+s = ServidorInterfaz(..., guia=leer_guia("guia.json"))  # sesiones de verificación: la etiqueta en curso en el estado
 s.arrancar() ; s.parar() ; s.url ; s.puerto
 s.emisor.entregar(frame_bgr)   # cada frame: solo guarda la referencia
 s.pendientes() -> [Orden]      # lo que pidió la página desde la última vez
@@ -5972,7 +5992,9 @@ Rutas: `/` (al modo narración), `/api/estado`, `POST /api/orden`,
 `/api/historias`, `/historias/<nombre>`, `/video.mjpg`, y la carpeta del visor.
 Solo en `127.0.0.1`; rechaza hosts ajenos, órdenes de otro origen y las que no
 son JSON. `python -m telmeow_teleop.control_panel [--demo] [--puerto N]
-[--sin-navegador] [--stories-dir D] [args de main]`.
+[--sin-navegador] [--stories-dir D] [--guia-sesion JSON] [args de main]`.
+`guia_desde_datos(datos)` / `leer_guia(ruta)` validan la guía (`ValueError` con
+el motivo) y `guia_de(guia, etiqueta)` da lo que la página enseña.
 
 ## `broker.py` (P10)
 

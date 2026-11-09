@@ -430,3 +430,83 @@ def test_el_comando_apaga_el_broker_que_levanto(comando):
     comando["lanza"] = True
     assert cp.main([]) == 0
     assert comando["terminados"] == 1
+
+
+# --------------------------------------------------------------------------
+# La guía de una sesión de verificación (--guia-sesion)
+# --------------------------------------------------------------------------
+
+GUIA = {"titulo": "Sesion de prueba", "etiquetas": [
+    {"etiqueta": 0, "que": "Cara relajada", "segundos": 10, "robot": "calibra"},
+    {"etiqueta": 1, "que": "Habla", "segundos": 60, "robot": "sigue la cabeza"},
+]}
+
+
+def test_la_guia_se_lee_y_se_valida(tmp_path):
+    ruta = tmp_path / "guia.json"
+    ruta.write_text(json.dumps(GUIA), encoding="utf-8")
+    guia = cp.leer_guia(ruta)
+    assert guia["ultima"] == 1 and guia["etiquetas"][1]["que"] == "Habla"
+    ruta.write_text("{no es json", encoding="utf-8")
+    with pytest.raises(ValueError, match="no se pudo leer"):
+        cp.leer_guia(ruta)
+    with pytest.raises(ValueError, match="no tiene etiquetas"):
+        cp.guia_desde_datos({"etiquetas": []})
+    with pytest.raises(ValueError, match="mal escrita"):
+        cp.guia_desde_datos({"etiquetas": [{"etiqueta": "x", "que": "a"}]})
+    with pytest.raises(ValueError, match="no se pudo leer"):
+        cp.leer_guia(tmp_path / "no_existe.json")
+
+
+def test_pasada_la_ultima_etiqueta_la_guia_dice_como_acabar():
+    guia = cp.guia_desde_datos(GUIA)
+    assert cp.guia_de(guia, 0)["que"] == "Cara relajada"
+    fuera = cp.guia_de(guia, 2)
+    assert "q dos veces" in fuera["que"] and fuera["ultima"] == 1 and fuera["segundos"] == 0
+
+
+def _estado(grabando, etiqueta):
+    return cp.estado_interfaz(enlace=True, grabando=grabando, etiqueta=etiqueta)
+
+
+@pytest.mark.parametrize("guia, grabando, etiqueta, que", [
+    (GUIA, True, 1, "Habla"),
+    (GUIA, False, 1, None),          # sin grabar no hay guía
+    (None, True, 1, None),           # al narrar de verdad no hay guía
+])
+def test_el_estado_lleva_la_guia_de_la_etiqueta_en_curso(tmp_path, guia, grabando, etiqueta, que):
+    servidor = cp.ServidorInterfaz(tmp_path, Biblioteca(tmp_path), puerto=0,
+                                   guia=cp.guia_desde_datos(guia) if guia else None)
+    servidor.arrancar()
+    try:
+        servidor.publicar_estado(_estado(grabando, etiqueta))
+        conexion = http.client.HTTPConnection("127.0.0.1", servidor.puerto, timeout=2)
+        conexion.request("GET", "/api/estado")
+        estado = json.loads(conexion.getresponse().read())
+    finally:
+        servidor.parar()
+    if que is None:
+        assert "guia" not in estado
+    else:
+        assert estado["guia"]["que"] == que and estado["guia"]["etiqueta"] == etiqueta
+        assert estado["guia"]["titulo"] == "Sesion de prueba"
+
+
+def test_la_demo_con_guia_ensena_la_etiqueta_0(tmp_path):
+    servidor = cp.ServidorInterfaz(tmp_path, Biblioteca(tmp_path), puerto=0, guia=cp.guia_desde_datos(GUIA))
+    try:
+        cp._PipelineDemo(servidor).paso(0.0)
+        assert servidor.estado["guia"]["que"] == "Cara relajada"
+    finally:
+        servidor.parar()
+
+
+def test_el_comando_pasa_la_guia_al_pipeline(comando):
+    assert cp.main(["--guia-sesion", "g.json", "--record", "p10.csv"]) == 0
+    assert comando["pipeline"] == ["--interfaz", "8001", "--abrir-navegador", "--guia-sesion", "g.json",
+                                   "--record", "p10.csv"]
+
+
+def test_la_demo_con_una_guia_que_no_vale_no_arranca(tmp_path, capsys):
+    assert cp.main(["--demo", "--guia-sesion", str(tmp_path / "no.json")]) == 1
+    assert "no se pudo leer la guia" in capsys.readouterr().out

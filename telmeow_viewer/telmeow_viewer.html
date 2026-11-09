@@ -141,6 +141,19 @@
   #n-fin{position:fixed;inset:0;z-index:30;background:rgba(5,7,12,.92);align-items:center;justify-content:center;
     font-size:20px;text-align:center;line-height:1.7;display:none}
   #n-fin.visible{display:flex}
+  /* La guía de una sesión de verificación (tools/sesion_verificacion.py): la
+     instrucción de la etiqueta en curso, arriba, para no tener que mirar la
+     terminal. Al narrar de verdad el estado no trae guía y no se ve. */
+  #n-guia{grid-area:guia;display:none;flex-direction:column;gap:4px;padding:9px 16px;
+    background:var(--panel-2);border-bottom:2px solid var(--accent-2)}
+  body.narracion.con-guia{grid-template-rows:auto minmax(0,1fr) minmax(0,1fr) auto;
+    grid-template-areas:"guia guia" "robot libro" "camara libro" "estado controles"}
+  body.narracion.con-guia #n-guia{display:flex}
+  #n-guia .cab{display:flex;gap:16px;align-items:baseline;font-size:12.5px;color:var(--ink-dim)}
+  #n-guia .cab b{color:var(--accent-2);font-size:14px}
+  #n-guia .cab .listo{color:var(--live)}
+  #n-guia .que{font-size:17px;line-height:1.35;min-height:2.7em}
+  #n-guia .robot{font-size:13px;color:var(--ink-dim);min-height:1.35em}
 </style>
 </head>
 <body>
@@ -269,6 +282,12 @@
   <div id="n-libro" class="narr">
     <canvas id="n-pagina"></canvas>
     <div class="vacio" id="n-libro-vacio">Elige un cuento en la lista de abajo.</div>
+  </div>
+  <div id="n-guia" aria-live="polite">
+    <div class="cab"><b id="n-guia-num">Etiqueta —</b><span id="n-guia-tiempo"></span>
+      <span>ESPACIO: siguiente etiqueta</span></div>
+    <div class="que" id="n-guia-que"></div>
+    <div class="robot" id="n-guia-robot"></div>
   </div>
   <div id="n-estado" class="narr">
     <div class="linea"><span class="dot" id="n-robot-dot"></span><b id="n-robot">Conectando con el programa…</b></div>
@@ -1287,7 +1306,7 @@
 
   const narr = { estado:null, fallosEstado:0, pdf:null, nombre:null, pagina:null, pedida:null,
                  cache:new Map(), ficha:0, ultimaPagina:null, confirmarHasta:0,
-                 mqttIniciado:false, vista:'detrás' };
+                 mqttIniciado:false, vista:'detrás', guiaEtiqueta:null, guiaDesde:0 };
 
   function pintarPantallaExterna(){
     // La página real en la pantalla externa del robot 3D: lo que verían los
@@ -1380,7 +1399,24 @@
     }
   }
 
+  // La guía de una sesión de verificación: qué hacer en la etiqueta en curso,
+  // cuánto lleva y qué debe pasar. La manda main.py solo con --guia-sesion.
+  function pintarGuia(g){
+    document.body.classList.toggle('con-guia', !!g);
+    if(!g){ narr.guiaEtiqueta = null; return; }
+    if(g.etiqueta !== narr.guiaEtiqueta){ narr.guiaEtiqueta = g.etiqueta; narr.guiaDesde = performance.now(); }
+    const llevas = Math.floor((performance.now() - narr.guiaDesde) / 1000);
+    const listo = g.segundos > 0 && llevas >= g.segundos;
+    document.getElementById('n-guia-num').textContent = `Etiqueta ${g.etiqueta} de ${g.ultima}`;
+    const tiempo = document.getElementById('n-guia-tiempo');
+    tiempo.textContent = g.segundos > 0 ? `${llevas} s de ${g.segundos}` + (listo ? ' · ya puedes pasar' : '') : '';
+    tiempo.className = listo ? 'listo' : '';
+    document.getElementById('n-guia-que').textContent = g.que;
+    document.getElementById('n-guia-robot').textContent = g.robot ? 'Qué debe pasar: ' + g.robot : '';
+  }
+
   function pintarEstado(e){
+    pintarGuia(e.guia);
     const robot = e.robot || {clave:'sin_enlace', texto:'—'};
     document.getElementById('n-robot').textContent = robot.texto;
     document.getElementById('n-robot-dot').className = 'dot' +

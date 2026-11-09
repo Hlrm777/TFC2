@@ -1519,3 +1519,46 @@ def test_el_informe_de_la_sesion_de_verificacion(pipeline, monkeypatch):
     assert "Cara tapada (etiqueta 11)" in informe
     assert "la guarda actuo en" in informe
     assert "Tasas:" in informe
+
+
+
+def test_con_guia_la_pagina_recibe_la_instruccion_de_la_etiqueta(pipeline, monkeypatch, tmp_path):
+    """--guia-sesion: el estado que lee la página lleva la instrucción de la
+    etiqueta en curso; ESPACIO la pasa a la siguiente."""
+    import json
+
+    import telmeow_teleop.control_panel as cp
+
+    ruta = tmp_path / "guia.json"
+    ruta.write_text(json.dumps({"titulo": "p", "etiquetas": [
+        {"etiqueta": 0, "que": "Quieto", "segundos": 5, "robot": "calibra"},
+        {"etiqueta": 1, "que": "Habla", "segundos": 60, "robot": ""}]}), encoding="utf-8")
+    vistos = []
+
+    class Interfaz(cp.ServidorInterfaz):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            creados.append(self)
+
+        def publicar_estado(self, estado):
+            super().publicar_estado(estado)
+            vistos.append(self.estado.get("guia", {}).get("que"))
+
+    creados = []
+    monkeypatch.setattr(cp, "ServidorInterfaz", Interfaz)
+    espacio = principal.Orden("etiqueta", origen="navegador")
+    assert pipeline.correr(argv=["--interfaz", "0", "--guia-sesion", str(ruta),
+                                 "--record", str(tmp_path / "s.csv")],
+                           frames=4, ordenes=[[], [espacio], [], []]) == 0
+    assert vistos == ["Quieto", "Habla", "Habla", "Habla"]
+
+
+def test_una_guia_que_no_vale_para_antes_de_abrir_la_camara(pipeline, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(principal, "abrir_camara", lambda *a, **k: pytest.fail("no debe abrir la camara"))
+    assert principal.main(["--interfaz", "0", "--guia-sesion", str(tmp_path / "no.json")]) == 1
+    assert "no se pudo leer la guia" in capsys.readouterr().out
+
+
+def test_la_guia_sin_interfaz_es_un_error_de_uso(tmp_path):
+    with pytest.raises(SystemExit):
+        principal.main(["--guia-sesion", str(tmp_path / "g.json")])

@@ -8,6 +8,7 @@ doble broker, el protocolo que se enseña, y las cifras del informe.
 from __future__ import annotations
 
 import csv
+import json
 import math
 import sys
 from pathlib import Path
@@ -466,7 +467,14 @@ def test_la_sesion_del_p10_ensena_cada_tabla_antes_de_su_grabacion(monkeypatch, 
     monkeypatch.setattr(sv, "asegurar_broker", lambda arrancados, **k: True)
     eventos = []
     monkeypatch.setattr(sv.subprocess, "Popen", lambda *a, **k: pytest.fail("ni visor ni monitor"))
-    monkeypatch.setattr(sv.subprocess, "run", lambda args, **k: eventos.append(("run", args)))
+    guias = []
+
+    def correr(args, **k):
+        eventos.append(("run", args))
+        if "--guia-sesion" in args:
+            ruta = Path(args[args.index("--guia-sesion") + 1])
+            guias.append((ruta, json.loads(ruta.read_text(encoding="utf-8"))))
+    monkeypatch.setattr(sv.subprocess, "run", correr)
     responder = _respondedor(RESPUESTAS_BUENAS)
 
     def entrada(prompt=""):
@@ -477,8 +485,12 @@ def test_la_sesion_del_p10_ensena_cada_tabla_antes_de_su_grabacion(monkeypatch, 
     assert sv.main(["--narracion"]) == 0
     lanzados = [args for tipo, args in eventos if tipo == "run"]
     assert lanzados[0][1:] == ["-m", "telmeow_teleop.main", "--record", str(tmp_path / "p10_sin_interfaz.csv")]
-    assert lanzados[1][1:] == ["-m", "telmeow_teleop.control_panel", "--record",
-                               str(tmp_path / "p10_narracion.csv")]
+    assert lanzados[1][1:5] == ["-m", "telmeow_teleop.control_panel", "--record",
+                                str(tmp_path / "p10_narracion.csv")]
+    # La segunda lleva la guía para la página, y el JSON temporal se borra al acabar.
+    (ruta, datos), = guias
+    assert datos == sv.guia_p10_datos()
+    assert not ruta.exists()
     # Lo impreso antes de cada grabación es su tabla.
     antes = [i for i, (tipo, _) in enumerate(eventos) if tipo == "run"]
     impreso_antes = ["".join(texto for tipo, texto in eventos[:i] if tipo == "tabla") for i in antes]
@@ -497,3 +509,33 @@ def test_una_grabacion_que_ya_existe_solo_se_repite_si_se_pide(monkeypatch, tmp_
     monkeypatch.setattr("builtins.input", lambda prompt="": "n" if "Ya existe" in prompt else responder(prompt))
     sv._sesion_narracion(tmp_path / "p10", "python")
     assert [args[2] for args in lanzados] == ["telmeow_teleop.control_panel"]
+
+
+def test_la_guia_de_la_pagina_es_la_tabla_de_la_terminal_y_la_lee_el_servidor():
+    """Dos caminos: la herramienta escribe la guía y control_panel la lee."""
+    from telmeow_teleop.control_panel import guia_de, guia_desde_datos
+
+    datos = sv.guia_p10_datos()
+    assert [(e["etiqueta"], e["que"], e["segundos"], e["robot"]) for e in datos["etiquetas"]] == \
+        list(sv.PROTOCOLO_P10_NARRACION)
+    guia = guia_desde_datos(json.loads(json.dumps(datos, ensure_ascii=False)))
+    assert guia["ultima"] == len(sv.PROTOCOLO_P10_NARRACION) - 1
+    assert guia_de(guia, 5)["que"] == sv.PROTOCOLO_P10_NARRACION[5][1]
+
+
+def test_el_ensayo_es_la_demo_con_la_guia_y_sin_broker(monkeypatch):
+    import telmeow_teleop.control_panel as cp
+
+    llamadas = []
+    monkeypatch.setattr(cp, "ejecutar_demo", lambda **k: llamadas.append(k) or 0)
+    monkeypatch.setattr(sv, "asegurar_broker", lambda *a, **k: pytest.fail("el ensayo no usa el broker"))
+    monkeypatch.setattr(sv.subprocess, "run", lambda *a, **k: pytest.fail("el ensayo no lanza nada"))
+    assert sv.main(["--narracion", "--ensayo", "--sin-navegador"]) == 0
+    (k,) = llamadas
+    assert k["abrir"] is False
+    assert k["guia"]["etiquetas"][13]["que"] == sv.PROTOCOLO_P10_NARRACION[13][1]
+
+
+def test_el_ensayo_solo_es_de_la_sesion_del_p10():
+    with pytest.raises(SystemExit):
+        sv.main(["--ensayo"])

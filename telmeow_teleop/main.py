@@ -1317,6 +1317,12 @@ def _parser() -> argparse.ArgumentParser:
         help="Con --interfaz: abre el navegador en cuanto aparece la ventana de "
              "OpenCV, para que el navegador quede delante.",
     )
+    propios.add_argument(
+        "--guia-sesion", metavar="JSON", type=Path,
+        help="Con --interfaz y --record: la instrucción de cada etiqueta, que la "
+             "página enseña arriba (sesiones de verificación; la escribe "
+             "tools/sesion_verificacion.py).",
+    )
     add_cli_args(parser)
     return parser
 
@@ -1368,6 +1374,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.guardar_recortes is not None and not args.record:
         parser.error("--guardar-recortes necesita --record: el CSV dice qué recorte es cada fila")
+    guia = None
+    if args.guia_sesion is not None:
+        if args.interfaz is None:
+            parser.error("--guia-sesion necesita --interfaz: la guía la enseña la página")
+        from .control_panel import leer_guia
+
+        try:
+            guia = leer_guia(args.guia_sesion)
+        except ValueError as exc:
+            # Antes de abrir la cámara: una sesión de verificación sin su guía no vale.
+            print(exc)
+            return 1
     cfg = _aplicar_broker(from_args(args, AppConfig.from_env()), args.broker)
     if not cfg.camera.flip:
         # Los brazos y la emoción saben si el frame viene volteado; el head
@@ -1440,7 +1458,7 @@ def main(argv: list[str] | None = None) -> int:
             hilo.arrancar()
 
         if args.interfaz is not None:
-            interfaz = _crear_interfaz(cfg, args.interfaz)
+            interfaz = _crear_interfaz(cfg, args.interfaz, guia)
             if interfaz is None:
                 return 1
             print(f"Interfaz de narracion en {interfaz.url} (cuentos de "
@@ -1476,7 +1494,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _crear_interfaz(cfg: AppConfig, puerto: int):
+def _crear_interfaz(cfg: AppConfig, puerto: int, guia: dict | None = None):
     """El servidor de la interfaz de narración (P10), ya arrancado, o ``None``
     si el puerto está ocupado (otra sesión abierta)."""
     # Aquí y no arriba: sin --interfaz no se carga nada de esto.
@@ -1484,7 +1502,7 @@ def _crear_interfaz(cfg: AppConfig, puerto: int):
 
     try:
         interfaz = ServidorInterfaz(CARPETA_VISOR, Biblioteca(cfg.paths.stories_dir),
-                                    puerto=puerto)
+                                    puerto=puerto, guia=guia)
     except OSError as exc:
         print(f"No se pudo abrir la interfaz en el puerto {puerto} ({exc}). "
               f"Hay otra sesion abierta?")

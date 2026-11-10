@@ -65,7 +65,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from telmeow_teleop.emotion_classifier import NEUTRAL, voto_con_cabeceo  # noqa: E402
+from telmeow_teleop.config import EMOTION_LABELS  # noqa: E402
+from telmeow_teleop.emotion_classifier import NEUTRAL, voto_del_modelo  # noqa: E402
 from telmeow_teleop.filters import ClassHysteresis  # noqa: E402
 
 #: Lo que tiene que enseñar el robot en cada etiqueta del protocolo del P6.1
@@ -184,6 +185,9 @@ def cargar(ruta: Path) -> list[dict]:
         fila["enojo_desde"] = float(fila.get("enojo_desde") or 2.0)
         # 'mirada_fuera' llegó el 2026-11-08 (P7.8): esa cara no votó.
         fila["mirada_fuera"] = int(fila.get("mirada_fuera") or 0)
+        # 'segunda_tras_enojo' llegó el 2026-11-10 (P10.1); antes un enojo
+        # descartado por el cabeceo votaba siempre neutral (0).
+        fila["segunda_tras_enojo"] = int(fila.get("segunda_tras_enojo") or 0)
     return filas
 
 
@@ -221,16 +225,23 @@ def voto(fila: dict) -> tuple[str, float] | None:
     y con rostro tampoco vota si ganó una clase sin equivalente (``prediccion``
     vacía), ni si había una mano sobre la cara (``manos``), ni si la cara se
     usó para calibrar la neutra (``calibrando``). Y desde el P7.6 el enojo con
-    la cabeza baja vota neutral si no llega a su umbral (``voto_con_cabeceo``).
+    la cabeza baja vota neutral si no llega a su umbral, o la segunda opción
+    del modelo con su probabilidad si la fila lleva ``segunda_tras_enojo``
+    (``voto_del_modelo``).
     """
     if not fila["rostro"] or not fila["prediccion"] or fila["confianza_pred"] is None:
         return None
     if fila.get("manos") or fila.get("calibrando") or fila.get("mirada_fuera"):
         return None
-    etiqueta = voto_con_cabeceo(
-        fila["prediccion"], fila["confianza_pred"], fila.get("cabeceo"),
-        fila["min_confidence"], fila.get("enojo_por_grado") or 0.0, fila.get("enojo_desde", 2.0))
-    return etiqueta, fila["confianza_pred"]
+    probabilidades = None
+    if fila.get("segunda_tras_enojo"):
+        crudas = {e: fila.get(f"p_{e}") for e in EMOTION_LABELS}
+        if all(v not in (None, "") for v in crudas.values()):
+            probabilidades = {e: float(v) for e, v in crudas.items()}
+    return voto_del_modelo(
+        fila["prediccion"], fila["confianza_pred"], probabilidades, fila.get("cabeceo"),
+        fila["min_confidence"], fila.get("enojo_por_grado") or 0.0, fila.get("enojo_desde", 2.0),
+        bool(fila.get("segunda_tras_enojo")))
 
 
 def reproducir(

@@ -789,6 +789,13 @@ class EmotionConfig:
     antes de grabarla (``tools/confirmar_p78.py``): el enojo mirando abajo pasa
     del 3 al 46 %, el neutral mirando abajo sigue al 100 % y ningún otro tramo
     cae (el enojo al frente sube de 79 a 88 %).
+
+    ``segunda_tras_enojo`` (P10.1, H70, 2026-11-10): cuando esa regla descarta
+    un enojo, el voto va a la segunda opción del modelo con su probabilidad, y
+    no a neutral. En la sesión p10 la sonrisa leyendo con la cabeza 10-16°
+    abajo empataba con el enojo (0.45 frente a 0.47), y al descartarlo se
+    quedaba en neutral: feliz el 25 % del tramo. Las cifras reproducidas, en
+    ``tools/simular_segunda_opcion.py``. ``False`` la apaga.
     """
 
     backend: str = "combinado"
@@ -803,6 +810,7 @@ class EmotionConfig:
     umbral_cejas: float = 0.15
     enojo_por_grado: float = 0.015
     enojo_desde: float = 2.0
+    segunda_tras_enojo: bool = True
     # P7.8 (decidido por el operador el 2026-11-08): con la cabeza más de 8°
     # abajo o 20° a un lado el modelo deja de leer la expresión (la
     # tristeza, del 98 % a nivel al 42 % entre 8 y 15° abajo, en p77 y p78), así
@@ -841,6 +849,8 @@ class EmotionConfig:
             umbral_cejas=_env_float(env, "EMOTION_UMBRAL_CEJAS", cls.umbral_cejas),
             enojo_por_grado=_env_float(env, "EMOTION_ENOJO_POR_GRADO", cls.enojo_por_grado),
             enojo_desde=_env_float(env, "EMOTION_ENOJO_DESDE", cls.enojo_desde),
+            segunda_tras_enojo=_env_bool(
+                env, "EMOTION_SEGUNDA_TRAS_ENOJO", cls.segunda_tras_enojo),
             mirada_abajo=_env_float(env, "EMOTION_MIRADA_ABAJO", cls.mirada_abajo),
             mirada_arriba=_env_float(env, "EMOTION_MIRADA_ARRIBA", cls.mirada_arriba),
             mirada_lado=_env_float(env, "EMOTION_MIRADA_LADO", cls.mirada_lado),

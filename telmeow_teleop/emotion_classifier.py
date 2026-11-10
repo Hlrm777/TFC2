@@ -405,6 +405,32 @@ def voto_con_cabeceo(etiqueta: str, confianza: float, cabeceo: float | None,
     return NEUTRAL if confianza < umbral else etiqueta
 
 
+def voto_del_modelo(etiqueta: str, confianza: float, probabilidades: Mapping[str, float] | None,
+                    cabeceo: float | None, min_confidence: float, por_grado: float,
+                    desde: float, segunda: bool) -> tuple[str, float]:
+    """El voto ``(etiqueta, confianza)`` que da una predicción a la histéresis.
+
+    Es ``voto_con_cabeceo`` más la regla de la segunda opción (P10.1, H70): si
+    el cabeceo descarta el enojo y ``segunda`` está puesta, el voto no va a
+    neutral sino a la expresión que el modelo tenía de segunda, con SU
+    probabilidad. En la sesión p10 el operador sonreía leyendo con la cabeza 10
+    a 16° abajo: el modelo empataba entre feliz (0.45) y enojado (0.47), el
+    enojo se descartaba, y la sonrisa se perdía en neutral (feliz el 25 % del
+    tramo). Con un neutral de verdad la segunda opción es neutral, así que
+    para él no cambia nada. Sin ``probabilidades`` (o sin ``segunda``) vota
+    como antes: neutral con la confianza del enojo. Pública por lo mismo que
+    ``voto_con_cabeceo``: la reproducción offline tiene que votar igual.
+    """
+    voto = voto_con_cabeceo(etiqueta, confianza, cabeceo, min_confidence, por_grado, desde)
+    if voto == etiqueta or not segunda or not probabilidades:
+        return voto, confianza
+    resto = {e: float(p) for e, p in probabilidades.items() if e != etiqueta}
+    if not resto:
+        return voto, confianza
+    mejor = max(resto, key=resto.get)
+    return mejor, resto[mejor]
+
+
 def mano_sobre_rostro(puntos, rect, margen: float = MARGEN_MANOS) -> bool:
     """Si algún punto de mano ``(x, y)`` cae en la caja del rostro ampliada.
 
@@ -930,6 +956,8 @@ class EmotionClassifier:
         enojo_por_grado, enojo_desde: el enojo pide más confianza con la cabeza
             baja (``voto_con_cabeceo``). Solo actúa si ``process`` recibe el
             cabeceo; 0 lo desactiva.
+        segunda_tras_enojo: si el cabeceo descarta un enojo, vota la segunda
+            opción del modelo en vez de neutral (``voto_del_modelo``).
     """
 
     def __init__(
@@ -951,6 +979,7 @@ class EmotionClassifier:
         neutral_sin_apoyo_s: float = NEUTRAL_SIN_APOYO_S,
         enojo_por_grado: float = 0.0,
         enojo_desde: float = 2.0,
+        segunda_tras_enojo: bool = False,
         mirada_abajo: float = -8.0,
         mirada_arriba: float = 15.0,
         mirada_lado: float = 20.0,
@@ -964,6 +993,7 @@ class EmotionClassifier:
         self.calibracion_s = float(calibracion_s)
         self.enojo_por_grado = float(enojo_por_grado)
         self.enojo_desde = float(enojo_desde)
+        self.segunda_tras_enojo = bool(segunda_tras_enojo)
         self._cabeceo: float | None = None
         self.mirada_abajo, self.mirada_arriba = float(mirada_abajo), float(mirada_arriba)
         self.mirada_lado, self.mirada_fuera_s = float(mirada_lado), float(mirada_fuera_s)
@@ -1031,6 +1061,7 @@ class EmotionClassifier:
             neutral_sin_apoyo_s=cfg.emotion.neutral_sin_apoyo_s,
             enojo_por_grado=cfg.emotion.enojo_por_grado,
             enojo_desde=cfg.emotion.enojo_desde,
+            segunda_tras_enojo=cfg.emotion.segunda_tras_enojo,
             mirada_abajo=cfg.emotion.mirada_abajo,
             mirada_arriba=cfg.emotion.mirada_arriba,
             mirada_lado=cfg.emotion.mirada_lado,
@@ -1339,10 +1370,12 @@ class EmotionClassifier:
                 self._ultima = distribucion
                 self._mirada_fuera = not self._manos and self._mirando_fuera(ahora)
                 if distribucion.etiqueta is not None and not self._manos and not self._mirada_fuera:
-                    voto = voto_con_cabeceo(
-                        distribucion.etiqueta, distribucion.confianza, self._cabeceo,
-                        self._histeresis.min_confidence, self.enojo_por_grado, self.enojo_desde)
-                    self._histeresis.update(voto, distribucion.confianza)
+                    voto, confianza = voto_del_modelo(
+                        distribucion.etiqueta, distribucion.confianza,
+                        distribucion.probabilidades, self._cabeceo,
+                        self._histeresis.min_confidence, self.enojo_por_grado, self.enojo_desde,
+                        self.segunda_tras_enojo)
+                    self._histeresis.update(voto, confianza)
         self._latencia_ms = (time.perf_counter() - inicio) * 1000.0
 
     def _cara_no_utilizable(self, ahora: float) -> None:
@@ -1397,7 +1430,10 @@ _COLUMNAS_CSV = (
        "cabeceo", "enojo_por_grado", "enojo_desde",
        # Desde el 2026-11-08 (P7.8): el giro y si la cara no votó por estar
        # mirando fuera de la pantalla (_mirando_fuera).
-       "giro", "mirada_fuera"]
+       "giro", "mirada_fuera",
+       # Desde el 2026-11-10 (P10.1): si un enojo descartado por el cabeceo
+       # votó la segunda opción del modelo (voto_del_modelo).
+       "segunda_tras_enojo"]
 )
 #: Las mismas columnas, con nombre público para el pipeline integrado (P7).
 COLUMNAS_CSV = _COLUMNAS_CSV
@@ -1442,7 +1478,7 @@ def _fila_csv(t, etiqueta, clasificador: EmotionClassifier, brillo: float,
            "" if clasificador.cabeceo is None else f"{clasificador.cabeceo:.2f}",
            f"{clasificador.enojo_por_grado:g}", f"{clasificador.enojo_desde:g}",
            "" if clasificador.giro is None else f"{clasificador.giro:.2f}",
-           int(clasificador.mirada_fuera)]
+           int(clasificador.mirada_fuera), int(clasificador.segunda_tras_enojo)]
     )
 
 

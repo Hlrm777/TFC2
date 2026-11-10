@@ -117,6 +117,34 @@ def test_en_automatico_no_se_fija_ningun_valor_manual(cv2_falso):
     assert camera.cv2.CAP_PROP_EXPOSURE not in cv2_falso[0].propiedades()
 
 
+def test_la_compensacion_de_contraluz_se_apaga_al_abrir(cv2_falso):
+    """H71: de fábrica viene en 1 y deja la cámara a 15 fps a mitad de sesión.
+    Se pide siempre, porque vive en el driver; y después de la exposición, que
+    es como se midió (``tools/medir_contraluz.py``)."""
+    assert CameraConfig.backlight == 0
+    abrir_camara(CameraConfig())
+    cap = cv2_falso[0]
+    assert cap.valor_de(camera.cv2.CAP_PROP_BACKLIGHT) == 0
+    orden = cap.propiedades()
+    assert orden.index(camera.cv2.CAP_PROP_AUTO_EXPOSURE) < orden.index(camera.cv2.CAP_PROP_BACKLIGHT)
+
+
+def test_la_compensacion_de_contraluz_se_puede_dejar_o_cambiar(cv2_falso):
+    abrir_camara(CameraConfig(backlight=1))
+    assert cv2_falso[0].valor_de(camera.cv2.CAP_PROP_BACKLIGHT) == 1
+    abrir_camara(CameraConfig(backlight=-1))                    # -1: no se toca
+    assert camera.cv2.CAP_PROP_BACKLIGHT not in cv2_falso[1].propiedades()
+    assert CameraConfig.from_env({"TELMEOW_CAMERA_BACKLIGHT": "1"}).backlight == 1
+    assert CameraConfig.from_env({}).backlight == 0
+
+
+def test_describir_dice_la_compensacion_que_concedio_la_camara(cv2_falso):
+    abrir_camara(CameraConfig())
+    cap = cv2_falso[0]
+    cap.valores = {camera.cv2.CAP_PROP_BACKLIGHT: 1.0}          # la cámara no hizo caso
+    assert "contraluz 1" in describir(cap, CameraConfig())
+
+
 def test_los_valores_de_autoexposicion_no_son_uno_y_cero():
     """No son 1/0 y confundirlos deja la cámara ciega sin ningún error.
 

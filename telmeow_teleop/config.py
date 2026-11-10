@@ -306,6 +306,23 @@ class CameraConfig:
     valor es el de la escala de DirectShow, logarítmica y negativa
     (−6 ≈ 1/64 s, −4 ≈ 1/16 s, −2 ≈ 1/4 s); en esta cámara −2 o superior da
     imagen usable y −4 ya sale oscura.
+
+    LA COMPENSACION DE CONTRALUZ, APAGADA (H71)
+    -------------------------------------------
+    ``backlight`` es la compensación de contraluz del driver
+    (``CAP_PROP_BACKLIGHT``), y en la cámara integrada es lo que autoriza a la
+    exposición automática a alargarse más allá de 1/30 s. De fábrica viene en
+    1, y con la luz normal del puesto eso deja la cámara al filo: en la sesión
+    p10 (2026-11-10) pasó sola de 30 a 15 fotos por segundo cuando el brazo del
+    operador oscureció la escena, y no volvió en 8 minutos. Medido ese día
+    (``tools/medir_contraluz.py``, cinco tandas alternadas): 15.0 fps con 1 y
+    30.0 con 0, a cambio de una imagen unos 30 niveles más oscura (brillo ~115
+    frente a ~145) y con algo más de grano.
+
+    Por defecto **0**, decidido por el operador el 2026-11-10, y se pide
+    siempre al abrir, como la exposición y por lo mismo: el ajuste vive en el
+    driver y lo hereda el siguiente programa. ``-1`` no la toca (deja lo que
+    haya), y ``TELMEOW_CAMERA_BACKLIGHT=1`` vuelve al valor de fábrica.
     """
 
     index: int = 0
@@ -317,6 +334,7 @@ class CameraConfig:
     fourcc: str = "MJPG"
     auto_exposure: bool = True
     exposure: float = -4.0
+    backlight: int = 0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "CameraConfig":
@@ -330,6 +348,7 @@ class CameraConfig:
             fourcc=_env_str(env, "CAMERA_FOURCC", cls.fourcc),
             auto_exposure=_env_bool(env, "CAMERA_AUTO_EXPOSURE", cls.auto_exposure),
             exposure=_env_float(env, "CAMERA_EXPOSURE", cls.exposure),
+            backlight=_env_int(env, "CAMERA_BACKLIGHT", cls.backlight),
         )
 
 

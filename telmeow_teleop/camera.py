@@ -16,6 +16,10 @@ arreglar una dejaba la otra rota:
 4. **``isOpened()`` se comprueba antes de leer**, y aun así el primer frame
    puede venir mal: hay que descartar unos cuantos mientras la autoexposición
    converge.
+5. **La compensación de contraluz baja los fps a la mitad.** De fábrica viene
+   puesta, y con ella la exposición automática puede alargarse hasta dejar la
+   cámara a 15 fotos por segundo en mitad de una sesión, sin volver (H71). Se
+   apaga al abrir. Ver ``config.CameraConfig``.
 
 Se mantiene fuera de ``config.py`` a propósito: ese módulo es solo biblioteca
 estándar, y aquí hace falta ``cv2``.
@@ -80,6 +84,12 @@ def abrir_camara(cfg: CameraConfig):
         cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, AUTO_EXPOSURE_OFF)
         cap.set(cv2.CAP_PROP_EXPOSURE, cfg.exposure)
 
+    # La compensación de contraluz, EXPLICITA también (H71): vive en el driver
+    # como la exposición, y de fábrica deja la cámara a 15 fps con poca luz.
+    # Un valor negativo no la toca.
+    if cfg.backlight >= 0:
+        cap.set(cv2.CAP_PROP_BACKLIGHT, cfg.backlight)
+
     return cap
 
 
@@ -97,7 +107,8 @@ def describir(cap, cfg: CameraConfig) -> str:
     )
     return (
         f"Camara {cfg.index} ({cfg.backend}) a {ancho}x{alto}, "
-        f"{cap.get(cv2.CAP_PROP_FPS):.0f} fps nominales, exposicion {exposicion}."
+        f"{cap.get(cv2.CAP_PROP_FPS):.0f} fps nominales, exposicion {exposicion}, "
+        f"contraluz {cap.get(cv2.CAP_PROP_BACKLIGHT):g}."
     )
 
 

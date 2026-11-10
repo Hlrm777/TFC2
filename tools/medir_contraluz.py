@@ -102,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="ademas, el barrido de la exposicion manual de -8 a 0")
     a = p.parse_args(argv)
 
-    cfg = AppConfig.from_env().camera
+    # backlight -1: que abrir la cámara no toque lo que se va a medir.
+    cfg = dataclasses.replace(AppConfig.from_env().camera, backlight=-1)
     cap = abrir_camara(cfg)
     if cap is None:
         print("No se pudo abrir la camara: ¿la tiene otro programa?")

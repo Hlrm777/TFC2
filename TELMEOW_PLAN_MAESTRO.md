@@ -127,8 +127,11 @@ delante, y en pausa no se pasa de página) y un hallazgo:
   reproducido). Falta confirmarlo en una grabación nueva.
 - **H71** — **la cámara bajó sola de 30 a 15 fotos por segundo a mitad de la
   sesión p10**, al pasar el brazo por delante, y no se recuperó: los «lagazos»
-  que notó el operador. La causa probable es la exposición automática; sin
-  confirmar ni corregir.
+  que notó el operador. Es la exposición automática (H27) con la
+  **compensación de contraluz** del driver puesta: con ella en 1 (de fábrica)
+  la cámara da 15 fps con esa luz, y con ella en 0, 30 (medido el 2026-11-10,
+  `tools/medir_contraluz.py`). Sin corregir: falta la opción en el programa y
+  verla en vivo.
 
 Cómo leerlo:
 
@@ -4754,7 +4757,7 @@ simulación sobre las sesiones grabadas con su criterio.
 | Pendiente | Quién | Qué lo dispara | Qué cuesta |
 |---|---|---|---|
 | **Confirmar el P10.1** en una grabación que nadie haya mirado. Criterio, fijado el 2026-11-10: en la etiqueta 9, feliz al menos el 60 % del tramo; en las de lectura (6, 7 y 12), neutral al menos el 90 % | El operador graba; el análisis, quien lleve el paso | Que el operador tenga 15 minutos con la cámara | Repetir `sesion_verificacion.py --narracion` (la primera grabación no hace falta repetirla si no cambian las condiciones) |
-| **H71, la cámara a 15 fotos por segundo** | Quien lleve el paso investiga si la exposición se puede fijar desde el programa (OpenCV, DirectShow); el operador lo prueba | El visto bueno del operador | Una opción de cámara y una grabación corta saludando. Si la cámara no se deja, más luz de frente a la cara |
+| **H71, la cámara a 15 fotos por segundo** — investigado el 2026-11-10 (§7.25): apagar la compensación de contraluz la deja a 30; fijar la exposición a mano no sirve | Quien lleve el paso añade la opción (`CameraConfig`, pedida siempre al abrir, como la exposición); el operador la ve en vivo | El visto bueno del operador a encenderla por defecto | Una opción de cámara con sus pruebas, y la misma grabación que confirma el P10.1. Criterio: la etiqueta 1 con interfaz, 18 fps o más y sin tramos a 15.0; el ruido de la malla y las pausas por poca luz, no peores que en p10. La imagen sale más oscura (brillo ~115 frente a ~145) y con algo más de grano: si eso estropea la cabeza o la emoción, se apaga y queda la luz de frente |
 | **Los fps con la interfaz, 88 % y no 90** | Quien lleve el H71, en la misma sesión | Lo mismo | Medir por separado qué cuestan el video (MJPEG, hasta 15 fotos por segundo), el robot 3D y el libro, y bajar el que más pese. Si no se toca, se declara como límite: el robot recibe sus 20 mensajes por segundo igualmente |
 | **La vista de frente, por defecto** | Quien lleve el paso | El operador la eligió en la sesión; hoy la página arranca desde detrás y recuerda el cambio en ese navegador | Una línea en el visor y su prueba |
 
@@ -7160,6 +7163,33 @@ que iba a 15 fps con el bucle en 60 ms y la espera en 4.5: ahí el lento era el
 cálculo, sin cargador. Para el operador son «lagazos»: el robot y su cámara se
 mueven a saltos. Sin corregir; pendiente con dueño en la sección del P10.
 
+*Investigado el 2026-11-10* con `tools/medir_contraluz.py`, la cámara abierta
+como la abre el pipeline, de día, sin luz añadida y sin nadie delante:
+
+| Ajuste (exposición automática) | fps reales | Intervalo p95 | Brillo medio | Ruido entre fotos |
+|---|---|---|---|---|
+| Compensación de contraluz 1 (de fábrica), 5 tandas | 14.4-15.0 | 81 ms | 142-152 | 1.0-1.8 |
+| Compensación de contraluz 0, 5 tandas | 30.0-30.1 | 48 ms | 111-118 | 2.0-2.1 |
+| Compensación de contraluz 2, 1 tanda | 15.0 | — | 180 | — |
+
+Las cinco tandas alternadas dan lo mismo. La compensación de contraluz
+(`CAP_PROP_BACKLIGHT`, que OpenCV sí deja escribir por DirectShow) es lo que
+autoriza a la cámara a alargar la exposición más allá de 1/30 s: con ella
+apagada la cámara aguanta los 30 fps y entrega la imagen más oscura (unos 30
+niveles menos) y con algo más de grano. La ganancia y el brillo del driver no
+arreglan nada (con exposición manual la cámara sigue a 16 fps o menos en
+cuanto la imagen es usable).
+
+Fijar la exposición a mano, que era la otra salida (§7.16), **no sirve con
+esta luz**: solo hay 30 fps de −4 hacia abajo, y ahí la imagen sale oscura
+(brillo de 18 a 52 sobre 255 a −4, casi negra a −5); a −3 ya son 16 fps y a −2,
+8. Es decir, con la luz de un día normal en ese puesto la cámara está en el
+filo: la automática con compensación elige 15 fps en cuanto algo oscurece la
+escena, y no vuelve.
+
+Lo que no se ha visto: cómo le sienta la imagen más oscura a la malla de la
+cara, a BlazePose y a la emoción. Por eso no se enciende sin una grabación.
+
 ## 7.11 Índice de hallazgos y dónde vive cada uno ahora
 
 | # | Tema | Recogido en |
@@ -7228,7 +7258,7 @@ mueven a saltos. Sin corregir; pendiente con dueño en la sección del P10.
 | **H66** | **La referencia del cabeceo era el primer frame, no la calibración**: el enojo de verdad cayó al 35 % (66 % medido desde la calibración) y la cabeza del robot miraba ~15° abajo. La cabeza toma el neutro al acabar la calibración | P7.7, §7.24 |
 | **H68** | **Con la cabeza muy baja (−25°) la tristeza no se lee**: el modelo dice tristeza el 16 % (96 % a nivel); el reentrenamiento no lo arregla. Límite declarado | P7.7, §7.24 |
 | **H67** | **Con la luz apagada del todo la malla pierde la cara, no tiembla**: el índice de ruido no se entera y la cabeza se quedaba mirando a un lado. Sin cara, cabeza al frente y pausa SIN CARA | P7.7, §7.24 |
-| **H71** | **La cámara bajó sola de 30 a 15 fotos por segundo a mitad de la sesión p10**, al pasar el brazo por delante, y no se recuperó: los «lagazos» del operador. Probable exposición automática; sin confirmar ni corregir | P10 (resultados de la sesión), §7.25 |
+| **H71** | **La cámara bajó sola de 30 a 15 fotos por segundo a mitad de la sesión p10**, al pasar el brazo por delante, y no se recuperó: los «lagazos» del operador. Es la compensación de contraluz del driver: en 1 da 15 fps con esa luz, en 0 da 30 (`tools/medir_contraluz.py`). Falta la opción en el programa y verla en vivo | P10 (resultados de la sesión), §7.25 |
 | **H70** | **La sonrisa con la cabeza baja se lee como enojo, y la regla del cabeceo la mandaba a neutral**: feliz el 25 % leyendo el libro de la pantalla. El voto descartado va ahora a la segunda opción del modelo (81 % reproducido); falta confirmarlo | P10.1, §7.25 |
 | **H69** | **En Windows, `http.server` deja abrir dos servidores en el mismo puerto** (`SO_REUSEADDR`): una segunda sesión habría compartido el 8001 en silencio. El servidor de la interfaz ya no reutiliza el puerto | P10, §7.25 |
 | **H62** | **Ni las tablas ni el visor comprueban el brazo contra la cabeza**: medido con las mallas, 32 mm como mínimo en toda la envolvente admisible, y 33 en la pose de la mano a la cara | P7.5, §7.23 |

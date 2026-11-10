@@ -1,0 +1,17 @@
+clave,pregunta,respuesta
+clic_python,¿Tuviste que hacer clic en la ventana de Python en algún momento?,n
+clic_navegador,¿Tuviste que hacer clic en el navegador para que las teclas respondieran?,n
+ESPACIO,¿ESPACIO pasaba de etiqueta?,s
+c,¿c calibraba (etiqueta 2)?,s
+l,¿l pasaba a la página siguiente?,s
+flecha_derecha,¿La flecha → pasaba a la página siguiente?,s
+j,¿j volvía a la página anterior?,s
+flecha_izquierda,¿La flecha ← volvía a la página anterior?,s
+k,¿k pausaba y reanudaba?,s
+6,¿6 fijaba «concentrado»?,s
+0,¿0 volvía a la expresión automática?,s
+q,¿q dos veces cerraba la sesión?,s
+temblor,¿Viste temblar los brazos del robot en las etiquetas 3 o 4?,n
+vistazos,¿El robot perdió la expresión al mirar abajo en las etiquetas 9 o 10?,s
+vertical,¿«Cambios» se veía entera y sin deformar?,s
+vista,"¿Qué vista del robot prefieres? (d = detrás, f = frente)",f

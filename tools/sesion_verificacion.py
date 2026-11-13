@@ -346,6 +346,7 @@ TOPE_BAJADA_MIN = 25.0
 BRAZO_QUIETO_MAX = 2.0
 BRAZO_VENTANA_S = 5.0
 BRAZO_LEVANTADO = 10.0
+BRAZO_FLEXION_LEVANTADO = 30.0
 #: La compensación de contraluz (H71), fijado el 2026-11-13: el ruido de la
 #: malla con ella apagada, como mucho este múltiplo del ruido con ella puesta,
 #: medidos uno detrás de otro con la misma luz. Por encima, apagarla es lo que
@@ -990,8 +991,9 @@ def brazo_quieto(filas: list[dict], etiqueta: int, lado: str,
     """``(segundos con el brazo levantado, desviación en su ventana más quieta)``
     del comando publicado para un brazo (``"L"`` o ``"R"``) en una etiqueta.
 
-    Levantado es con la abducción más de ``BRAZO_LEVANTADO`` grados sobre el
-    reposo: con el brazo en la mesa no se sigue y el comando es el reposo, fijo.
+    Levantado es fuera del reposo: la abducción a más de ``BRAZO_LEVANTADO``
+    grados de la suya o la flexión a más de ``BRAZO_FLEXION_LEVANTADO``. Con el
+    brazo en la mesa no se sigue y el comando es el reposo, fijo.
     La desviación es la mayor de las dos articulaciones en la ventana de
     ``ventana_s`` segundos seguidos en que es menor; ``None`` si el brazo no
     estuvo levantado ``ventana_s`` segundos seguidos.
@@ -999,11 +1001,14 @@ def brazo_quieto(filas: list[dict], etiqueta: int, lado: str,
     from telmeow_teleop.config import ArmConfig
 
     abd, flex = ("armL", "armLtw") if lado == "L" else ("armR", "armRtw")
-    reposo = ArmConfig.reposo_abduccion
+    reposo, reposo_flexion = ArmConfig.reposo_abduccion, ArmConfig.reposo_flexion
     tramo = [(float(f["t"]), _num(f.get(abd)), _num(f.get(flex)))
              for f in filas if int(f["etiqueta"]) == etiqueta]
+    # Fuera del reposo por cualquiera de las dos articulaciones: en la rama del
+    # mapeo, un brazo estirado al lado es (-58, -107), casi la abduccion del
+    # reposo y toda la diferencia en la flexion (sesion del 2026-11-13).
     arriba = [(t, a, x) for t, a, x in tramo if a is not None and x is not None
-              and a > reposo + BRAZO_LEVANTADO]
+              and (abs(a - reposo) > BRAZO_LEVANTADO or abs(x - reposo_flexion) > BRAZO_FLEXION_LEVANTADO)]
     if len(arriba) < 2:
         return 0.0, None
     paso = statistics.median(b[0] - a[0] for a, b in zip(arriba, arriba[1:]))
@@ -1170,8 +1175,9 @@ def analizar_narracion(base: Path) -> str:
     else:
         for clave, pregunta, cumple in PREGUNTAS_P10:
             r = respuestas.get(clave, "")
-            texto = {"d": "detras", "f": "frente", "s": "si", "n": "no"}.get(r, "--")
-            lineas.append(f"  {pregunta} {texto}" + (f" {ok(r == cumple)}" if cumple else ""))
+            texto = {"d": "detras", "f": "frente", "s": "si", "n": "no"}.get(r, "sin respuesta")
+            # Una pregunta sin responder no decide: ni cumple ni deja de cumplir.
+            lineas.append(f"  {pregunta} {texto}" + (f" {ok(r == cumple)}" if cumple and r else ""))
 
     lineas += ["", f"P7.8 en vivo, brazos a la vista y quietos (desviacion del comando en sus "
                    f"{BRAZO_VENTANA_S:.0f} s mas quietos con el brazo levantado; criterio <= "

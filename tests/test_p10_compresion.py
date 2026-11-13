@@ -178,13 +178,13 @@ def test_el_criterio_de_la_simulacion():
 
 
 def test_la_compresion_cumple_sobre_la_sesion_grabada():
-    """La cifra del plan (2026-11-13): en la narración del 2026-11-12 el robot
+    """La cifra del plan (2026-11-13): en la narración del 2026-11-12 (p10b) el robot
     pasa de 15.8 s en el tope (sin filtro) a ninguno."""
     import simular_compresion_tilt as sct
 
-    ruta = RAIZ / "p10_narracion_cabeza.csv"
+    ruta = RAIZ / "p10b_cabeza.csv"
     if not ruta.exists():
-        pytest.skip("falta p10_narracion_cabeza.csv")
+        pytest.skip("falta p10b_cabeza.csv")
     h = AppConfig.from_env({}).head
     r = sct.simular(sct.leer(ruta), h.gain_tilt_up, h.gain_tilt_down,
                     h.tilt_down_recto, h.tilt_down_hasta)

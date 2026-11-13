@@ -495,6 +495,12 @@ def test_el_brazo_quieto_busca_su_ventana_mas_quieta():
     assert segundos == pytest.approx(6.85, abs=0.2) and desviacion == pytest.approx(0.0)
     assert sv.brazo_quieto(filas, 4, "L") == (0.0, None)
     assert sv.brazo_quieto(filas[:80], 4, "R")[1] is None        # menos de 5 s arriba
+    # Lo que salió en la sesión del 2026-11-13: el brazo estirado al lado casi no
+    # cambia la abducción (-58 frente a -55 del reposo); va todo en la flexión.
+    al_lado = [{"t": 0.05 * k, "etiqueta": 3, "armL": -58.0, "armLtw": -107.0 + 0.2 * (k % 2),
+                "armR": -55.0, "armRtw": 0.0} for k in range(160)]
+    segundos, desviacion = sv.brazo_quieto(al_lado, 3, "L")
+    assert segundos == pytest.approx(8.0, abs=0.2) and desviacion == pytest.approx(0.1, abs=0.01)
 
 
 def test_la_etiqueta_3_pone_un_brazo_a_la_vista():
@@ -504,6 +510,19 @@ def test_la_etiqueta_3_pone_un_brazo_a_la_vista():
     assert "IZQUIERDO estirado" in que[3] and "dentro de tu cámara" in que[3]
     assert "DERECHO estirado" in que[4] and "dentro de tu cámara" in que[4]
     assert "últimas líneas de cada página" in que[6]            # el P10.2 se prueba leyendo
+
+
+def test_una_pregunta_sin_responder_no_decide(tmp_path):
+    """La sesión del 2026-11-13 acabó sin las preguntas, y las cuatro que
+    importaban se respondieron después: las demás quedan sin respuesta."""
+    base = _sesion_p10(tmp_path)
+    ruta = tmp_path / "p10_respuestas.csv"
+    lineas = ruta.read_text(encoding="utf-8").splitlines()
+    nuevas = [linea[:-1] if linea.startswith("q,") else linea for linea in lineas]
+    ruta.write_text(chr(10).join(nuevas) + chr(10), encoding="utf-8")
+    informe = sv.analizar_narracion(base)
+    assert "¿q dos veces cerraba la sesión? sin respuesta" in informe
+    assert "NO CUMPLE" not in informe
 
 
 def test_sin_la_segunda_grabacion_no_hay_informe(tmp_path):

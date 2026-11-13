@@ -2,13 +2,13 @@ INFORME DEL P10 DE p10
 ============================================================
 
 No le roba tiempo al bucle (etiqueta 1, hablando):
-  fps medios sin interfaz 22.0, con interfaz 21.3: 97 % (criterio >= 90 %) OK
-  publicacion con interfaz 19.9 Hz (criterio >= 19.5; sin interfaz 19.9) OK
+  fps medios sin interfaz 22.0, con interfaz 18.9: 86 % (criterio >= 90 %) NO CUMPLE
+  publicacion con interfaz 20.0 Hz (criterio >= 19.5; sin interfaz 19.9) OK
   mensajes perdidos en la etiqueta: 0
 
 Pagina y gesto juntos (cada cambio de pagina con su gesto en la misma fila; ninguno en pausa):
-  cambios de pagina: 10 (esperados 10: 5 en la 6, 2 en la 7, 1 en la 8, 2 en la 12); por etiqueta, 6: 5, 7: 2, 8: 1, 12: 2
-  con su gesto, en su sentido, en la misma fila: 10 de 10 OK
+  cambios de pagina: 27 (esperados 10: 5 en la 6, 2 en la 7, 1 en la 8, 2 en la 12); por etiqueta, 6: 5, 7: 3, 8: 2, 9: 1, 10: 14, 12: 2
+  con su gesto, en su sentido, en la misma fila: 27 de 27 OK
   en pausa: 0 (criterio 0) OK
   intentos de pasar de pagina en pausa: 1 (el protocolo hace 1, en la 8)
 
@@ -16,41 +16,51 @@ Ordenes que llegaron del navegador (columna orden), por etiqueta:
    0: etiqueta
    1: etiqueta
    2: calibrar x2, etiqueta
-   3: etiqueta
+   3: pausa x2, etiqueta
    4: etiqueta
    5: etiqueta
    6: historia=El túnel - Anthony Browne.pdf, pagina_siguiente x5, etiqueta
-   7: pagina_anterior x2, etiqueta
-   8: pausa x2, pagina_siguiente x2, etiqueta
-   9: etiqueta
-  10: etiqueta
+   7: pagina_anterior x3, etiqueta
+   8: pausa x2, pagina_siguiente x3, etiqueta
+   9: pagina_siguiente, etiqueta
+  10: pagina_siguiente x14, etiqueta
   11: expresion=concentrado, automatico, etiqueta
   12: historia=Cambios de Anthony Browne.pdf, pagina_siguiente x2, etiqueta
-  13: salir
   ordenes desde la ventana de Python: 0 (lo esperado: 0)
 
 Lo que respondio el operador:
-  ¿Tuviste que hacer clic en la ventana de Python en algún momento? no OK
-  ¿Tuviste que hacer clic en el navegador para que las teclas respondieran? no
-  ¿ESPACIO pasaba de etiqueta? si OK
-  ¿c calibraba (etiqueta 2)? si OK
-  ¿l pasaba a la página siguiente? si OK
-  ¿La flecha → pasaba a la página siguiente? si OK
-  ¿j volvía a la página anterior? si OK
-  ¿La flecha ← volvía a la página anterior? si OK
-  ¿k pausaba y reanudaba? si OK
-  ¿6 fijaba «concentrado»? si OK
-  ¿0 volvía a la expresión automática? si OK
-  ¿q dos veces cerraba la sesión? si OK
-  ¿Viste temblar los brazos del robot en las etiquetas 3 o 4? si NO CUMPLE
-  ¿El robot perdió la expresión al mirar abajo en las etiquetas 9 o 10? si NO CUMPLE
-  ¿«Cambios» se veía entera y sin deformar? si OK
-  ¿Qué vista del robot prefieres? (d = detrás, f = frente) frente
+  ¿Tuviste que hacer clic en la ventana de Python en algún momento? sin respuesta
+  ¿Tuviste que hacer clic en el navegador para que las teclas respondieran? sin respuesta
+  ¿ESPACIO pasaba de etiqueta? sin respuesta
+  ¿c calibraba (etiqueta 2)? sin respuesta
+  ¿l pasaba a la página siguiente? sin respuesta
+  ¿La flecha → pasaba a la página siguiente? sin respuesta
+  ¿j volvía a la página anterior? sin respuesta
+  ¿La flecha ← volvía a la página anterior? sin respuesta
+  ¿k pausaba y reanudaba? sin respuesta
+  ¿6 fijaba «concentrado»? sin respuesta
+  ¿0 volvía a la expresión automática? sin respuesta
+  ¿q dos veces cerraba la sesión? sin respuesta
+  ¿Viste temblar los brazos del robot en las etiquetas 3 o 4, con tu brazo ya quieto? no OK
+  ¿Viste al robot quedarse parado o dar tirones al mirar al pie de la página? no OK
+  ¿El cabeceo del robot cerca del frente te pareció el de antes? si OK
+  ¿El robot perdió la expresión al mirar abajo en las etiquetas 9 o 10? no OK
+  ¿«Cambios» se veía entera y sin deformar? sin respuesta
+  ¿Qué vista del robot prefieres? (d = detrás, f = frente) sin respuesta
 
-P7.8 en vivo, brazos del robot (cambios > 1 grado/min, saltos > 5 grados/min, p95 del salto; decide lo que viste, las cifras quedan de referencia):
-   3 antebrazos en la mesa: L 0 / 0 / 0.0; R 0 / 0 / 0.0
-   4 brazo derecho estirado: L 0 / 0 / 0.0; R 221 / 102 / 7.8
+P7.8 en vivo, brazos a la vista y quietos (desviacion del comando en sus 5 s mas quietos con el brazo levantado; criterio <= 2 grados):
+   3 brazo izquierdo estirado: levantado 24 s; desviacion 0.0 grados OK
+   4 brazo derecho estirado: levantado 23 s; desviacion 0.0 grados OK
 
 P7.8 en vivo, vistazos (mirando abajo, el robot conserva la expresion de justo antes, hasta 3 s):
-   9 feliz: 4 vistazos (el protocolo hace 3); conserva la expresion en el 100 % de sus filas (criterio >= 95 %) OK; feliz en el 77 % del tramo
-  10 triste: 9 vistazos (el protocolo hace 3); conserva la expresion en el 100 % de sus filas (criterio >= 95 %) OK; triste en el 69 % del tramo
+   9 feliz: 8 vistazos (el protocolo hace 3); conserva la expresion en el 100 % de sus filas (criterio >= 95 %) OK; feliz en el 76 % del tramo
+  10 triste: 5 vistazos (el protocolo hace 3); conserva la expresion en el 100 % de sus filas (criterio >= 95 %) OK; triste en el 70 % del tramo
+
+P10.2, el cabeceo hacia abajo (segundos con el robot parado en su tope; criterio < 1 s; el 2026-11-12, sin la compresion, unos 15):
+  en el tope 0.0 s, bajando la cabeza hasta 37 grados OK
+
+El temblor de la cabeza (ruido de la malla; el 2026-11-10, de dia, 0.75; el 2026-11-12, de noche, 1.2):
+  hablando (etiqueta 1): 1.08
+  compensacion puesta, de fabrica: 30.0 fps, brillo 140, ruido de la malla 1.14
+  compensacion apagada, como se usa: 30.0 fps, brillo 122, ruido de la malla 1.04
+  apagada, el ruido de la malla es 0.91 veces el de puesta (criterio <= 1.25) OK

@@ -22,7 +22,7 @@ destapó el problema; por eso se ve además en vivo):
 
 Uso::
 
-    python tools/simular_compresion_tilt.py                    # p10_narracion
+    python tools/simular_compresion_tilt.py                    # p10b, la narracion del 2026-11-12
     python tools/simular_compresion_tilt.py p10a
 """
 
@@ -108,7 +108,7 @@ def simular(filas: list[tuple[float, float]], ganancia_arriba: float, ganancia_a
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("sesion", nargs="?", default="p10_narracion")
+    p.add_argument("sesion", nargs="?", default="p10b")
     a = p.parse_args(argv)
 
     h = AppConfig.from_env().head

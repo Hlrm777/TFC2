@@ -314,7 +314,8 @@ def _escribir(ruta, columnas, filas):
         w.writerows(filas)
 
 
-RESPUESTAS_BUENAS = {"clic_python": "n", "clic_navegador": "n", "temblor": "n", "vistazos": "n", "vista": "f"}
+RESPUESTAS_BUENAS = {"clic_python": "n", "clic_navegador": "n", "temblor": "n", "vistazos": "n",
+                     "tope": "n", "vista": "f"}
 
 
 def _respondedor(respuestas):
@@ -330,9 +331,12 @@ def _respondedor(respuestas):
 
 
 def _sesion_p10(tmp_path, *, fps_con=20.0, sin_gesto=False, en_pausa=False, vistazo=True,
-                conserva=True, respuestas=None):
-    """Las dos grabaciones del P10, fabricadas: 40 frames por etiqueta, el cuento
-    y las páginas como en el protocolo."""
+                conserva=True, respuestas=None, brazo_arriba=True, tiembla=0.0, bajada=30.0,
+                en_tope=False, ruido_apagada=1.1, con_cara=True):
+    """Las dos grabaciones del P10, fabricadas: 40 frames por etiqueta (140 en
+    las de los brazos, que piden 5 s quietos), el cuento y las páginas como en el
+    protocolo; el CSV de cabeza bajando hasta ``bajada`` grados y la medición de
+    la cámara."""
     from telmeow_teleop.emotion_classifier import COLUMNAS_CSV as EMOCION
     from telmeow_teleop.main import COLUMNAS_SESION
 
@@ -351,9 +355,15 @@ def _sesion_p10(tmp_path, *, fps_con=20.0, sin_gesto=False, en_pausa=False, vist
     t, con, emocion = 0.0, [], []
     historia, pagina = "", ""
     for etiqueta in range(len(sv.PROTOCOLO_P10_NARRACION)):
-        for k in range(40):
+        n = 140 if etiqueta in (3, 4) else 40
+        for k in range(n):
             t += 1.0 / fps_con if etiqueta == 1 else 0.05
-            extra = {}
+            extra = {"ruido_malla": 0.9}
+            if etiqueta in (3, 4) and brazo_arriba and k >= 20:
+                # El brazo de la etiqueta, estirado; ``tiembla`` grados de vaivén.
+                lado = "L" if etiqueta == 3 else "R"
+                extra[f"arm{lado}"] = -20.0 + (tiembla if k % 2 else -tiembla)
+                extra[f"arm{lado}tw"] = -150.0
             if etiqueta in (6, 12) and k == 0:
                 historia, pagina = ("El túnel.pdf" if etiqueta == 6 else "Cambios.pdf"), 1
                 extra["orden"] = f"historia={historia}@navegador"
@@ -376,7 +386,7 @@ def _sesion_p10(tmp_path, *, fps_con=20.0, sin_gesto=False, en_pausa=False, vist
                     extra["gesto"] = ""
                 if en_pausa and etiqueta == 12 and k == 5:
                     extra["pausa"] = 1
-            if k == 39:
+            if k == n - 1:
                 extra["orden"] = "salir@navegador" if etiqueta == 13 else "etiqueta@navegador"
             con.append(fila(t, etiqueta, 0.05, historia=historia, pagina=pagina, **extra))
             if k % 2 == 0:
@@ -387,6 +397,20 @@ def _sesion_p10(tmp_path, *, fps_con=20.0, sin_gesto=False, en_pausa=False, vist
                                 "emocion": "neutral" if fuera and not conserva else emo})
     _escribir(tmp_path / "p10_narracion.csv", COLUMNAS_SESION, con)
     _escribir(tmp_path / "p10_narracion_emocion.csv", EMOCION, emocion)
+    # La cabeza: baja hasta ``bajada`` grados en 2 s y vuelve; el robot la sigue
+    # sin llegar al tope, salvo ``en_tope`` (2 s clavado en −39).
+    cabeza = []
+    for k in range(81):
+        crudo = -bajada * (1 - abs(k - 40) / 40)
+        cabeza.append({"t": f"{0.05 * k:.3f}", "etiqueta": 6, "raw_tilt": f"{crudo:.2f}",
+                       "tilt": "-39.0000" if en_tope and 20 <= k < 60 else f"{1.2 * crudo:.2f}"})
+    _escribir(tmp_path / "p10_narracion_cabeza.csv", ["t", "etiqueta", "raw_tilt", "tilt"], cabeza)
+    _escribir(tmp_path / "p10_contraluz.csv",
+              ["vuelta", "contraluz", "fps", "dt_p95_ms", "brillo", "ruido_imagen", "ruido_malla", "con_cara"],
+              [{"vuelta": v, "contraluz": c, "fps": 30 if c == 0 else 15, "brillo": 115 if c == 0 else 145,
+                "ruido_imagen": 2.0, "ruido_malla": (ruido_apagada if c == 0 else 1.0) if con_cara else "",
+                "con_cara": 1.0 if con_cara else 0.0}
+               for v in (1, 2) for c in (1, 0)])
     sv.preguntar_p10(tmp_path / "p10", _respondedor({**RESPUESTAS_BUENAS, **(respuestas or {})}))
     return tmp_path / "p10"
 
@@ -394,8 +418,14 @@ def _sesion_p10(tmp_path, *, fps_con=20.0, sin_gesto=False, en_pausa=False, vist
 def test_el_informe_del_p10_da_por_buena_una_sesion_que_cumple(tmp_path, capsys):
     informe = sv.analizar_narracion(_sesion_p10(tmp_path))
     assert "NO CUMPLE" not in informe and "NO VALE" not in informe
-    criterios = 2 + 2 + sum(1 for _, _, cumple in sv.PREGUNTAS_P10 if cumple) + 2
+    # fps y publicación, gesto y pausa, las preguntas, los dos brazos, los dos
+    # vistazos, el tope del cabeceo y la compensación de contraluz.
+    criterios = 2 + 2 + sum(1 for _, _, cumple in sv.PREGUNTAS_P10 if cumple) + 2 + 2 + 1 + 1
     assert informe.count(" OK") == criterios
+    assert "   3 brazo izquierdo estirado: levantado 6 s; desviacion 0.0 grados OK" in informe
+    assert "  en el tope 0.0 s, bajando la cabeza hasta 30 grados OK" in informe
+    assert "  hablando (etiqueta 1): 0.90" in informe
+    assert "  apagada, el ruido de la malla es 1.10 veces el de puesta (criterio <= 1.25) OK" in informe
     assert "cambios de pagina: 10 (esperados 10" in informe
     assert "por etiqueta, 6: 5, 7: 2, 8: 1, 12: 2" in informe
     assert "intentos de pasar de pagina en pausa: 1" in informe
@@ -411,6 +441,12 @@ def test_el_informe_del_p10_da_por_buena_una_sesion_que_cumple(tmp_path, capsys)
     ({"conserva": False}, "   9 feliz"),
     ({"respuestas": {"q": "n"}}, "  ¿q dos veces"),
     ({"respuestas": {"clic_python": "s"}}, "  ¿Tuviste que hacer clic en la ventana de Python"),
+    ({"respuestas": {"tope": "s"}}, "  ¿Viste al robot quedarse parado"),
+    ({"respuestas": {"cabeceo": "n"}}, "  ¿El cabeceo del robot cerca del frente"),
+    ({"tiembla": 3.0}, "   3 brazo izquierdo estirado"),
+    ({"tiembla": 3.0}, "   4 brazo derecho estirado"),
+    ({"en_tope": True}, "  en el tope 2.0 s"),
+    ({"ruido_apagada": 1.6}, "  apagada, el ruido de la malla es 1.60 veces"),
 ])
 def test_el_informe_del_p10_senala_lo_que_no_cumple(tmp_path, cambio, empieza):
     informe = sv.analizar_narracion(_sesion_p10(tmp_path, **cambio))
@@ -426,6 +462,48 @@ def test_hacer_clic_en_el_navegador_informa_pero_no_decide(tmp_path):
 def test_si_no_se_bajo_la_cabeza_los_vistazos_no_valen(tmp_path):
     informe = sv.analizar_narracion(_sesion_p10(tmp_path, vistazo=False))
     assert "   9 feliz: NO VALE: no se detecto ningun vistazo" in informe
+
+
+@pytest.mark.parametrize("cambio, dice", [
+    ({"brazo_arriba": False}, "   3 brazo izquierdo estirado: NO VALE: el brazo estuvo levantado 0 s"),
+    ({"bajada": 12.0}, "  NO VALE: lo mas que bajaste la cabeza fueron 12 grados"),
+    ({"con_cara": False}, "  NO VALE: la malla vio la cara en el 0 % de las fotos de la medicion"),
+])
+def test_lo_que_no_se_hizo_no_vale_y_el_informe_lo_dice(tmp_path, cambio, dice):
+    """Comprobar en los datos qué se hizo: un brazo que no se levantó, una cabeza
+    que no bajó o una medición sin nadie delante no prueban nada."""
+    assert dice in sv.analizar_narracion(_sesion_p10(tmp_path, **cambio))
+
+
+def test_sin_la_medicion_de_la_camara_el_informe_lo_dice_y_sigue(tmp_path):
+    base = _sesion_p10(tmp_path)
+    (tmp_path / "p10_contraluz.csv").unlink()
+    (tmp_path / "p10_narracion_cabeza.csv").unlink()
+    informe = sv.analizar_narracion(base)
+    assert "sin datos (falta p10_contraluz.csv)" in informe
+    assert "sin datos: falta p10_narracion_cabeza.csv" in informe
+    assert "NO CUMPLE" not in informe
+
+
+def test_el_brazo_quieto_busca_su_ventana_mas_quieta():
+    """Subir el brazo mueve el comando; lo que cuenta son los 5 s más quietos
+    con el brazo ya arriba, y el otro brazo, en reposo, no cuenta."""
+    filas = [{"t": 0.05 * k, "etiqueta": 4, "armL": -55.0, "armLtw": 0.0,
+              "armR": -55.0 if k < 20 else (-55.0 + 3.5 * (k - 20) if k < 30 else -20.0),
+              "armRtw": 0.0 if k < 20 else -150.0} for k in range(160)]
+    segundos, desviacion = sv.brazo_quieto(filas, 4, "R")
+    assert segundos == pytest.approx(6.85, abs=0.2) and desviacion == pytest.approx(0.0)
+    assert sv.brazo_quieto(filas, 4, "L") == (0.0, None)
+    assert sv.brazo_quieto(filas[:80], 4, "R")[1] is None        # menos de 5 s arriba
+
+
+def test_la_etiqueta_3_pone_un_brazo_a_la_vista():
+    """Hasta el 2026-11-13 era «antebrazos en la mesa», y ahí los brazos no se
+    siguen: la zona muerta no actuaba (lo notó el operador)."""
+    que = {e: texto for e, texto, _, _ in sv.PROTOCOLO_P10_NARRACION}
+    assert "IZQUIERDO estirado" in que[3] and "dentro de tu cámara" in que[3]
+    assert "DERECHO estirado" in que[4] and "dentro de tu cámara" in que[4]
+    assert "últimas líneas de cada página" in que[6]            # el P10.2 se prueba leyendo
 
 
 def test_sin_la_segunda_grabacion_no_hay_informe(tmp_path):
@@ -484,8 +562,11 @@ def test_la_sesion_del_p10_ensena_cada_tabla_antes_de_su_grabacion(monkeypatch, 
 
     assert sv.main(["--narracion"]) == 0
     lanzados = [args for tipo, args in eventos if tipo == "run"]
-    assert lanzados[0][1:] == ["-m", "telmeow_teleop.main", "--record", str(tmp_path / "p10_sin_interfaz.csv")]
-    assert lanzados[1][1:5] == ["-m", "telmeow_teleop.control_panel", "--record",
+    # Primero la cámara (con el operador ya sentado), y luego las dos grabaciones.
+    assert lanzados[0][1:] == [str(tmp_path / "tools" / "medir_contraluz.py"), "--vueltas", "2", "--malla",
+                               "--csv", str(tmp_path / "p10_contraluz.csv")]
+    assert lanzados[1][1:] == ["-m", "telmeow_teleop.main", "--record", str(tmp_path / "p10_sin_interfaz.csv")]
+    assert lanzados[2][1:5] == ["-m", "telmeow_teleop.control_panel", "--record",
                                 str(tmp_path / "p10_narracion.csv")]
     # La segunda lleva la guía para la página, y el JSON temporal se borra al acabar.
     (ruta, datos), = guias
@@ -494,8 +575,9 @@ def test_la_sesion_del_p10_ensena_cada_tabla_antes_de_su_grabacion(monkeypatch, 
     # Lo impreso antes de cada grabación es su tabla.
     antes = [i for i, (tipo, _) in enumerate(eventos) if tipo == "run"]
     impreso_antes = ["".join(texto for tipo, texto in eventos[:i] if tipo == "tabla") for i in antes]
-    assert "PRIMERA GRABACIÓN" in impreso_antes[0] and "SEGUNDA GRABACIÓN" not in impreso_antes[0]
-    assert "SEGUNDA GRABACIÓN" in impreso_antes[1]
+    assert "LA CÁMARA, antes de grabar" in impreso_antes[0] and "PRIMERA GRABACIÓN" not in impreso_antes[0]
+    assert "PRIMERA GRABACIÓN" in impreso_antes[1] and "SEGUNDA GRABACIÓN" not in impreso_antes[1]
+    assert "SEGUNDA GRABACIÓN" in impreso_antes[2]
     assert sv.leer_respuestas(tmp_path / "p10")["vista"] == "f"
     assert (tmp_path / "p10_informe.txt").is_file()
 
@@ -503,6 +585,7 @@ def test_la_sesion_del_p10_ensena_cada_tabla_antes_de_su_grabacion(monkeypatch, 
 def test_una_grabacion_que_ya_existe_solo_se_repite_si_se_pide(monkeypatch, tmp_path):
     monkeypatch.setattr(sv, "PROJECT_ROOT", tmp_path)
     (tmp_path / "p10_sin_interfaz.csv").write_text("ya", encoding="utf-8")
+    (tmp_path / "p10_contraluz.csv").write_text("ya", encoding="utf-8")
     lanzados = []
     monkeypatch.setattr(sv.subprocess, "run", lambda args, **k: lanzados.append(args))
     responder = _respondedor(RESPUESTAS_BUENAS)

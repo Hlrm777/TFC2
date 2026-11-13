@@ -174,7 +174,7 @@ cambia respecto al plan original.
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1650 pruebas en verde** (desde el 2026-11-13, P10.2: 1629 + 21 de la compresión del cabeceo hacia abajo; desde el 2026-11-10, P10.1 y H71: 1610 + 16 de la segunda opción tras un enojo descartado + 3 de la compensación de contraluz; desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 44 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1667 pruebas en verde** (desde el 2026-11-13, P10.2: 1629 + 21 de la compresión del cabeceo hacia abajo + 17 de la sesión que la confirma —la medición de la cámara, el brazo a la vista y el tope en el informe, la vista de frente—; desde el 2026-11-10, P10.1 y H71: 1610 + 16 de la segunda opción tras un enojo descartado + 3 de la compensación de contraluz; desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 44 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -4632,10 +4632,10 @@ cargador puesto): el primer criterio compara sus fps. En las dos la etiqueta 0
    | 0 | Lo mismo que la 0 de arriba, hasta que se abra el navegador | 15 s | «Calibrando: cara relajada, mirando la pantalla» unos 3 s; luego, neutral |
    | 1 | La 1 de arriba, palabra por palabra | 60 s | sigue la cabeza; los brazos quietos |
    | 2 | Cara relajada mirando la pantalla: `c` y quieto | 5 s | calibra 3 s; cabeza al frente y neutral |
-   | 3 | Antebrazos apoyados en la mesa, como al leer, sin moverlos (P7.8) | 30 s | los dos brazos quietos, **sin temblor** |
-   | 4 | Brazo derecho estirado a la derecha, a la altura del hombro, «señalando la ventana»; el izquierdo en la mesa. Quieto (P7.8) | 20 s | su brazo derecho estirado y quieto, sin temblor |
-   | 5 | Botón «Vista» (de frente), saludar 2 veces con la derecha; «Vista» otra vez (detrás), saludar 2 veces | 20 s | desde detrás saluda por el mismo lado de la pantalla que el operador en su cámara; de frente, por el contrario |
-   | 6 | Elegir «El túnel» y leerlo pasando 5 páginas, una cada ~6 s: 3 con `l` y 2 con → | 40 s | gesto de página en cada cambio; la pantalla del robot muestra la misma página |
+   | 3 | Brazo izquierdo estirado a la izquierda, a la altura del hombro, con la mano dentro de la cámara; el derecho en la mesa. Subirlo, y quieto 10 s (P7.8) | 20 s | su brazo izquierdo estirado y quieto, **sin temblor** |
+   | 4 | Brazo derecho estirado a la derecha, a la altura del hombro, con la mano dentro de la cámara; el izquierdo en la mesa. Subirlo, y quieto 10 s (P7.8) | 20 s | su brazo derecho estirado y quieto, sin temblor |
+   | 5 | El robot se ve de frente: saludar 2 veces con la derecha; botón «Vista» (detrás), saludar 2 veces más; dejarlo en la que se prefiera | 20 s | de frente saluda por el lado contrario de la pantalla que el operador en su cámara; desde detrás, por el mismo |
+   | 6 | Elegir «El túnel» y leerlo pasando 5 páginas, una cada ~6 s: 3 con `l` y 2 con →. Leer también las últimas líneas de cada página, bajando la cabeza con naturalidad (P10.2) | 40 s | gesto de página en cada cambio; al bajar la cabeza al pie de la página el robot la sigue bajando, sin quedarse parado |
    | 7 | Volver 2 páginas, una cada ~3 s: una con `j` y otra con ← | 10 s | gesto hacia el otro lado y página anterior, las dos veces |
    | 8 | `k` (pausa); intentar pasar con `l`; `k` otra vez; pasar con `l` | 15 s | en pausa, quieto, «En pausa (k)» y la página NO cambia; al reanudar, cambia con su gesto |
    | 9 | Sonrisa clara leyendo; tres veces, bajar la cabeza 2 s a la esquina de abajo a la derecha de la página («buscando la línea siguiente») y volver (P7.8) | 20 s | **conserva feliz** durante el vistazo |
@@ -4654,6 +4654,35 @@ igual en las dos grabaciones); la vista se elige en una etiqueta propia (la 5); 
 Al analizar, primero se comprueba en los datos qué se hizo de verdad en cada
 etiqueta: las páginas pasadas por etiqueta, las órdenes que llegaron del
 navegador y los vistazos detectados salen en el informe.
+
+**Cambios del 2026-11-13**, para que una sola sesión cierre lo que dejaron las
+dos primeras:
+
+- **Antes de grabar, la cámara** (1 minuto, el operador sentado y quieto):
+  `tools/medir_contraluz.py --malla` alterna la compensación de contraluz
+  puesta y apagada, cuatro tandas de 11 s, y mide en cada una los fps, el
+  brillo y el ruido de la malla (el índice de `RuidoMalla`, el que hace crecer
+  la zona muerta de la cabeza). Queda en `p10_contraluz.csv`. Responde a lo que
+  la sesión del 2026-11-12 no pudo separar: si el temblor leve de la cabeza lo
+  mete la compensación apagada o la luz de esa noche. Criterio: apagada, el
+  ruido de la malla no pasa de 1.25 veces el de puesta; no vale si la malla ve
+  la cara en menos del 90 % de las fotos.
+- **La etiqueta 3 ya no es «antebrazos en la mesa»**: ahí los codos y las manos
+  no entran en cuadro, los brazos no se siguen y la zona muerta del P7.8 no
+  actúa (lo notó el operador). Ahora es el brazo izquierdo a la vista, como el
+  derecho en la 4. El informe mide, en cada una, la desviación del comando en
+  los 5 s más quietos con el brazo ya levantado (criterio: 2° como mucho; en
+  las dos sesiones anteriores, de 0.1 a 1.2°), y dice NO VALE si el brazo no
+  estuvo 5 s seguidos levantado.
+- **El P10.2 en el informe**: segundos con el cabeceo del robot en su tope
+  (criterio: menos de 1 s; sin la compresión, unos 15), y NO VALE si el
+  operador no bajó la cabeza 25° o más. La etiqueta 6 pide leer las últimas
+  líneas de cada página. Dos preguntas nuevas al operador: si vio al robot
+  parado o a tirones al pie de la página, y si el cabeceo cerca del frente le
+  pareció el de antes.
+- **La vista de frente, por defecto** (`VISTA_INICIAL` en el visor): la eligió
+  el operador en las dos sesiones. El botón la cambia y el navegador recuerda
+  el cambio; la etiqueta 5 empieza de frente.
 
 ### La sesión p10 — resultados (2026-11-10)
 
@@ -4916,10 +4945,9 @@ la sesión grabada.
 
 | Pendiente | Quién | Qué lo dispara | Qué cuesta |
 |---|---|---|---|
-| **Ver el P10.2 en vivo** (la compresión del cabeceo) | El operador narra; el análisis, quien lleve el paso | Que el operador tenga 10 minutos con la cámara | Una narración con `sesion_verificacion.py --narracion` (la primera grabación no hace falta). Criterio, fijado el 2026-11-13: menos de 1 s en el tope en toda la sesión leyendo el pie de la página como en la del 2026-11-12, y que al operador el cabeceo cerca del frente le parezca el de antes |
-| **Cuánto ruido mete la compensación de contraluz apagada** | Quien lleve el paso amplía `tools/medir_contraluz.py` para medir también el ruido de la malla; el operador se sienta 2 minutos | Que el temblor leve de la cabeza moleste al narrar | Una medición con la misma luz en las dos posiciones. Si la compensación apagada es la que mete el ruido, se elige entre fps y ruido, o se añade luz |
-| **La etiqueta 3 del protocolo** | Quien escriba el próximo protocolo | Que haga falta volver a medir la zona muerta de los brazos | Cambiarla por una postura con los brazos a la vista y quietos; hoy solo comprueba que los brazos que no se ven no tiemblan |
-| **La vista de frente, por defecto** | Quien lleve el paso | El operador la eligió en la sesión; hoy la página arranca desde detrás y recuerda el cambio en ese navegador | Una línea en el visor y su prueba |
+| **La sesión que cierra el P10** | El operador la hace; el análisis, quien lleve el paso | Que el operador tenga 15 minutos con la cámara y buena luz | `sesion_verificacion.py --narracion`: la medición de la cámara, y la narración (la primera grabación solo si cambian las condiciones). El informe decide el P10.2 (menos de 1 s en el tope), la compensación de contraluz (ruido de la malla apagada ≤ 1.25 veces el de puesta) y los dos brazos a la vista (≤ 2°) |
+| **Si la compensación apagada mete el ruido** (el criterio no se cumple en esa sesión) | El operador decide; quien lleve el paso lo aplica | El informe de la sesión | Elegir entre los 30 fps con algo más de temblor, o volver a la compensación puesta y añadir luz de frente para que no caiga a 15 fps |
+| **La skill `telmeow-viewer`** dice que la vista arranca desde detrás | Quien lleve el paso propone el archivo; el operador lo sube a claude.ai | La próxima vez que se toque el visor | Una línea de la sección «Modo narración» |
 
 ### Enunciado original
 

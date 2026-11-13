@@ -309,7 +309,7 @@
       <button id="n-auto" title="Volver a la expresión automática (0)">Automático (0)</button>
       <button id="n-calibrar" title="Calibrar la cara neutra y la cabeza (c)">Calibrar (c)</button>
       <button id="n-pausa" title="Pausar o reanudar el robot (k)">Pausa (k)</button>
-      <button id="n-vista" title="Ver el robot de frente o desde atrás">Vista: detrás</button>
+      <button id="n-vista" title="Ver el robot de frente o desde atrás">Vista: frente</button>
     </div>
   </div>
   <div id="n-confirmar" class="narr">Pulsa <b>q</b> otra vez para terminar la sesión.<br><span style="font-size:14px;color:var(--ink-dim)">Esc cancela</span></div>
@@ -1303,10 +1303,13 @@
   const ALIAS_TECLAS = { ArrowLeft:'j', ArrowRight:'l' };
   const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
   const VISTAS = { 'detrás': [700,-900,550], 'frente': [-250,1150,480] };
+  // De frente, como lo ven los niños: la eligió el operador en la sesión p10
+  // (2026-11-10). El botón la cambia y el navegador recuerda el cambio.
+  const VISTA_INICIAL = 'frente';
 
   const narr = { estado:null, fallosEstado:0, pdf:null, nombre:null, pagina:null, pedida:null,
                  cache:new Map(), ficha:0, ultimaPagina:null, confirmarHasta:0,
-                 mqttIniciado:false, vista:'detrás', guiaEtiqueta:null, guiaDesde:0 };
+                 mqttIniciado:false, vista:'frente', guiaEtiqueta:null, guiaDesde:0 };
 
   function pintarPantallaExterna(){
     // La página real en la pantalla externa del robot 3D: lo que verían los
@@ -1486,7 +1489,7 @@
   }
 
   function ponerVista(nombre){
-    narr.vista = nombre in VISTAS ? nombre : 'detrás';
+    narr.vista = nombre in VISTAS ? nombre : VISTA_INICIAL;
     cam.position.set(...VISTAS[narr.vista]);
     controls.target.set(0,0,180); controls.update();
     document.getElementById('n-vista').textContent = 'Vista: ' + narr.vista;
@@ -1542,8 +1545,8 @@
     const sel = document.getElementById('n-cuento');
     sel.onchange = ()=>{ if(sel.value) ordenar('historia', sel.value); sel.blur(); };
     document.addEventListener('keydown', teclaNarracion);
-    let vista = 'detrás';
-    try{ vista = localStorage.getItem('telmeow.vista') || 'detrás'; }catch(e){}
+    let vista = VISTA_INICIAL;
+    try{ vista = localStorage.getItem('telmeow.vista') || VISTA_INICIAL; }catch(e){}
     ponerVista(vista);
     // Si cambia el tamaño del panel del libro, la página se vuelve a dibujar a
     // la nueva medida.

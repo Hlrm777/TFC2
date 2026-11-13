@@ -246,7 +246,10 @@ PROTOCOLO_P10_SIN_INTERFAZ: tuple[tuple[int, str, int, str], ...] = (
 )
 
 #: La segunda, con la interfaz de narración: TODAS las teclas en el navegador.
-#: Una postura por etiqueta; las 3, 4, 9 y 10 comprueban en vivo el P7.8.
+#: Una postura por etiqueta; las 3, 4, 9 y 10 comprueban en vivo el P7.8. La 3
+#: era «antebrazos en la mesa» hasta el 2026-11-13: ahí los codos y las manos no
+#: entran en cuadro, los brazos no se siguen y la zona muerta no actúa (lo notó
+#: el operador). Ahora es el brazo izquierdo a la vista, como el derecho en la 4.
 PROTOCOLO_P10_NARRACION: tuple[tuple[int, str, int, str], ...] = (
     (0, "Cara relajada mirando la pantalla, quieto, antebrazos en la mesa. NO pulses nada: "
         "espera a que se abra el navegador con el robot, tu cámara y el libro", 15,
@@ -254,20 +257,23 @@ PROTOCOLO_P10_NARRACION: tuple[tuple[int, str, int, str], ...] = (
     (1, _HABLAR_P10, 60, "sigue tu cabeza; los brazos quietos"),
     (2, "Cara relajada mirando la pantalla: pulsa c y quédate quieto", 5,
      "«Calibrando: cara relajada, mirando la pantalla» 3 s; luego, cabeza al frente y neutral"),
-    (3, "Antebrazos apoyados en la mesa, como al leer, sin moverlos", 30,
-     "los dos brazos quietos, SIN temblor"),
-    (4, "Brazo DERECHO estirado hacia tu derecha, a la altura del hombro, como señalando la "
-        "ventana; el izquierdo en la mesa. Quieto", 20,
+    (3, "Brazo IZQUIERDO estirado hacia tu izquierda, a la altura del hombro, con la mano "
+        "dentro de tu cámara; el derecho en la mesa. Súbelo, y quieto 10 s", 20,
+     "su brazo izquierdo estirado y quieto, SIN temblor"),
+    (4, "Brazo DERECHO estirado hacia tu derecha, a la altura del hombro, con la mano dentro "
+        "de tu cámara; el izquierdo en la mesa. Súbelo, y quieto 10 s", 20,
      "su brazo derecho estirado y quieto, sin temblor"),
-    (5, "Pulsa con el ratón el botón «Vista» (el último de la fila de botones): el robot "
-        "se ve de frente. Saluda 2 veces con la derecha. Vuelve a pulsarlo (detrás) y saluda 2 "
-        "veces más. Fíjate cuál te resulta más natural: al final te lo pregunto", 20,
-     "desde detrás saluda por el mismo lado de la pantalla que tú en tu cámara; de frente, "
-     "por el contrario"),
+    (5, "El robot se ve de frente. Saluda 2 veces con la derecha. Pulsa con el ratón el botón "
+        "«Vista» (el último de la fila de botones): ahora se ve desde detrás; saluda 2 veces "
+        "más. Déjalo en la vista que prefieras: al final te lo pregunto", 20,
+     "de frente saluda por el lado contrario de la pantalla que tú en tu cámara; desde "
+     "detrás, por el mismo"),
     (6, "En la lista «Elige un cuento…» (debajo del libro) elige «El túnel». Léelo en voz "
         "alta y pasa 5 páginas, una cada ~6 s: las 3 primeras con l y las 2 últimas con la "
-        "flecha →. Mueve la cabeza con normalidad", 40,
-     "gesto de página en cada cambio; la pantalla del robot muestra la misma página que el libro"),
+        "flecha →. Lee también las últimas líneas de cada página, bajando la cabeza como "
+        "te salga natural", 40,
+     "gesto de página en cada cambio; al bajar la cabeza al pie de la página el robot la "
+     "sigue bajando, sin quedarse parado"),
     (7, "Vuelve atrás 2 páginas, una cada ~3 s: la primera con j y la segunda con la flecha ←", 10,
      "gesto hacia el otro lado y página anterior, las dos veces"),
     (8, "Pulsa k (pausa). Intenta pasar de página con l. Pulsa k otra vez (reanudar) y pasa "
@@ -306,7 +312,9 @@ PREGUNTAS_P10: tuple[tuple[str, str, str], ...] = (
     ("6", "¿6 fijaba «concentrado»?", "s"),
     ("0", "¿0 volvía a la expresión automática?", "s"),
     ("q", "¿q dos veces cerraba la sesión?", "s"),
-    ("temblor", "¿Viste temblar los brazos del robot en las etiquetas 3 o 4?", "n"),
+    ("temblor", "¿Viste temblar los brazos del robot en las etiquetas 3 o 4, con tu brazo ya quieto?", "n"),
+    ("tope", "¿Viste al robot quedarse parado o dar tirones al mirar al pie de la página?", "n"),
+    ("cabeceo", "¿El cabeceo del robot cerca del frente te pareció el de antes?", "s"),
     ("vistazos", "¿El robot perdió la expresión al mirar abajo en las etiquetas 9 o 10?", "n"),
     ("vertical", "¿«Cambios» se veía entera y sin deformar?", "s"),
     ("vista", "¿Qué vista del robot prefieres? (d = detrás, f = frente)", ""),
@@ -325,6 +333,26 @@ PAGINAS_P10: dict[int, int] = {6: 5, 7: 2, 8: 1, 12: 2}
 #: para la primera fila, que puede llegar con el voto ya hecho.
 VISTAZO_CONSERVA_MIN = 95.0
 VISTAZO_MAX_S = 3.0
+#: P10.2 (H72), fijado el 2026-11-13: segundos, en toda la narración, con el
+#: cabeceo del robot en su tope de abajo. En la del 2026-11-12, sin la
+#: compresión, unos 15. Solo vale si el operador bajó la cabeza de verdad.
+TOPE_MAX_S = 1.0
+TOPE_BAJADA_MIN = 25.0
+#: Brazos a la vista y quietos (etiquetas 3 y 4, P7.8), fijado el 2026-11-13: en
+#: los ``BRAZO_VENTANA_S`` segundos más quietos con el brazo levantado, la
+#: desviación del comando no pasa de ``BRAZO_QUIETO_MAX`` grados (0.1-1.2 en las
+#: sesiones del 2026-11-10 y 11-12). Levantado = más de ``BRAZO_LEVANTADO``
+#: grados por encima del reposo.
+BRAZO_QUIETO_MAX = 2.0
+BRAZO_VENTANA_S = 5.0
+BRAZO_LEVANTADO = 10.0
+#: La compensación de contraluz (H71), fijado el 2026-11-13: el ruido de la
+#: malla con ella apagada, como mucho este múltiplo del ruido con ella puesta,
+#: medidos uno detrás de otro con la misma luz. Por encima, apagarla es lo que
+#: mete el temblor leve de la cabeza.
+RUIDO_CONTRALUZ_MAX = 1.25
+#: Fotos con cara que necesita esa medicion para valer.
+CARA_MIN_CONTRALUZ = 0.9
 
 #: Criterios del P7.6, fijados antes de grabar. Enojo del robot con la cabeza
 #: subiendo y bajando (etiqueta 1): en el neutral de p75 era el 23 %.
@@ -819,8 +847,11 @@ def analizar_gestos(base: Path) -> str:
 # --------------------------------------------------------------------------
 
 INTRO_P10 = """
-LA SESIÓN DEL P10: dos grabaciones, unos 6 minutos en total, con buena luz.
+LA SESIÓN DEL P10: una medición de la cámara y dos grabaciones, unos 7 minutos
+en total, con buena luz.
 
+  0. La cámara: 1 minuto sentado y quieto, mirando la pantalla. No se abre
+     ninguna ventana: la terminal va diciendo lo que mide.
   1. p10_sin_interfaz: solo la ventana de Python, como en el P7. Es la
      referencia de velocidad: 1 minuto hablando. Las teclas van a ESA ventana.
   2. p10_narracion: el navegador con el robot, tu cámara y el libro. TODAS las
@@ -831,6 +862,11 @@ LA SESIÓN DEL P10: dos grabaciones, unos 6 minutos en total, con buena luz.
   informe.
 """
 
+CABECERA_P10_CAMARA = (
+    "LA CÁMARA, antes de grabar: 1 minuto. Siéntate como para narrar, a tu distancia de\n"
+    "siempre, con la cara relajada y mirando al centro de la pantalla. QUIETO y sin hablar:\n"
+    "se mide cuánto tiembla el seguimiento de tu cara con la compensación de contraluz de\n"
+    "la cámara puesta y apagada, cuatro tandas de 11 s. No se abre ninguna ventana.")
 CABECERA_P10_SIN_INTERFAZ = (
     "PRIMERA GRABACIÓN, sin la interfaz: SOLO 2 etiquetas, la 0 y la 1, y luego q.\n"
     "Aquí no hay navegador ni botones, solo la ventana de Python: ESPACIO en ella pasa\n"
@@ -949,6 +985,81 @@ def movimiento_brazos(filas: list[dict], etiqueta: int) -> dict[str, tuple[float
     return salida
 
 
+def brazo_quieto(filas: list[dict], etiqueta: int, lado: str,
+                 ventana_s: float = BRAZO_VENTANA_S) -> tuple[float, float | None]:
+    """``(segundos con el brazo levantado, desviación en su ventana más quieta)``
+    del comando publicado para un brazo (``"L"`` o ``"R"``) en una etiqueta.
+
+    Levantado es con la abducción más de ``BRAZO_LEVANTADO`` grados sobre el
+    reposo: con el brazo en la mesa no se sigue y el comando es el reposo, fijo.
+    La desviación es la mayor de las dos articulaciones en la ventana de
+    ``ventana_s`` segundos seguidos en que es menor; ``None`` si el brazo no
+    estuvo levantado ``ventana_s`` segundos seguidos.
+    """
+    from telmeow_teleop.config import ArmConfig
+
+    abd, flex = ("armL", "armLtw") if lado == "L" else ("armR", "armRtw")
+    reposo = ArmConfig.reposo_abduccion
+    tramo = [(float(f["t"]), _num(f.get(abd)), _num(f.get(flex)))
+             for f in filas if int(f["etiqueta"]) == etiqueta]
+    arriba = [(t, a, x) for t, a, x in tramo if a is not None and x is not None
+              and a > reposo + BRAZO_LEVANTADO]
+    if len(arriba) < 2:
+        return 0.0, None
+    paso = statistics.median(b[0] - a[0] for a, b in zip(arriba, arriba[1:]))
+    segundos = len(arriba) * paso
+    mejor = None
+    inicio = 0
+    for fin in range(len(arriba)):
+        while arriba[fin][0] - arriba[inicio][0] > ventana_s:
+            inicio += 1
+        ventana = arriba[inicio:fin + 1]
+        seguida = all(b[0] - a[0] <= 4.0 * paso for a, b in zip(ventana, ventana[1:]))
+        if seguida and ventana[-1][0] - ventana[0][0] >= ventana_s - 2.0 * paso and len(ventana) >= 3:
+            desviacion = max(statistics.pstdev(v[1] for v in ventana),
+                             statistics.pstdev(v[2] for v in ventana))
+            mejor = desviacion if mejor is None else min(mejor, desviacion)
+    return segundos, mejor
+
+
+def cabeceo_en_tope(ruta_cabeza: Path) -> tuple[float, float] | None:
+    """``(segundos con el cabeceo del robot en su tope de abajo, lo más que bajó
+    la cabeza el operador en grados crudos)`` de un CSV de cabeza; ``None`` si no
+    tiene filas."""
+    import simular_compresion_tilt as sct
+
+    with open(ruta_cabeza, newline="", encoding="utf-8") as f:
+        filas = [(float(x["t"]), _num(x.get("raw_tilt")), _num(x.get("tilt"))) for x in csv.DictReader(f)]
+    filas = [x for x in filas if x[1] is not None and x[2] is not None]
+    if not filas:
+        return None
+    segundos = sct.segundos_en_tope([t for t, _, _ in filas], [tilt for _, _, tilt in filas])
+    return segundos, -min(crudo for _, crudo, _ in filas)
+
+
+def ruta_contraluz(base: Path) -> Path:
+    return base.with_name(base.name + "_contraluz.csv")
+
+
+def leer_contraluz(base: Path) -> dict[int, dict[str, float]] | None:
+    """La medición de la cámara (``tools/medir_contraluz.py --malla``): por valor
+    de la compensación, la mediana de cada cifra entre sus tandas."""
+    ruta = ruta_contraluz(base)
+    if not ruta.is_file():
+        return None
+    with open(ruta, newline="", encoding="utf-8") as f:
+        filas = list(csv.DictReader(f))
+    salida: dict[int, dict[str, float]] = {}
+    for valor in sorted({int(x["contraluz"]) for x in filas}):
+        tandas = [x for x in filas if int(x["contraluz"]) == valor]
+        salida[valor] = {}
+        for campo in ("fps", "brillo", "ruido_imagen", "ruido_malla", "con_cara"):
+            numeros = [v for v in (_num(x.get(campo)) for x in tandas) if v is not None]
+            if numeros:
+                salida[valor][campo] = statistics.median(numeros)
+    return salida or None
+
+
 def _ruta_respuestas(base: Path) -> Path:
     return base.with_name(base.name + "_respuestas.csv")
 
@@ -1062,12 +1173,17 @@ def analizar_narracion(base: Path) -> str:
             texto = {"d": "detras", "f": "frente", "s": "si", "n": "no"}.get(r, "--")
             lineas.append(f"  {pregunta} {texto}" + (f" {ok(r == cumple)}" if cumple else ""))
 
-    lineas += ["", "P7.8 en vivo, brazos del robot (cambios > 1 grado/min, saltos > 5 grados/min, p95 del "
-                   "salto; decide lo que viste, las cifras quedan de referencia):"]
-    for etiqueta, texto in ((3, "antebrazos en la mesa"), (4, "brazo derecho estirado")):
-        m = movimiento_brazos(con, etiqueta)
-        lineas.append(f"  {etiqueta:>2} {texto}: " + ("; ".join(
-            f"{lado} {c:.0f} / {sal:.0f} / {p95:.1f}" for lado, (c, sal, p95) in m.items()) or "sin datos"))
+    lineas += ["", f"P7.8 en vivo, brazos a la vista y quietos (desviacion del comando en sus "
+                   f"{BRAZO_VENTANA_S:.0f} s mas quietos con el brazo levantado; criterio <= "
+                   f"{BRAZO_QUIETO_MAX:.0f} grados):"]
+    for etiqueta, lado, texto in ((3, "L", "brazo izquierdo estirado"), (4, "R", "brazo derecho estirado")):
+        segundos, desviacion = brazo_quieto(con, etiqueta, lado)
+        if desviacion is None:
+            lineas.append(f"  {etiqueta:>2} {texto}: NO VALE: el brazo estuvo levantado {segundos:.0f} s, y "
+                          f"hacen falta {BRAZO_VENTANA_S:.0f} seguidos (¿la mano salia de la camara?)")
+        else:
+            lineas.append(f"  {etiqueta:>2} {texto}: levantado {segundos:.0f} s; desviacion {desviacion:.1f} "
+                          f"grados {ok(desviacion <= BRAZO_QUIETO_MAX)}")
 
     rutas = rutas_de_grabacion(ruta_con)
     emocion = fc.leer(rutas["emocion"]) if rutas["emocion"].is_file() else []
@@ -1088,6 +1204,42 @@ def analizar_narracion(base: Path) -> str:
         lineas.append(f"  {etiqueta:>2} {emo}: {n} vistazos (el protocolo hace 3); conserva la expresion en el "
                       f"{p:.0f} % de sus filas (criterio >= {VISTAZO_CONSERVA_MIN:.0f} %) "
                       f"{ok(p >= VISTAZO_CONSERVA_MIN)}; {emo} en el {tramo:.0f} % del tramo")
+
+    lineas += ["", f"P10.2, el cabeceo hacia abajo (segundos con el robot parado en su tope; criterio < "
+                   f"{TOPE_MAX_S:.0f} s; el 2026-11-12, sin la compresion, unos 15):"]
+    tope = cabeceo_en_tope(rutas["cabeza"]) if rutas["cabeza"].is_file() else None
+    if tope is None:
+        lineas.append(f"  sin datos: falta {rutas['cabeza'].name}")
+    elif tope[1] < TOPE_BAJADA_MIN:
+        lineas.append(f"  NO VALE: lo mas que bajaste la cabeza fueron {tope[1]:.0f} grados, y hacen falta "
+                      f"{TOPE_BAJADA_MIN:.0f} para probarlo; en el tope, {tope[0]:.1f} s")
+    else:
+        lineas.append(f"  en el tope {tope[0]:.1f} s, bajando la cabeza hasta {tope[1]:.0f} grados "
+                      f"{ok(tope[0] < TOPE_MAX_S)}")
+
+    ruidos = [r for r in (_num(f.get("ruido_malla")) for f in con if f["etiqueta"] == 1) if r is not None]
+    lineas += ["", "El temblor de la cabeza (ruido de la malla; el 2026-11-10, de dia, 0.75; el 2026-11-12, "
+                   "de noche, 1.2):"]
+    lineas.append(f"  hablando (etiqueta 1): {statistics.median(ruidos):.2f}" if ruidos
+                  else "  hablando (etiqueta 1): sin datos")
+    medida = leer_contraluz(base)
+    if medida is None or 0 not in medida or 1 not in medida:
+        lineas.append(f"  la camara, con y sin compensacion de contraluz: sin datos (falta "
+                      f"{ruta_contraluz(base).name})")
+    else:
+        for valor, nombre in ((1, "puesta, de fabrica"), (0, "apagada, como se usa")):
+            m = medida[valor]
+            lineas.append(f"  compensacion {nombre}: {m.get('fps', float('nan')):.1f} fps, brillo "
+                          f"{m.get('brillo', float('nan')):.0f}, ruido de la malla "
+                          + (f"{m['ruido_malla']:.2f}" if "ruido_malla" in m else "sin cara"))
+        cara = min(medida[0].get("con_cara", 0.0), medida[1].get("con_cara", 0.0))
+        if "ruido_malla" not in medida[0] or "ruido_malla" not in medida[1] or cara < CARA_MIN_CONTRALUZ:
+            lineas.append(f"  NO VALE: la malla vio la cara en el {100 * cara:.0f} % de las fotos de la medicion, y "
+                          f"hace falta el {100 * CARA_MIN_CONTRALUZ:.0f} (hay que estar delante y quieto)")
+        else:
+            veces = medida[0]["ruido_malla"] / max(medida[1]["ruido_malla"], 1e-9)
+            lineas.append(f"  apagada, el ruido de la malla es {veces:.2f} veces el de puesta (criterio <= "
+                          f"{RUIDO_CONTRALUZ_MAX}) {ok(veces <= RUIDO_CONTRALUZ_MAX)}")
     return "\n".join(lineas)
 
 
@@ -1104,6 +1256,12 @@ def _sesion_narracion(base: Path, py: str, entrada=None) -> None:
     entrada = entrada or input
     sin, con = rutas_p10(base)
     print(INTRO_P10)
+    contraluz = ruta_contraluz(base)
+    if _hay_que_grabar(contraluz, entrada):
+        print(CABECERA_P10_CAMARA)
+        _esperar("Colócate como para narrar. Al seguir empieza la medición: 1 minuto quieto.")
+        subprocess.run([py, str(PROJECT_ROOT / "tools" / "medir_contraluz.py"), "--vueltas", "2",
+                        "--malla", "--csv", str(contraluz)], cwd=PROJECT_ROOT)
     if _hay_que_grabar(sin, entrada):
         print(tabla_protocolo(PROTOCOLO_P10_SIN_INTERFAZ, cabecera=CABECERA_P10_SIN_INTERFAZ, quien="se ve",
                               ancho=ANCHO_P10))

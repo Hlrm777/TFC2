@@ -117,6 +117,16 @@ def test_todo_lo_que_la_pagina_pide_lo_sirve_el_servidor(servidor_real):
 
 
 
+def test_la_vista_del_robot_arranca_de_frente():
+    """La eligió el operador en la sesión p10; el botón la cambia y el navegador
+    recuerda el cambio, así que el valor guardado manda sobre el inicial."""
+    assert "const VISTA_INICIAL = 'frente';" in HTML
+    assert ">Vista: frente</button>" in HTML
+    assert "localStorage.getItem('telmeow.vista') || VISTA_INICIAL" in HTML
+    assert "'detrás'" in HTML.split("const VISTAS =")[1].split(";")[0]      # la otra sigue existiendo
+    assert "vista = 'detrás'" not in HTML and "vista:'detrás'" not in HTML
+
+
 def test_la_franja_de_guia_existe_y_solo_se_ve_con_guia():
     """La guía de las sesiones de verificación: sus elementos, el CSS que la
     enseña solo con la clase con-guia, y el JS que la pone desde el estado."""

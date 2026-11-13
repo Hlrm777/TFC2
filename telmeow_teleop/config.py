@@ -408,6 +408,17 @@ class HeadConfig:
     gain_pan: float = 1.49
     gain_tilt_up: float = 1.59
     gain_tilt_down: float = 1.80
+    # Compresión del cabeceo hacia abajo (P10.2, H72, decidida por el operador
+    # el 2026-11-13). Con 1.80 el robot toca su tope (−39°) a los 21° del
+    # operador, y al narrar el operador baja hasta 37° para leer el pie de la
+    # página: en la sesión del 2026-11-12 el robot estuvo 14.9 s parado en el
+    # tope. Con la compresión, la ganancia vale ``gain_tilt_down`` hasta
+    # ``tilt_down_recto`` grados del operador —los gestos pequeños no cambian—
+    # y de ahí baja de forma continua para que el tope llegue justo a
+    # ``tilt_down_hasta`` grados (``head_tracker.comprimir_tilt_abajo``).
+    # ``tilt_down_hasta`` 0 la apaga (lineal, como antes).
+    tilt_down_recto: float = 8.0
+    tilt_down_hasta: float = 37.0
     invert_pan: bool = True
     invert_tilt: bool = False
     # Filtro (P7.4). En el pipeline la cabeza temblaba con la persona quieta:
@@ -452,6 +463,8 @@ class HeadConfig:
             gain_pan=_env_float(env, "HEAD_GAIN_PAN", cls.gain_pan),
             gain_tilt_up=_env_float(env, "HEAD_GAIN_TILT_UP", cls.gain_tilt_up),
             gain_tilt_down=_env_float(env, "HEAD_GAIN_TILT_DOWN", cls.gain_tilt_down),
+            tilt_down_recto=_env_float(env, "HEAD_TILT_DOWN_RECTO", cls.tilt_down_recto),
+            tilt_down_hasta=_env_float(env, "HEAD_TILT_DOWN_HASTA", cls.tilt_down_hasta),
             invert_pan=_env_bool(env, "HEAD_INVERT_PAN", cls.invert_pan),
             invert_tilt=_env_bool(env, "HEAD_INVERT_TILT", cls.invert_tilt),
             min_cutoff=_env_float(env, "HEAD_MIN_CUTOFF", cls.min_cutoff),

@@ -139,8 +139,9 @@ delante, y en pausa no se pasa de página) y un hallazgo:
   ganancia de 1.80 el robot toca su tope (−39°) cuando el operador baja 21°, y
   esta vez bajó hasta 37°. El robot estuvo 14.9 s parado en el tope, en 17
   veces: los «lagazos» que notó el operador. (El primer diagnóstico, que la
-  malla perdía la cara, era falso; ver la sesión de confirmación.) Sin
-  corregir: es una decisión sobre el mapeo.
+  malla perdía la cara, era falso; ver la sesión de confirmación.) Corregido
+  en el P10.2 con una compresión suave de la ganancia, decidida por el
+  operador; falta verla en vivo.
 
 Cómo leerlo:
 
@@ -169,11 +170,11 @@ cambia respecto al plan original.
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral · **2026-11-03 (P6.5)**: las gafas no pesan; los blendshapes, reentrenados con el dataset y cuatro sesiones del operador (tristeza con ceño 32-38 % → 61-72 % en validación cruzada), y la regla «sin cejas arriba no es sorpresa» encendida, por decisión del operador | `1e3b6c1`, `de4827a` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ✅ **cerrado el 2026-11-08** · código hecho el 2026-10-26, sesión con el operador el 2026-11-02 · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cerrado el 2026-11-08 por decisión del operador** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7»; el P7.8 se ve en vivo en la primera sesión del P10 | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a`, `3bd2be8` |
-| P10 — Interfaz de narración | 🟡 **código hecho el 2026-11-08, sesión p10 el 2026-11-10** · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **sesión p10 (2026-11-10)**: las teclas, la página con su gesto (21 de 21) y los brazos, bien; al operador la interfaz le pareció intuitiva y prefiere la vista de frente; los fps con la interfaz, 88 % de los de sin ella (se pedía 90); **H70** (la sonrisa con la cabeza baja) y **H71** (la cámara a 15 fps) · **P10.1**: el voto de un enojo descartado va a la segunda opción del modelo (feliz leyendo, 25 → 81 % reproducido) · **H71 corregido**: la compensación de contraluz de la cámara se apaga al abrirla (15 → 30 fps medidos) · **confirmación del 2026-11-12** (de noche, en otra habitación): feliz leyendo 77 % y neutral leyendo 92 % (P10.1 ✅), 18-21 fps sin tramos a 15 y 97 % de los fps de sin interfaz (H71 ✅) · **H72**: al mirar al pie de la pantalla el operador baja más de lo que el cuello del robot sigue (tope a 21° del operador) · **falta**: decidir el H72 y la vista de frente por defecto · la sesión se lleva con `tools/sesion_verificacion.py --narracion`, que enseña la tabla de cada grabación antes de lanzarla (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
+| P10 — Interfaz de narración | 🟡 **código hecho el 2026-11-08, sesión p10 el 2026-11-10** · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **sesión p10 (2026-11-10)**: las teclas, la página con su gesto (21 de 21) y los brazos, bien; al operador la interfaz le pareció intuitiva y prefiere la vista de frente; los fps con la interfaz, 88 % de los de sin ella (se pedía 90); **H70** (la sonrisa con la cabeza baja) y **H71** (la cámara a 15 fps) · **P10.1**: el voto de un enojo descartado va a la segunda opción del modelo (feliz leyendo, 25 → 81 % reproducido) · **H71 corregido**: la compensación de contraluz de la cámara se apaga al abrirla (15 → 30 fps medidos) · **confirmación del 2026-11-12** (de noche, en otra habitación): feliz leyendo 77 % y neutral leyendo 92 % (P10.1 ✅), 18-21 fps sin tramos a 15 y 97 % de los fps de sin interfaz (H71 ✅) · **H72**: al mirar al pie de la pantalla el operador baja más de lo que el cuello del robot sigue (tope a 21° del operador) · **P10.2**: la ganancia hacia abajo se comprime lejos del frente y el tope llega a los 37° (15.8 → 0 s en el tope, reproducido) · **falta**: ver el P10.2 en vivo y la vista de frente por defecto · la sesión se lleva con `tools/sesion_verificacion.py --narracion`, que enseña la tabla de cada grabación antes de lanzarla (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
-**1629 pruebas en verde** (desde el 2026-11-10, P10.1 y H71: 1610 + 16 de la segunda opción tras un enojo descartado + 3 de la compensación de contraluz; desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 44 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
+**1650 pruebas en verde** (desde el 2026-11-13, P10.2: 1629 + 21 de la compresión del cabeceo hacia abajo; desde el 2026-11-10, P10.1 y H71: 1610 + 16 de la segunda opción tras un enojo descartado + 3 de la compensación de contraluz; desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 44 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
 
 Entre ellas, tres de tipo distinto que conviene conocer porque atrapan lo que las
 demás no ven (`tests/test_estatico.py`): una pasa **pyflakes** sobre todo el
@@ -4858,11 +4859,64 @@ con el brazo ya quieto, la desviación fue de 0.7 a 1.2° (0.1 a 1.0° el
 2026-11-10). El «sí» del operador a los temblores es por la cabeza y por los
 segundos en que el brazo sube.
 
+### P10.2 — El cabeceo hacia abajo, comprimido 🟡 código hecho el 2026-11-13 · falta verlo en vivo
+
+**El problema (H72)**, arriba: con la ganancia de 1.80 el robot toca su tope a
+los 21° del operador, que al narrar baja hasta 37°.
+
+**Lo que se decidió** (el operador, el 2026-11-13, entre tres salidas: comprimir,
+bajar la ganancia a ~1.1 o dejarlo y declararlo): **compresión suave**. La
+ganancia sigue en 1.80 hasta 8° —los gestos pequeños se ven igual— y de ahí la
+pendiente decae de forma continua, sin codo, para que el tope llegue justo a
+los 37° (`head_tracker.comprimir_tilt_abajo`; `HeadConfig.tilt_down_recto` y
+`tilt_down_hasta`; `TELMEOW_HEAD_TILT_DOWN_HASTA=0` la apaga). Hacia arriba y
+en el giro no cambia nada. Va antes del filtro y la zona muerta, que siguen
+igual. El CSV de cabeza gana las dos columnas.
+
+| El operador baja | El robot, antes | El robot, ahora | Pendiente ahora |
+|---|---|---|---|
+| 5° | 9.0° | 9.0° | 1.80 |
+| 8° | 14.4° | 14.4° | 1.80 |
+| 10° | 18.0° | 17.8° | 1.59 |
+| 15° | 27.0° | 24.7° | 1.18 |
+| 20° | 36.0° | 29.8° | 0.87 |
+| 25° | 39.0° (tope) | 33.5° | 0.64 |
+| 30° | 39.0° (tope) | 36.3° | 0.48 |
+| 37° | 39.0° (tope) | 39.0° (tope) | 0.31 |
+
+Por qué 8 y 37: leyendo, la mediana del cabeceo del operador fue de 3 a 6° y
+el 1 % más bajo, 30° (el mínimo, 37°). Por qué una exponencial y no dos rectas:
+un codo es un cambio brusco de velocidad del robot en mitad de un gesto.
+
+**Reproducida sobre la sesión grabada** (`tools/simular_compresion_tilt.py`,
+con el cabeceo crudo de cada fila y sin el filtro). Criterios fijados el
+2026-11-13, después de ver la sesión: el tiempo en el tope baja al menos un
+90 %, y cerca del frente y hacia arriba sale idéntico.
+
+| Sesión | Segundos en el tope, lineal | Comprimido |
+|---|---|---|
+| Narración del 2026-11-12 | 15.8 (14.9 medidos en vivo, con el filtro) | **0.0** |
+| Narración del 2026-11-10 (`p10a`) | 1.4 | 0.0 |
+
+Cumple. **El precio**, que se ve en la tabla: entre 10 y 20° del operador el
+robot baja algo menos que antes (a 20°, 30° en vez de 36°). Y al pie de la
+página se mueve poco (la pendiente baja a 0.3), pero se mueve.
+
+**De paso** baja el temblor con la cabeza baja: los escalones de la zona
+muerta salen multiplicados por la pendiente, que ahí ya no es 1.80.
+
+**21 pruebas nuevas** (`tests/test_p10_compresion.py`): la curva —igual cerca
+del frente, el tope donde se pide, continua y sin codo, monótona, nunca más
+que la lineal, y lineal cuando no hay nada que comprimir—, el tracker de
+verdad (ya no se para a los 21°, hacia arriba no cambia, con el tilt
+invertido), la configuración y el CSV, y la simulación con su criterio sobre
+la sesión grabada.
+
 ### Lo que deja pendiente la sesión p10
 
 | Pendiente | Quién | Qué lo dispara | Qué cuesta |
 |---|---|---|---|
-| **H72, el robot se para en el tope al mirar al pie de la pantalla** | El operador decide; quien lleve el paso lo reproduce antes sobre `p10_narracion_cabeza.csv` | La decisión del operador entre tres salidas | (a) **Compresión suave**: la ganancia de 1.80 cerca del frente y cada vez menor al bajar, de modo que el tope llegue a los ~37° del operador; el robot no se para nunca y los gestos pequeños se ven igual. Una curva con sus pruebas y verla en vivo. (b) **Bajar la ganancia** hacia abajo (a ~1.1): lo mismo de simple que hoy, pero todos los cabeceos del robot se ven más pequeños. (c) **Dejarlo y declararlo**: el cuello del robot llega a −39° y no más; subir el libro en la pantalla o bajar menos la cabeza |
+| **Ver el P10.2 en vivo** (la compresión del cabeceo) | El operador narra; el análisis, quien lleve el paso | Que el operador tenga 10 minutos con la cámara | Una narración con `sesion_verificacion.py --narracion` (la primera grabación no hace falta). Criterio, fijado el 2026-11-13: menos de 1 s en el tope en toda la sesión leyendo el pie de la página como en la del 2026-11-12, y que al operador el cabeceo cerca del frente le parezca el de antes |
 | **Cuánto ruido mete la compensación de contraluz apagada** | Quien lleve el paso amplía `tools/medir_contraluz.py` para medir también el ruido de la malla; el operador se sienta 2 minutos | Que el temblor leve de la cabeza moleste al narrar | Una medición con la misma luz en las dos posiciones. Si la compensación apagada es la que mete el ruido, se elige entre fps y ruido, o se añade luz |
 | **La etiqueta 3 del protocolo** | Quien escriba el próximo protocolo | Que haga falta volver a medir la zona muerta de los brazos | Cambiarla por una postura con los brazos a la vista y quietos; hoy solo comprueba que los brazos que no se ven no tiemblan |
 | **La vista de frente, por defecto** | Quien lleve el paso | El operador la eligió en la sesión; hoy la página arranca desde detrás y recuerda el cambio en ese navegador | Una línea en el visor y su prueba |
@@ -7377,7 +7431,7 @@ que conviene saber:
 | **H66** | **La referencia del cabeceo era el primer frame, no la calibración**: el enojo de verdad cayó al 35 % (66 % medido desde la calibración) y la cabeza del robot miraba ~15° abajo. La cabeza toma el neutro al acabar la calibración | P7.7, §7.24 |
 | **H68** | **Con la cabeza muy baja (−25°) la tristeza no se lee**: el modelo dice tristeza el 16 % (96 % a nivel); el reentrenamiento no lo arregla. Límite declarado | P7.7, §7.24 |
 | **H67** | **Con la luz apagada del todo la malla pierde la cara, no tiembla**: el índice de ruido no se entera y la cabeza se quedaba mirando a un lado. Sin cara, cabeza al frente y pausa SIN CARA | P7.7, §7.24 |
-| **H72** | **Al mirar al pie de la pantalla el operador baja más de lo que el cuello del robot sigue**: con la ganancia de 1.80 el tope (−39°) llega a los 21° del operador, que bajó hasta 37°; 14.9 s parado en el tope en la sesión del 2026-11-12. El primer diagnóstico (la malla perdía la cara) era una mala lectura de `malla_falla`. Sin corregir | P10 (la sesión de confirmación) |
+| **H72** | **Al mirar al pie de la pantalla el operador baja más de lo que el cuello del robot sigue**: con la ganancia de 1.80 el tope (−39°) llega a los 21° del operador, que bajó hasta 37°; 14.9 s parado en el tope en la sesión del 2026-11-12. El primer diagnóstico (la malla perdía la cara) era una mala lectura de `malla_falla`. Corregido con la compresión del P10.2; falta verla en vivo | P10 (la sesión de confirmación), P10.2 |
 | **H71** | **La cámara bajó sola de 30 a 15 fotos por segundo a mitad de la sesión p10**, al pasar el brazo por delante, y no se recuperó: los «lagazos» del operador. Es la compensación de contraluz del driver: en 1 da 15 fps con esa luz, en 0 da 30 (`tools/medir_contraluz.py`). El programa la apaga al abrir la cámara; falta verlo en vivo | P10 (resultados de la sesión), §7.25 |
 | **H70** | **La sonrisa con la cabeza baja se lee como enojo, y la regla del cabeceo la mandaba a neutral**: feliz el 25 % leyendo el libro de la pantalla. El voto descartado va ahora a la segunda opción del modelo (81 % reproducido); falta confirmarlo | P10.1, §7.25 |
 | **H69** | **En Windows, `http.server` deja abrir dos servidores en el mismo puerto** (`SO_REUSEADDR`): una segunda sesión habría compartido el 8001 en silencio. El servidor de la interfaz ya no reutiliza el puerto | P10, §7.25 |

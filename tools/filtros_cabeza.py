@@ -62,6 +62,9 @@ def reproducir(filas: list[dict], min_cutoff: float, beta: float,
     f0 = filas[0]
     tr = HeadTracker(gain_pan=float(f0["gain_pan"]), gain_tilt_up=float(f0["gain_tilt_up"]),
                      gain_tilt_down=float(f0["gain_tilt_down"]), invert_pan=True,
+                     # Desde el P10.2; las grabaciones anteriores no la llevan (0, lineal).
+                     tilt_down_recto=float(f0.get("tilt_down_recto") or 0.0),
+                     tilt_down_hasta=float(f0.get("tilt_down_hasta") or 0.0),
                      min_cutoff=min_cutoff, beta=beta, zona_muerta=zona,
                      clock=lambda: reloj["t"])
     try:

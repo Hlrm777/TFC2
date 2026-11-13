@@ -63,6 +63,7 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
+from functools import lru_cache
 from pathlib import Path
 
 import cv2
@@ -285,6 +286,51 @@ def landmarks_to_cloud(landmarks, width: int, height: int) -> np.ndarray:
     )
 
 
+@lru_cache(maxsize=32)
+def _escala_compresion(ganancia: float, tope: float, recto: float, hasta: float) -> float | None:
+    """La constante ``A`` de ``comprimir_tilt_abajo``, o ``None`` si no hay que
+    comprimir: apagada, o el tope ya queda más allá de ``hasta`` con la ganancia
+    sola, o el tramo recto ya llega al tope."""
+    if hasta <= 0.0 or hasta <= recto or ganancia * hasta <= tope or ganancia * recto >= tope:
+        return None
+    falta = tope - ganancia * recto            # lo que le queda al robot tras el tramo recto
+    tramo = ganancia * (hasta - recto)         # lo que recorrería sin comprimir
+    # A·(1 − exp(−tramo/A)) crece con A desde 0 hasta ``tramo``: bisección.
+    bajo, alto = 1e-6, 1e6
+    for _ in range(200):
+        medio = math.sqrt(bajo * alto)
+        if medio * (1.0 - math.exp(-tramo / medio)) < falta:
+            bajo = medio
+        else:
+            alto = medio
+    return math.sqrt(bajo * alto)
+
+
+def comprimir_tilt_abajo(abajo: float, ganancia: float, tope: float,
+                         recto: float, hasta: float) -> float:
+    """Grados que baja la cabeza del robot cuando el operador baja ``abajo``
+    (los dos positivos) — P10.2, H72.
+
+    Hasta ``recto`` grados es la ganancia de siempre, ``ganancia · abajo``. De
+    ahí en adelante la pendiente decae de forma continua (una exponencial que
+    arranca con pendiente ``ganancia``, así que no hay codo que se vea) y la
+    curva pasa por ``tope`` justo en ``hasta``::
+
+        ganancia·recto + A·(1 − exp(−ganancia·(abajo − recto)/A))
+
+    Más allá de ``hasta`` sigue creciendo y lo corta el recorte de siempre. Sin
+    compresión (``hasta`` 0, o un tope que la ganancia sola no alcanza antes de
+    ``hasta``) devuelve ``ganancia · abajo``. Es monótona: el robot nunca se
+    mueve al revés que el operador.
+    """
+    if abajo <= recto:
+        return ganancia * abajo
+    escala = _escala_compresion(float(ganancia), float(tope), float(recto), float(hasta))
+    if escala is None:
+        return ganancia * abajo
+    return ganancia * recto + escala * (1.0 - math.exp(-ganancia * (abajo - recto) / escala))
+
+
 class RuidoMalla:
     """Cuánto tiembla la Face Mesh, en grados crudos, sin confundirlo con mover
     la cabeza (P7.6).
@@ -399,8 +445,14 @@ class HeadTracker:
         min_cutoff: float = 0.5,
         beta: float = 0.5,
         zona_muerta: float = 0.0,
+        tilt_down_recto: float = 0.0,
+        tilt_down_hasta: float = 0.0,
         clock=time.perf_counter,
     ) -> None:
+        if min(tilt_down_recto, tilt_down_hasta) < 0.0:
+            raise ValueError("tilt_down_recto y tilt_down_hasta no pueden ser negativos")
+        self.tilt_down_recto = float(tilt_down_recto)
+        self.tilt_down_hasta = float(tilt_down_hasta)
         arriba = gain_tilt if gain_tilt_up is None else gain_tilt_up
         abajo = gain_tilt if gain_tilt_down is None else gain_tilt_down
         if min(gain_pan, arriba, abajo) <= 0.0:
@@ -455,6 +507,8 @@ class HeadTracker:
             gain_pan=cfg.head.gain_pan,
             gain_tilt_up=cfg.head.gain_tilt_up,
             gain_tilt_down=cfg.head.gain_tilt_down,
+            tilt_down_recto=cfg.head.tilt_down_recto,
+            tilt_down_hasta=cfg.head.tilt_down_hasta,
             method=cfg.head.method,
             invert_pan=cfg.head.invert_pan,
             invert_tilt=cfg.head.invert_tilt,
@@ -721,10 +775,19 @@ class HeadTracker:
         # menos hacia abajo (−39° frente a +42°) y el operador también. Con una
         # sola ganancia hay que elegir entre pasarse arriba o no llegar abajo.
         # La función es continua en 0, así que no hay salto al cruzar.
-        ganancia_tilt = self.gain_tilt_up if pitch >= 0.0 else self.gain_tilt_down
+        #
+        # Hacia abajo, además, la ganancia se comprime lejos del frente (P10.2,
+        # H72): al narrar el operador baja hasta 37° para leer el pie de la
+        # página, y con la ganancia sola el robot se quedaba parado en su tope
+        # desde los 21°. Ver ``comprimir_tilt_abajo``.
+        if pitch >= 0.0:
+            tilt = pitch * self.gain_tilt_up
+        else:
+            tilt = -comprimir_tilt_abajo(-pitch, self.gain_tilt_down, -HEAD_TILT_RANGE[0],
+                                         self.tilt_down_recto, self.tilt_down_hasta)
 
         pan = yaw * self.gain_pan * (-1.0 if self.invert_pan else 1.0)
-        tilt = pitch * ganancia_tilt * (-1.0 if self.invert_tilt else 1.0)
+        tilt *= -1.0 if self.invert_tilt else 1.0
 
         ahora = self._clock() if timestamp is None else timestamp
         pan = self._zona_pan(self._filter_pan(pan, ahora))
@@ -828,6 +891,8 @@ COLUMNAS_CSV = (
     "t", "etiqueta", "metodo", "raw_pan", "raw_tilt",
     "pan", "tilt", "gain_pan", "gain_tilt_up", "gain_tilt_down",
     "recortado", "escala_cara", "ancho", "alto",
+    # Desde el 2026-11-13 (P10.2): la compresión del cabeceo hacia abajo.
+    "tilt_down_recto", "tilt_down_hasta",
 )
 
 
@@ -848,6 +913,7 @@ def fila_csv(tracker: HeadTracker, t: float, etiqueta: int,
         f"{tracker.gain_tilt_up:.2f}", f"{tracker.gain_tilt_down:.2f}",
         int(bool(recorte and recorte.clamped)),
         f"{tracker.face_scale or float('nan'):.2f}", ancho, alto,
+        f"{tracker.tilt_down_recto:g}", f"{tracker.tilt_down_hasta:g}",
     ]
 
 

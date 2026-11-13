@@ -296,6 +296,31 @@ PROTOCOLO_P10_NARRACION: tuple[tuple[int, str, int, str], ...] = (
      "dice «La sesión terminó»"),
 )
 
+#: La sesión corta de velocidad (2026-11-13): la referencia sin interfaz y la
+#: narración, grabadas una detrás de otra, y la narración con las dos vistas del
+#: robot. En la sesión que cerró el P10 la narración fue a 18.9 fps y la única
+#: referencia era de la noche anterior; y la vista de frente, que es nueva,
+#: dibuja la pantalla de los ojos, que desde detrás no se ve.
+PROTOCOLO_VELOCIDAD: tuple[tuple[int, str, int, str], ...] = (
+    (0, "Cara relajada mirando la pantalla, quieto, antebrazos en la mesa. NO pulses nada: "
+        "espera a que se abra el navegador con el robot, tu cámara y el libro", 15,
+     "abajo dice «Calibrando: cara relajada, mirando la pantalla» unos 3 s; luego, neutral"),
+    (1, "Mira el último botón de la fila: tiene que decir «Vista: frente» (si dice «detrás», "
+        "púlsalo con el ratón). Luego habla en voz alta mirando la pantalla: cuenta qué "
+        "hiciste hoy. Antebrazos en la mesa, sin gestos. No elijas ningún cuento", 60,
+     "el robot, visto de FRENTE, sigue tu cabeza"),
+    (2, "Pulsa con el ratón el botón «Vista» (pasará a decir «Vista: detrás») y sigue "
+        "hablando igual, mirando la pantalla, sin gestos", 60,
+     "el robot, visto desde DETRÁS, sigue tu cabeza"),
+    (3, "Pulsa «Vista» otra vez para dejarlo de frente, y luego q dos veces seguidas (en menos "
+        "de 3 s)", 5,
+     "la primera q pide confirmación; con la segunda se cierra la ventana de Python y la página "
+     "dice «La sesión terminó»"),
+)
+
+#: Segundos que tiene que durar cada tramo de la sesión de velocidad para valer.
+VELOCIDAD_MIN_S = 30.0
+
 #: Lo que se le pregunta al operador al acabar: (clave, pregunta, respuesta que
 #: cumple). Sin respuesta que cumpla, la pregunta informa y no decide: el criterio
 #: es no tocar la ventana de Python, y la vista la elige él.
@@ -893,18 +918,18 @@ def rutas_p10(base: Path) -> tuple[Path, Path]:
             base.with_name(base.name + "_narracion.csv"))
 
 
-def guia_p10_datos(protocolo=PROTOCOLO_P10_NARRACION) -> dict:
+def guia_p10_datos(protocolo=PROTOCOLO_P10_NARRACION, titulo: str | None = None) -> dict:
     """La guía que la página enseña arriba (``--guia-sesion``), etiqueta por
     etiqueta: la misma tabla que la terminal."""
-    return {"titulo": TITULO_GUIA_P10,
+    return {"titulo": titulo or TITULO_GUIA_P10,
             "etiquetas": [{"etiqueta": etiqueta, "que": que, "segundos": segundos, "robot": robot}
                           for etiqueta, que, segundos, robot in protocolo]}
 
 
-def _escribir_guia() -> Path:
+def _escribir_guia(datos: dict | None = None) -> Path:
     """La guía en un JSON temporal, para pasárselo a ``control_panel``."""
     with tempfile.NamedTemporaryFile("wb", suffix="_guia_p10.json", delete=False) as f:
-        f.write(json.dumps(guia_p10_datos(), ensure_ascii=False, indent=1).encode("utf-8"))
+        f.write(json.dumps(datos or guia_p10_datos(), ensure_ascii=False, indent=1).encode("utf-8"))
     return Path(f.name)
 
 
@@ -1287,6 +1312,132 @@ def _sesion_narracion(base: Path, py: str, entrada=None) -> None:
         preguntar_p10(base, entrada)
 
 
+INTRO_VELOCIDAD = """
+LA SESIÓN DE VELOCIDAD: dos grabaciones seguidas, unos 4 minutos, sin cambiar la
+luz ni abrir otros programas entre una y otra.
+
+  1. Sin la interfaz: solo la ventana de Python, 1 minuto hablando. Las teclas
+     van a ESA ventana.
+  2. Con la interfaz: 1 minuto hablando con el robot visto de frente y 1 minuto
+     visto desde detrás. Todas las teclas, en el navegador.
+
+  Es para saber cuánto frena la interfaz al programa, con las dos grabaciones de
+  la misma noche. No hay preguntas al final: sale el informe.
+"""
+
+CABECERA_VELOCIDAD_NARRACION = (
+    "SEGUNDA GRABACIÓN, con la interfaz: 4 etiquetas. ESPACIO pasa de etiqueta (la 0 empieza\n"
+    "sola). Esta misma tabla sale ARRIBA en la página, con el tiempo que llevas: no hace\n"
+    "falta volver a esta terminal. La ventana de Python también se abre: déjala, sin hacer\n"
+    "clic en ella. Si el navegador no queda delante, haz clic una vez en el libro.")
+
+TITULO_GUIA_VELOCIDAD = "Sesión de velocidad · segunda grabación"
+
+CABECERA_VELOCIDAD_SIN = (
+    "PRIMERA GRABACIÓN, sin la interfaz: SOLO 2 etiquetas, la 0 y la 1, y luego q.\n"
+    "Aquí no hay navegador ni botones, solo la ventana de Python: ESPACIO en ella pasa\n"
+    "de etiqueta (la 0 empieza sola).")
+
+
+def guia_velocidad() -> str:
+    """Todo lo que se lee antes de la sesión de velocidad."""
+    return "\n".join([
+        INTRO_VELOCIDAD,
+        tabla_protocolo(PROTOCOLO_P10_SIN_INTERFAZ, cabecera=CABECERA_VELOCIDAD_SIN, quien="se ve",
+                        ancho=ANCHO_P10),
+        tabla_protocolo(PROTOCOLO_VELOCIDAD, cabecera=CABECERA_VELOCIDAD_NARRACION, ancho=ANCHO_P10),
+    ])
+
+
+def _sesion_velocidad(base: Path, py: str) -> None:
+    """Las dos grabaciones, SIEMPRE las dos y seguidas: lo que se mide es una
+    frente a otra, y una referencia de otro día no vale (sesión del 2026-11-13)."""
+    sin, con = rutas_p10(base)
+    print(INTRO_VELOCIDAD)
+    print(tabla_protocolo(PROTOCOLO_P10_SIN_INTERFAZ, cabecera=CABECERA_VELOCIDAD_SIN, quien="se ve",
+                          ancho=ANCHO_P10))
+    _esperar("Lee la tabla. Al seguir se abre la ventana de Python y empieza la etiqueta 0.\n"
+             "  Cuando acabe la etiqueta 1, pulsa q en esa ventana.")
+    subprocess.run([py, "-m", "telmeow_teleop.main", "--record", str(sin)], cwd=PROJECT_ROOT)
+    print(tabla_protocolo(PROTOCOLO_VELOCIDAD, cabecera=CABECERA_VELOCIDAD_NARRACION, ancho=ANCHO_P10))
+    _esperar("Lee la tabla. Al seguir se abre la ventana de Python y, unos segundos después,\n"
+             "  el navegador: desde ahí, todo con el navegador delante.")
+    guia = _escribir_guia(guia_p10_datos(PROTOCOLO_VELOCIDAD, TITULO_GUIA_VELOCIDAD))
+    try:
+        subprocess.run([py, "-m", "telmeow_teleop.control_panel", "--record", str(con),
+                        "--guia-sesion", str(guia)], cwd=PROJECT_ROOT)
+    finally:
+        guia.unlink(missing_ok=True)
+
+
+def analizar_velocidad(base: Path) -> str:
+    """El informe de la sesión de velocidad: los fps de la narración, con el
+    robot visto de frente y desde detrás, frente a los de sin interfaz."""
+    import analizar_sesion as asn
+
+    ruta_sin, ruta_con = rutas_p10(base)
+    lineas = [f"INFORME DE VELOCIDAD DE {base.name}", "=" * 60, ""]
+    faltan = [r.name for r in (ruta_sin, ruta_con) if not r.is_file()]
+    if faltan:
+        return "\n".join(lineas + [f"Falta {', '.join(faltan)}: no hay nada que comparar."])
+
+    def tramo(ruta, etiqueta):
+        filas = [f for f in asn.cargar(ruta) if f["etiqueta"] == etiqueta and not f["pausa"]]
+        if len(filas) < 2:
+            return None
+        segundos = filas[-1]["t"] - filas[0]["t"]
+        bucle = [f["ms_bucle"] for f in filas if f.get("ms_bucle") is not None]
+        hz = [f["mqtt_hz"] for f in filas if f.get("mqtt_hz") is not None]
+        return {"segundos": segundos, "fps": (len(filas) - 1) / segundos if segundos > 0 else 0.0,
+                "bucle": statistics.mean(bucle) if bucle else None,
+                "hz": statistics.median(hz) if hz else None}
+
+    def texto(t):
+        bucle = "--" if t["bucle"] is None else f"{t['bucle']:.0f}"
+        return f"{t['fps']:.1f} fps en {t['segundos']:.0f} s ({bucle} ms por vuelta)"
+
+    sin = tramo(ruta_sin, 1)
+    frente, detras = tramo(ruta_con, 1), tramo(ruta_con, 2)
+    lineas.append(f"Criterio: con la interfaz, al menos el {100 * FPS_INTERFAZ_MIN:.0f} % de los fps de sin ella; "
+                  f"cada tramo, de {VELOCIDAD_MIN_S:.0f} s o mas.")
+    lineas.append("")
+    if sin is None or sin["segundos"] < VELOCIDAD_MIN_S:
+        lineas.append(f"  sin interfaz (etiqueta 1): NO VALE: hacen falta {VELOCIDAD_MIN_S:.0f} s hablando"
+                      + ("" if sin is None else f", y hay {sin['segundos']:.0f}"))
+        return "\n".join(lineas)
+    lineas.append(f"  sin interfaz (etiqueta 1):               {texto(sin)}")
+    fracciones = {}
+    for nombre, etiqueta, t in (("robot de frente", 1, frente), ("robot desde detras", 2, detras)):
+        if t is None or t["segundos"] < VELOCIDAD_MIN_S:
+            lineas.append(f"  con interfaz, {nombre} (etiqueta {etiqueta}): NO VALE: hacen falta "
+                          f"{VELOCIDAD_MIN_S:.0f} s" + ("" if t is None else f", y hay {t['segundos']:.0f}"))
+            continue
+        fracciones[nombre] = t["fps"] / sin["fps"]
+        cumple = fracciones[nombre] >= FPS_INTERFAZ_MIN
+        lineas.append(f"  con interfaz, {nombre} (etiqueta {etiqueta}): {texto(t)}: "
+                      f"{100 * fracciones[nombre]:.0f} % {'OK' if cumple else 'NO CUMPLE'}")
+        if t["hz"] is not None:
+            lineas.append(f"      publicacion {t['hz']:.1f} Hz (criterio >= {HZ_INTERFAZ_MIN}) "
+                          f"{'OK' if t['hz'] >= HZ_INTERFAZ_MIN else 'NO CUMPLE'}")
+    if len(fracciones) == 2:
+        f, d = fracciones["robot de frente"], fracciones["robot desde detras"]
+        lineas.append("")
+        if f >= FPS_INTERFAZ_MIN and d >= FPS_INTERFAZ_MIN:
+            lineas.append("Lectura: la interfaz cumple con las dos vistas.")
+        elif d >= FPS_INTERFAZ_MIN:
+            lineas.append("Lectura: desde detras cumple y de frente no: lo que cuesta es dibujar el robot de "
+                          "frente (la pantalla de los ojos).")
+        elif abs(f - d) < 0.03:
+            lineas.append("Lectura: no cumple con ninguna vista y las dos van igual: no es la vista, es la "
+                          "pagina entera (el video, el robot y el libro).")
+        else:
+            lineas.append("Lectura: no cumple con ninguna vista, y de frente va "
+                          + ("peor" if f < d else "mejor") + " que desde detras.")
+        lineas.append("(La vista no se graba: se supone que la etiqueta 1 se hizo de frente y la 2 desde "
+                      "detras, como pide la tabla.)")
+    return "\n".join(lineas)
+
+
 def _guardar_informe(base: Path, analisis) -> int:
     print("\nAnalizando...\n")
     informe = analisis(base)
@@ -1311,6 +1462,8 @@ def main(argv: list[str] | None = None) -> int:
     modo.add_argument("--entrenar", action="store_true", help="la del P7.7: caras para reentrenar la emocion")
     modo.add_argument("--confirmar", action="store_true", help="la que confirma el reentrenado y la regla suave")
     modo.add_argument("--narracion", action="store_true", help="la del P10: sin y con la interfaz de narracion")
+    modo.add_argument("--velocidad", action="store_true",
+                      help="la corta del P10: los fps sin interfaz y con ella, seguidas, con las dos vistas")
     parser.add_argument("--analizar", action="store_true", help="solo el informe, sin grabar")
     parser.add_argument("--guia", action="store_true", help="solo las tablas del protocolo, sin grabar")
     parser.add_argument("--ensayo", action="store_true",
@@ -1318,18 +1471,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sin-navegador", action="store_true", help="con --ensayo: no abrir el navegador")
     args = parser.parse_args(argv)
     modo_ = ("gestos" if args.gestos else "ajustes" if args.ajustes else "entrenar" if args.entrenar
-             else "confirmar" if args.confirmar else "narracion" if args.narracion else "")
+             else "confirmar" if args.confirmar else "narracion" if args.narracion
+             else "velocidad" if args.velocidad else "")
     base = PROJECT_ROOT / (args.base or {"gestos": "p75", "ajustes": "p76", "entrenar": "p77",
-                                         "confirmar": "p78", "narracion": "p10"}.get(modo_, "p7_final"))
+                                         "confirmar": "p78", "narracion": "p10",
+                                         "velocidad": "p10v"}.get(modo_, "p7_final"))
     py = sys.executable
     analisis = {"gestos": analizar_gestos, "ajustes": analizar_ajustes,
                 "entrenar": analizar_entrenamiento,
-                "confirmar": analizar_confirmacion, "narracion": analizar_narracion}.get(modo_, analizar)
+                "confirmar": analizar_confirmacion, "narracion": analizar_narracion,
+                "velocidad": analizar_velocidad}.get(modo_, analizar)
     protocolo = {"gestos": PROTOCOLO_GESTOS, "ajustes": PROTOCOLO_AJUSTES,
                  "entrenar": PROTOCOLO_ENTRENAR, "confirmar": PROTOCOLO_CONFIRMAR}.get(modo_, PROTOCOLO)
 
     if args.guia:
-        print(guia_p10() if modo_ == "narracion" else tabla_protocolo(protocolo))
+        print(guia_p10() if modo_ == "narracion" else guia_velocidad() if modo_ == "velocidad"
+              else tabla_protocolo(protocolo))
         return 0
     if args.ensayo:
         if modo_ != "narracion":
@@ -1350,6 +1507,9 @@ def main(argv: list[str] | None = None) -> int:
         if modo_ == "narracion":
             # Ni el visor del 8000 ni el monitor: la interfaz la sirve main.py.
             _sesion_narracion(base, py)
+            return _guardar_informe(base, analisis)
+        if modo_ == "velocidad":
+            _sesion_velocidad(base, py)
             return _guardar_informe(base, analisis)
 
         if not puerto_abierto(8000):

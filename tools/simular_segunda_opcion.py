@@ -44,13 +44,15 @@ SUBIDA_FELIZ = 30.0
 CAIDA_MAXIMA = 5.0
 
 #: El tramo que la regla tiene que arreglar.
-TRAMO_SONRISA = ("p10_narracion", "feliz leyendo")
+TRAMO_SONRISA = ("p10a", "feliz leyendo")
 
 #: Por sesión: ``(tramo, etiquetas, expresión pedida)``. De p10, solo las
 #: etiquetas con una expresión clara: fuera la calibración (0, 2), la pausa (8),
 #: la expresión fijada a mano (11) y el cierre (13).
+#: ``p10a`` es la narracion de la sesion p10 del 2026-11-10 (la que destapo el
+#: problema); ``p10_narracion`` es desde el 2026-11-12 la de confirmacion.
 TRAMOS: dict[str, tuple[tuple[str, tuple[int, ...], str], ...]] = {
-    "p10_narracion": (
+    "p10a": (
         ("neutral hablando", (1,), "neutral"),
         ("neutral brazos quietos", (3,), "neutral"),
         ("neutral brazo estirado", (4,), "neutral"),

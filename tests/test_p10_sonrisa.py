@@ -175,11 +175,11 @@ def test_el_criterio_de_la_simulacion():
     import simular_segunda_opcion as sso
 
     sin = {"feliz leyendo": 25.0, "neutral leyendo": 95.0}
-    assert sso.criterio({"p10_narracion": (sin, {"feliz leyendo": 81.0, "neutral leyendo": 94.0})}).cumple
-    poco = sso.criterio({"p10_narracion": (sin, {"feliz leyendo": 40.0, "neutral leyendo": 95.0})})
+    assert sso.criterio({"p10a": (sin, {"feliz leyendo": 81.0, "neutral leyendo": 94.0})}).cumple
+    poco = sso.criterio({"p10a": (sin, {"feliz leyendo": 40.0, "neutral leyendo": 95.0})})
     assert not poco.cumple and poco.subida_feliz == pytest.approx(15.0)
-    rompe = sso.criterio({"p10_narracion": (sin, {"feliz leyendo": 81.0, "neutral leyendo": 80.0})})
-    assert not rompe.cumple and rompe.caidas == (("p10_narracion", "neutral leyendo", 15.0),)
+    rompe = sso.criterio({"p10a": (sin, {"feliz leyendo": 81.0, "neutral leyendo": 80.0})})
+    assert not rompe.cumple and rompe.caidas == (("p10a", "neutral leyendo", 15.0),)
     # Sin la sesión de la sonrisa no se puede decidir.
     assert not sso.criterio({"p78": ({"neutral abajo": 100.0}, {"neutral abajo": 100.0})}).cumple
 
@@ -192,15 +192,15 @@ def test_la_regla_cumple_sobre_las_sesiones_grabadas():
 
     bases = [b for b in sso.TRAMOS if (RAIZ / f"{b}_emocion.csv").exists()
              and (RAIZ / f"{b}_cabeza.csv").exists()]
-    if "p10_narracion" not in bases:
-        pytest.skip("falta p10_narracion_emocion.csv")
+    if "p10a" not in bases:
+        pytest.skip("falta p10a_emocion.csv")
     tablas = {}
     for base in bases:
         filas = sso.preparar(base)
         tablas[base] = (sso.resumir(base, filas, False), sso.resumir(base, filas, True))
     v = sso.criterio(tablas)
     assert v.cumple, v
-    sin, con = tablas["p10_narracion"]
+    sin, con = tablas["p10a"]
     assert sin["feliz leyendo"] < 30.0 and con["feliz leyendo"] > 75.0
     if "p78" in tablas:
         assert tablas["p78"][1]["enojado abajo"] > tablas["p78"][0]["enojado abajo"] + 20.0

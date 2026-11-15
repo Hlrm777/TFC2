@@ -171,7 +171,7 @@ cambia respecto al plan original.
 | **P6** — Clasificador de emoción | 🟡 **código hecho el 2026-10-19** · preprocesamiento idéntico al del entrenamiento bit a bit, orden de clases verificado contra las etiquetas del dataset · **2026-10-24**: manual verificado con el operador, el modelo propio acierta 4 de 5 en buenas condiciones pero **no reconoce la tristeza** (H51); manos y retorno a neutral hechos · **2026-10-25**: protocolo v3 grabado y once modelos comparados sobre las mismas caras (P6.4); **el operador eligió la combinación de `mbf_va_mtl` y los blendshapes relativos** (triste 98 %, 0.8 falsas alarmas por minuto leyendo), integrada como backend `combinado` por defecto, con calibración de la cara neutra; **verificada en vivo**: 8 de 9 etiquetas, y la tristeza fallaba solo por el umbral de confianza · **2026-10-26**: `min_confidence` baja a 0.5 por decisión del operador (9 de 9 en vivo), y sin expresión clara 2 s el robot pasa a neutral · **2026-11-03 (P6.5)**: las gafas no pesan; los blendshapes, reentrenados con el dataset y cuatro sesiones del operador (tristeza con ceño 32-38 % → 61-72 % en validación cruzada), y la regla «sin cejas arriba no es sorpresa» encendida, por decisión del operador | `1e3b6c1`, `de4827a` |
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ✅ **cerrado el 2026-11-08** · código hecho el 2026-10-26, sesión con el operador el 2026-11-02 · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cerrado el 2026-11-08 por decisión del operador** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7»; el P7.8 se ve en vivo en la primera sesión del P10 | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a`, `3bd2be8` |
-| P10 — Interfaz de narración | 🟡 **código hecho el 2026-11-08, sesión p10 el 2026-11-10** · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **sesión p10 (2026-11-10)**: las teclas, la página con su gesto (21 de 21) y los brazos, bien; al operador la interfaz le pareció intuitiva y prefiere la vista de frente; los fps con la interfaz, 88 % de los de sin ella (se pedía 90); **H70** (la sonrisa con la cabeza baja) y **H71** (la cámara a 15 fps) · **P10.1**: el voto de un enojo descartado va a la segunda opción del modelo (feliz leyendo, 25 → 81 % reproducido) · **H71 corregido**: la compensación de contraluz de la cámara se apaga al abrirla (15 → 30 fps medidos) · **confirmación del 2026-11-12** (de noche, en otra habitación): feliz leyendo 77 % y neutral leyendo 92 % (P10.1 ✅), 18-21 fps sin tramos a 15 y 97 % de los fps de sin interfaz (H71 ✅) · **H72**: al mirar al pie de la pantalla el operador baja más de lo que el cuello del robot sigue (tope a 21° del operador) · **P10.2**: la ganancia hacia abajo se comprime lejos del frente y el tope llega a los 37° (15.8 → 0 s en el tope, reproducido) · **sesión del 2026-11-13**: P10.2 ✅ (0.0 s en el tope bajando hasta 37°), la compensación de contraluz apagada no mete temblor (0.91 veces el ruido de puesta), los dos brazos a la vista quietos (0.0°) y la vista de frente por defecto · **sesión de velocidad del 2026-11-14**: con la interfaz el bucle va al 81 % (robot de frente) y al 85 % (desde detrás) de sin ella, y no al 90; la publicación, en 20.0 Hz · **P10.3** (propuesto por el operador): la narración ya no abre la ventana de OpenCV (22.8 → 26.0 fps medidos, sin navegador) y el robot se dibuja con menos píxeles y a 30 cuadros · **falta**: repetir la sesión de velocidad con el P10.3 · la sesión se lleva con `tools/sesion_verificacion.py --narracion`, que enseña la tabla de cada grabación antes de lanzarla (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
+| P10 — Interfaz de narración | ✅ **cerrado el 2026-11-14** (código el 2026-11-08, sesiones del 2026-11-10 al 11-14) · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **sesión p10 (2026-11-10)**: las teclas, la página con su gesto (21 de 21) y los brazos, bien; al operador la interfaz le pareció intuitiva y prefiere la vista de frente; los fps con la interfaz, 88 % de los de sin ella (se pedía 90); **H70** (la sonrisa con la cabeza baja) y **H71** (la cámara a 15 fps) · **P10.1**: el voto de un enojo descartado va a la segunda opción del modelo (feliz leyendo, 25 → 81 % reproducido) · **H71 corregido**: la compensación de contraluz de la cámara se apaga al abrirla (15 → 30 fps medidos) · **confirmación del 2026-11-12** (de noche, en otra habitación): feliz leyendo 77 % y neutral leyendo 92 % (P10.1 ✅), 18-21 fps sin tramos a 15 y 97 % de los fps de sin interfaz (H71 ✅) · **H72**: al mirar al pie de la pantalla el operador baja más de lo que el cuello del robot sigue (tope a 21° del operador) · **P10.2**: la ganancia hacia abajo se comprime lejos del frente y el tope llega a los 37° (15.8 → 0 s en el tope, reproducido) · **sesión del 2026-11-13**: P10.2 ✅ (0.0 s en el tope bajando hasta 37°), la compensación de contraluz apagada no mete temblor (0.91 veces el ruido de puesta), los dos brazos a la vista quietos (0.0°) y la vista de frente por defecto · **sesión de velocidad del 2026-11-14**: con la interfaz el bucle va al 81 % (robot de frente) y al 85 % (desde detrás) de sin ella, y no al 90; la publicación, en 20.0 Hz · **P10.3** (propuesto por el operador): la narración ya no abre la ventana de OpenCV (22.8 → 26.0 fps medidos, sin navegador) y el robot se dibuja con menos píxeles y a 30 cuadros; repetida la sesión de velocidad, **92 % con las dos vistas** (criterio 90) · límites declarados en «Con qué se cierra el P10» · la sesión se lleva con `tools/sesion_verificacion.py --narracion`, que enseña la tabla de cada grabación antes de lanzarla (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
 | P11 — Pantalla externa (RPi) | ⬜ | |
 | P9 — Evaluación comparativa | ⬜ | |
 
@@ -4415,7 +4415,7 @@ Commit: "test: evaluacion comparativa de reconocimiento de emociones"
 
 ---
 
-## PROMPT 10 — Interfaz de narración 🟡 **código hecho el 2026-11-08** · falta la sesión con el operador
+## PROMPT 10 — Interfaz de narración ✅ **cerrado el 2026-11-14**
 
 **Ideas del operador (2026-09-27), para cuando llegue este prompt.** El narrador
 **no sostiene un libro físico**: ve el libro digitalizado en la interfaz,
@@ -5037,7 +5037,7 @@ pose sobre los 64 ms de captura a mensaje medidos en el P7.
 **Pendiente de decisión del operador**: declararlo como límite y cerrar el P10,
 o reducir lo que cuesta la página (abajo).
 
-### P10.3 — La página y la sesión, más ligeras 🟡 código hecho el 2026-11-14 · falta repetir la sesión de velocidad
+### P10.3 — La página y la sesión, más ligeras ✅ hecho y confirmado el 2026-11-14
 
 Antes de declarar el 81-85 % como límite, el operador propuso dos cosas, y las
 dos se han hecho:
@@ -5092,11 +5092,56 @@ del navegador mandan; sin ventana hace falta la interfaz; con ventana todo
 sigue igual; el comando de la sesión la quita y `--ventana` la devuelve; y el
 visor dibuja más ligero solo en narración.
 
+**La sesión de velocidad, repetida con el P10.3** (2026-11-14, 20:59 y 21:03;
+`p10v_*.csv`, la de la tarde queda como `p10v_*_anterior.csv`):
+
+| Tramo (hablando) | Antes del P10.3 (18:56) | Con el P10.3 (20:59) | |
+|---|---|---|---|
+| Sin interfaz | 23.5 fps, 39.1 ms por vuelta | 23.3 fps, 39.6 ms | la referencia no cambia |
+| Con interfaz, robot de frente | 19.0 fps (81 %), 48.2 ms | **21.4 fps (92 %)**, 45.6 ms | ✅ |
+| Con interfaz, robot desde detrás | 20.0 fps (85 %), 45.8 ms | **21.5 fps (92 %)**, 45.4 ms | ✅ |
+| Publicación con interfaz | 20.0 Hz | 19.8 y 19.9 Hz | ✅ (criterio 19.5) |
+
+Cumple con las dos vistas, y ya no hay diferencia entre verlo de frente y
+desde detrás: dibujar el robot dejó de notarse. Lo que queda —el bucle a 45 ms
+con la página abierta frente a 40 sin ella, porque los brazos tardan 33 ms en
+vez de 26— es el navegador compitiendo por el procesador con MediaPipe, y con
+eso se cierra.
+
+### Con qué se cierra el P10 (2026-11-14)
+
+| Qué | Cómo queda |
+|---|---|
+| La interfaz, dentro del visor (`?modo=narracion`), servida por `main.py` | hecha; al operador le pareció intuitiva; la vista del robot, de frente por defecto |
+| Todas las teclas en el navegador, sin tocar la ventana de Python | sí; desde el P10.3 la ventana ni se abre |
+| Página y gesto en el mismo instante, y nunca en pausa | 21 de 21, 10 de 10 y 27 de 27 en las tres sesiones |
+| No le roba tiempo al bucle (≥ 90 % de los fps de sin interfaz) | **92 %** con el P10.3 (81-85 % antes); la publicación, 19.8-20.0 Hz |
+| Los vistazos y los brazos del P7.8, en vivo | conservan la expresión el 100 % de las filas; brazos a la vista, 0.0° con el brazo quieto |
+| P10.1, la sonrisa con la cabeza baja (H70) | feliz leyendo 76-77 % (25 % antes); neutral leyendo 92-99 % |
+| H71, la cámara a 15 fps | la compensación de contraluz, apagada al abrir; no mete temblor (0.91 veces el ruido de puesta) |
+| P10.2, el cabeceo hacia abajo (H72) | comprimido: 0.0 s en el tope bajando la cabeza hasta 37° |
+
+**Límites que se declaran**, medidos:
+
+- **Con la interfaz el bucle va al 92 % de su velocidad** (21.4 frente a 23.3
+  fps, 45 frente a 40 ms por vuelta), en el equipo de referencia (P10.3). El
+  robot recibe sus 20 mensajes por segundo igualmente.
+- **De noche el seguimiento de la cara tiembla más** (ruido de la malla 1.0-1.3
+  frente a 0.75 de día): es la luz, no un ajuste; la zona muerta de la cabeza
+  crece con él y los escalones de la cabeza del robot son de 0.7° de mediana.
+- **Triste leyendo, 69-73 %**, y feliz 76-77 %: la emoción con la cabeza baja
+  sigue siendo lo más débil (H68 del P7); se reporta en el P9.
+- **El visor depende de internet** (three, mqtt.js y pdf.js por CDN) y **la
+  cámara se elige por índice**: los dos pendientes del P10 que no se
+  dispararon, con su dueño en la tabla de pendientes del principio de esta
+  sección.
+- **La sesión del 2026-11-13 acabó sin las preguntas del final**, una vez y sin
+  rastro; si vuelve a pasar, hay que mirar la terminal en ese momento.
+
 ### Lo que deja pendiente la sesión p10
 
 | Pendiente | Quién | Qué lo dispara | Qué cuesta |
 |---|---|---|---|
-| **Repetir la sesión de velocidad con el P10.3** | El operador graba; el análisis, quien lleve el paso | Que el operador tenga 5 minutos con la cámara | `sesion_verificacion.py --velocidad`, igual que el 2026-11-14 (81 y 85 %). Criterio, el mismo: cada vista, al menos el 90 % de los fps de sin interfaz. Si cumple, el P10 se cierra; si no, el operador decide entre declararlo —el robot recibe sus 20 mensajes por segundo— o seguir aligerando (el video de la cámara de 15 a 10 fotos por segundo; el navegador en la NVIDIA en vez de la gráfica integrada) |
 | **Los requisitos de cómputo del equipo del teleoperador** | Quien lleve el P9 (la evaluación), que es donde se reportan las cifras | Al escribir el P9 | Declarar el equipo de referencia (arriba) y el presupuesto medido: lo que tarda cada red por foto y la vuelta entera, con y sin la interfaz. Un «mínimo» de verdad pide medir en un equipo más modesto: si hay uno a mano, la misma sesión `--velocidad` en él; si no, se declara como equipo de referencia y no como mínimo |
 | **Por qué la sesión acabó sin las preguntas** | Quien lleve el paso | Que vuelva a pasar | Mirar la salida de la terminal en ese momento; hoy no hay rastro |
 | **La skill `telmeow-viewer`** dice que la vista arranca desde detrás | Quien lleve el paso propone el archivo; el operador lo sube a claude.ai | La próxima vez que se toque el visor | Una línea de la sección «Modo narración» |

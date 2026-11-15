@@ -3,11 +3,11 @@ INFORME DE VELOCIDAD DE p10v
 
 Criterio: con la interfaz, al menos el 90 % de los fps de sin ella; cada tramo, de 30 s o mas.
 
-  sin interfaz (etiqueta 1):               23.5 fps en 86 s (39 ms por vuelta)
-  con interfaz, robot de frente (etiqueta 1): 19.0 fps en 70 s (48 ms por vuelta): 81 % NO CUMPLE
-      publicacion 20.0 Hz (criterio >= 19.5) OK
-  con interfaz, robot desde detras (etiqueta 2): 20.0 fps en 72 s (46 ms por vuelta): 85 % NO CUMPLE
-      publicacion 20.0 Hz (criterio >= 19.5) OK
+  sin interfaz (etiqueta 1):               23.3 fps en 115 s (40 ms por vuelta)
+  con interfaz, robot de frente (etiqueta 1): 21.4 fps en 93 s (46 ms por vuelta): 92 % OK
+      publicacion 19.8 Hz (criterio >= 19.5) OK
+  con interfaz, robot desde detras (etiqueta 2): 21.5 fps en 103 s (45 ms por vuelta): 92 % OK
+      publicacion 19.9 Hz (criterio >= 19.5) OK
 
-Lectura: no cumple con ninguna vista, y de frente va peor que desde detras.
+Lectura: la interfaz cumple con las dos vistas.
 (La vista no se graba: se supone que la etiqueta 1 se hizo de frente y la 2 desde detras, como pide la tabla.)

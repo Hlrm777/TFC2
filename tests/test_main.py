@@ -1562,3 +1562,70 @@ def test_una_guia_que_no_vale_para_antes_de_abrir_la_camara(pipeline, monkeypatc
 def test_la_guia_sin_interfaz_es_un_error_de_uso(tmp_path):
     with pytest.raises(SystemExit):
         principal.main(["--guia-sesion", str(tmp_path / "g.json")])
+
+
+# --------------------------------------------------------------------------
+# P10.3: la sesión de narración, sin la ventana de OpenCV
+# --------------------------------------------------------------------------
+
+
+def test_sin_ventana_no_se_dibuja_ni_se_abre_nada_y_el_navegador_manda(pipeline, monkeypatch):
+    """Dibujar el esqueleto y el panel y enseñarlos le quitaba tiempo al bucle
+    mientras el operador miraba el navegador. Sin ventana, las órdenes llegan
+    solo del navegador, y la sesión sigue grabando y publicando igual."""
+    import csv
+
+    import cv2
+
+    llamadas = []
+    original = pipeline.correr
+
+    def correr(**k):
+        # Después de los dobles del arnés: cualquier dibujo o tecla de OpenCV falla.
+        return original(**k)
+
+    monkeypatch.setattr(principal, "dibujar_panel", lambda *a, **k: llamadas.append("panel"))
+    ordenes = [[], [principal.Orden("etiqueta", None, "navegador")], [],
+               [principal.Orden("salir", None, "navegador")]]
+    ruta = pipeline.tmp / "s.csv"
+    bucle_original = principal._bucle
+
+    def bucle(*a, **k):
+        assert k["ventana"] is False
+        monkeypatch.setattr(cv2, "imshow", lambda *x: llamadas.append("imshow"))
+        monkeypatch.setattr(cv2, "waitKey", lambda *x: llamadas.append("waitKey") or ord("q"))
+        return bucle_original(*a, **k)
+
+    monkeypatch.setattr(principal, "_bucle", bucle)
+    assert correr(argv=["--interfaz", "0", "--sin-ventana", "--record", str(ruta)], frames=50,
+                  ordenes=ordenes) == 0
+    assert llamadas == []
+    with open(ruta, newline="", encoding="utf-8") as f:
+        filas = list(csv.DictReader(f))
+    # Cuatro frames: el de «salir» es el último, y la etiqueta pasó en el segundo.
+    assert len(filas) == 4
+    assert [fila["etiqueta"] for fila in filas] == ["0", "0", "1", "1"]
+    assert filas[1]["orden"] == "etiqueta@navegador" and filas[3]["orden"] == "salir@navegador"
+    assert all(fila["ms_bucle"] for fila in filas)
+
+
+def test_sin_ventana_hace_falta_la_interfaz(pipeline):
+    """Sin ventana ni navegador no habría dónde pulsar nada."""
+    with pytest.raises(SystemExit):
+        pipeline.correr(argv=["--sin-ventana"], frames=3)
+
+
+def test_con_ventana_todo_sigue_como_antes(pipeline, monkeypatch):
+    import cv2
+
+    vistas = []
+    bucle_original = principal._bucle
+
+    def bucle(*a, **k):
+        assert k["ventana"] is True
+        monkeypatch.setattr(cv2, "imshow", lambda *x: vistas.append(x[0]))
+        return bucle_original(*a, **k)
+
+    monkeypatch.setattr(principal, "_bucle", bucle)
+    assert pipeline.correr(frames=3) == 0
+    assert vistas == [principal.VENTANA] * 3

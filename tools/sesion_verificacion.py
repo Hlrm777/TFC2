@@ -292,8 +292,7 @@ PROTOCOLO_P10_NARRACION: tuple[tuple[int, str, int, str], ...] = (
     (12, "En la lista elige «Cambios» (sus páginas son verticales) y pasa 2 páginas con l", 15,
      "la página se ve entera y sin deformar"),
     (13, "Pulsa q dos veces seguidas (en menos de 3 s)", 5,
-     "la primera q pide confirmación; con la segunda se cierra la ventana de Python y la página "
-     "dice «La sesión terminó»"),
+     "la primera q pide confirmación; con la segunda la página dice «La sesión terminó»"),
 )
 
 #: La sesión corta de velocidad (2026-11-13): la referencia sin interfaz y la
@@ -314,8 +313,7 @@ PROTOCOLO_VELOCIDAD: tuple[tuple[int, str, int, str], ...] = (
      "el robot, visto desde DETRÁS, sigue tu cabeza"),
     (3, "Pulsa «Vista» otra vez para dejarlo de frente, y luego q dos veces seguidas (en menos "
         "de 3 s)", 5,
-     "la primera q pide confirmación; con la segunda se cierra la ventana de Python y la página "
-     "dice «La sesión terminó»"),
+     "la primera q pide confirmación; con la segunda la página dice «La sesión terminó»"),
 )
 
 #: Segundos que tiene que durar cada tramo de la sesión de velocidad para valer.
@@ -881,7 +879,7 @@ en total, con buena luz.
   1. p10_sin_interfaz: solo la ventana de Python, como en el P7. Es la
      referencia de velocidad: 1 minuto hablando. Las teclas van a ESA ventana.
   2. p10_narracion: el navegador con el robot, tu cámara y el libro. TODAS las
-     teclas van al navegador: no hagas clic en la ventana de Python.
+     teclas van al navegador. Aquí ya no se abre la ventana de Python.
 
   En las dos la etiqueta 0 empieza sola, y cada ESPACIO pasa a la siguiente.
   Antes de cada una sale su tabla. Al final te hago unas preguntas y sale el
@@ -902,8 +900,8 @@ CABECERA_P10_NARRACION = (
     "ESPACIO pasa de etiqueta (la 0 empieza sola). Esta misma tabla sale ARRIBA en la\n"
     "página, etiqueta por etiqueta y con el tiempo que llevas: no hace falta volver a\n"
     "esta terminal (si haces clic en ella, las teclas dejan de llegar al navegador hasta\n"
-    "que hagas clic en el libro). La ventana de Python también se abre: déjala, sin\n"
-    "hacer clic en ella. Si el navegador no queda delante, haz clic una vez en el libro.")
+    "que hagas clic en el libro). Aquí NO se abre la ventana de Python: solo el\n"
+    "navegador. Si las teclas no responden, haz clic una vez en el libro.")
 
 #: El título de la franja de guía en la página.
 TITULO_GUIA_P10 = "Sesión p10 · segunda grabación"
@@ -1301,8 +1299,8 @@ def _sesion_narracion(base: Path, py: str, entrada=None) -> None:
         subprocess.run([py, "-m", "telmeow_teleop.main", "--record", str(sin)], cwd=PROJECT_ROOT)
     if _hay_que_grabar(con, entrada):
         print(tabla_protocolo(PROTOCOLO_P10_NARRACION, cabecera=CABECERA_P10_NARRACION, ancho=ANCHO_P10))
-        _esperar("Lee la tabla. Al seguir se abre la ventana de Python y, unos segundos después,\n"
-                 "  el navegador: desde ahí, todo con el navegador delante.")
+        _esperar("Lee la tabla. Al seguir, en unos 10 segundos se abre el navegador (esta vez sin\n"
+                 "  la ventana de Python): desde ahí, todo en el navegador.")
         guia = _escribir_guia()
         try:
             subprocess.run([py, "-m", "telmeow_teleop.control_panel", "--record", str(con),
@@ -1319,7 +1317,8 @@ luz ni abrir otros programas entre una y otra.
   1. Sin la interfaz: solo la ventana de Python, 1 minuto hablando. Las teclas
      van a ESA ventana.
   2. Con la interfaz: 1 minuto hablando con el robot visto de frente y 1 minuto
-     visto desde detrás. Todas las teclas, en el navegador.
+     visto desde detrás. Todas las teclas, en el navegador; aquí ya no se abre
+     la ventana de Python.
 
   Es para saber cuánto frena la interfaz al programa, con las dos grabaciones de
   la misma noche. No hay preguntas al final: sale el informe.
@@ -1328,8 +1327,8 @@ luz ni abrir otros programas entre una y otra.
 CABECERA_VELOCIDAD_NARRACION = (
     "SEGUNDA GRABACIÓN, con la interfaz: 4 etiquetas. ESPACIO pasa de etiqueta (la 0 empieza\n"
     "sola). Esta misma tabla sale ARRIBA en la página, con el tiempo que llevas: no hace\n"
-    "falta volver a esta terminal. La ventana de Python también se abre: déjala, sin hacer\n"
-    "clic en ella. Si el navegador no queda delante, haz clic una vez en el libro.")
+    "falta volver a esta terminal. Aquí NO se abre la ventana de Python: solo el navegador.\n"
+    "Si las teclas no responden, haz clic una vez en el libro.")
 
 TITULO_GUIA_VELOCIDAD = "Sesión de velocidad · segunda grabación"
 
@@ -1360,8 +1359,8 @@ def _sesion_velocidad(base: Path, py: str) -> None:
              "  Cuando acabe la etiqueta 1, pulsa q en esa ventana.")
     subprocess.run([py, "-m", "telmeow_teleop.main", "--record", str(sin)], cwd=PROJECT_ROOT)
     print(tabla_protocolo(PROTOCOLO_VELOCIDAD, cabecera=CABECERA_VELOCIDAD_NARRACION, ancho=ANCHO_P10))
-    _esperar("Lee la tabla. Al seguir se abre la ventana de Python y, unos segundos después,\n"
-             "  el navegador: desde ahí, todo con el navegador delante.")
+    _esperar("Lee la tabla. Al seguir, en unos 10 segundos se abre el navegador (esta vez sin\n"
+             "  la ventana de Python): desde ahí, todo en el navegador.")
     guia = _escribir_guia(guia_p10_datos(PROTOCOLO_VELOCIDAD, TITULO_GUIA_VELOCIDAD))
     try:
         subprocess.run([py, "-m", "telmeow_teleop.control_panel", "--record", str(con),

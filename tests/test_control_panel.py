@@ -411,13 +411,19 @@ def comando(monkeypatch):
 
 def test_el_comando_lanza_el_pipeline_con_la_interfaz_y_el_navegador(comando):
     assert cp.main(["--record", "p10.csv", "--camera", "1"]) == 0
-    assert comando["pipeline"] == ["--interfaz", "8001", "--abrir-navegador",
+    # Sin la ventana de OpenCV (P10.3): al narrar todo va en el navegador.
+    assert comando["pipeline"] == ["--interfaz", "8001", "--sin-ventana", "--abrir-navegador",
                                    "--record", "p10.csv", "--camera", "1"]
+
+
+def test_la_ventana_de_diagnostico_se_puede_pedir(comando):
+    assert cp.main(["--ventana", "--record", "p10.csv"]) == 0
+    assert comando["pipeline"] == ["--interfaz", "8001", "--abrir-navegador", "--record", "p10.csv"]
 
 
 def test_el_comando_pasa_la_carpeta_de_cuentos_y_el_puerto(comando, tmp_path):
     assert cp.main(["--sin-navegador", "--puerto", "8123", "--stories-dir", str(tmp_path)]) == 0
-    assert comando["pipeline"] == ["--interfaz", "8123", "--stories-dir", str(tmp_path)]
+    assert comando["pipeline"] == ["--interfaz", "8123", "--sin-ventana", "--stories-dir", str(tmp_path)]
 
 
 def test_sin_broker_el_comando_no_lanza_el_pipeline(comando):
@@ -503,8 +509,8 @@ def test_la_demo_con_guia_ensena_la_etiqueta_0(tmp_path):
 
 def test_el_comando_pasa_la_guia_al_pipeline(comando):
     assert cp.main(["--guia-sesion", "g.json", "--record", "p10.csv"]) == 0
-    assert comando["pipeline"] == ["--interfaz", "8001", "--abrir-navegador", "--guia-sesion", "g.json",
-                                   "--record", "p10.csv"]
+    assert comando["pipeline"] == ["--interfaz", "8001", "--sin-ventana", "--abrir-navegador",
+                                   "--guia-sesion", "g.json", "--record", "p10.csv"]
 
 
 def test_la_demo_con_una_guia_que_no_vale_no_arranca(tmp_path, capsys):

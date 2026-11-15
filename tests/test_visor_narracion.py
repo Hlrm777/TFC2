@@ -117,6 +117,20 @@ def test_todo_lo_que_la_pagina_pide_lo_sirve_el_servidor(servidor_real):
 
 
 
+def test_en_narracion_el_robot_se_dibuja_mas_ligero():
+    """P10.3: menos píxeles y 30 cuadros por segundo solo en el modo narración;
+    el banco de pruebas del 8000 se queda como estaba. Las colisiones y los
+    límites no dependen de esto: siguen en su sitio."""
+    assert "const ESCALA_NARRACION = 0.75;" in HTML and "const CUADROS_NARRACION = 30;" in HTML
+    assert ("renderer.setPixelRatio(MODO_NARRACION ? ESCALA_NARRACION : Math.min(devicePixelRatio,2));"
+            in HTML)
+    assert "const PERIODO_DIBUJO = MODO_NARRACION ? 1000 / CUADROS_NARRACION : 0;" in HTML
+    tick = HTML.split("function tick(){")[1].split("tick(); applyPose();")[0]
+    # El turno que no toca se salta ANTES de dibujar y de mirar colisiones.
+    assert tick.index("if(PERIODO_DIBUJO &&") < tick.index("renderer.render(scene,cam);")
+    assert "checkCollisions();" in tick and "clampPoseExternal()" in HTML
+
+
 def test_la_vista_del_robot_arranca_de_frente():
     """La eligió el operador en la sesión p10; el botón la cambia y el navegador
     recuerda el cambio, así que el valor guardado manda sobre el inicial."""

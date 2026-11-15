@@ -669,6 +669,9 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"puerto de la interfaz (por defecto {PUERTO})")
     parser.add_argument("--sin-navegador", action="store_true",
                         help="no abrir el navegador")
+    parser.add_argument("--ventana", action="store_true",
+                        help="abrir tambien la ventana de OpenCV, con el esqueleto y las cifras de "
+                             "diagnostico (por defecto no: le quita tiempo al bucle)")
     parser.add_argument("--stories-dir", type=Path, default=None,
                         help="carpeta de los cuentos en PDF")
     parser.add_argument("--guia-sesion", type=Path, default=None, metavar="JSON",
@@ -694,6 +697,10 @@ def main(argv: list[str] | None = None) -> int:
         from .main import main as pipeline
 
         argumentos = ["--interfaz", str(args.puerto)]
+        if not args.ventana:
+            # P10.3: al narrar todo va en el navegador, y dibujar la ventana de
+            # OpenCV le quitaba tiempo al bucle.
+            argumentos.append("--sin-ventana")
         if not args.sin_navegador:
             argumentos.append("--abrir-navegador")
         if args.stories_dir is not None:

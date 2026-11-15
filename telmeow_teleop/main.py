@@ -1318,6 +1318,13 @@ def _parser() -> argparse.ArgumentParser:
              "OpenCV, para que el navegador quede delante.",
     )
     propios.add_argument(
+        "--sin-ventana", action="store_true",
+        help="Con --interfaz: no abre la ventana de OpenCV ni dibuja su panel. "
+             "Al narrar no hace falta (todo va en el navegador) y dibujarla le "
+             "quita tiempo al bucle. Se termina con q dos veces en el navegador, "
+             "o con Ctrl-C en la terminal.",
+    )
+    propios.add_argument(
         "--guia-sesion", metavar="JSON", type=Path,
         help="Con --interfaz y --record: la instrucción de cada etiqueta, que la "
              "página enseña arriba (sesiones de verificación; la escribe "
@@ -1374,6 +1381,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.guardar_recortes is not None and not args.record:
         parser.error("--guardar-recortes necesita --record: el CSV dice qué recorte es cada fila")
+    if args.sin_ventana and args.interfaz is None:
+        parser.error("--sin-ventana necesita --interfaz: sin ventana ni navegador no hay "
+                     "donde pulsar las teclas")
     guia = None
     if args.guia_sesion is not None:
         if args.interfaz is None:
@@ -1466,7 +1476,8 @@ def main(argv: list[str] | None = None) -> int:
 
         _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
                pendientes=interfaz.pendientes if interfaz is not None else None,
-               interfaz=interfaz, abrir_navegador=args.abrir_navegador)
+               interfaz=interfaz, abrir_navegador=args.abrir_navegador,
+               ventana=not args.sin_ventana)
     except KeyboardInterrupt:
         print("\nInterrumpido.")
     finally:
@@ -1528,10 +1539,14 @@ def _grabar_inferencia(clasificador, grabacion):
 
 
 def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
-           pendientes=None, interfaz=None, abrir_navegador=False) -> None:
+           pendientes=None, interfaz=None, abrir_navegador=False, ventana=True) -> None:
     """El bucle de visión. ``pendientes``, si se da, devuelve en cada frame las
     órdenes que llegaron del navegador (P10); ``interfaz`` recibe el video y el
-    estado de cada frame."""
+    estado de cada frame. Con ``ventana`` falso no se dibuja ni se abre la
+    ventana de OpenCV (P10.3): las teclas llegan solo por ``pendientes``."""
+    if not ventana:
+        print("Sin ventana de Python: todo va en el navegador. Para terminar, q dos veces "
+              "en el navegador (o Ctrl-C aqui).\n")
     import mediapipe as mp
 
     dibujo = mp.solutions.drawing_utils
@@ -1671,69 +1686,73 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
             if brazos is not None:
                 grabacion.escribir("brazos", fila_brazos(brazos, mando, t, sesion.etiqueta, ancho, alto))
 
-        # -- dibujo: video limpio a la izquierda, panel a la derecha --------
-        if lienzo is None or lienzo.shape[:2] != (alto, ancho + ANCHO_PANEL):
-            lienzo = np.zeros((alto, ancho + ANCHO_PANEL, 3), dtype=np.uint8)
-        video = frame.copy()
-        if brazos is not None and brazos.landmarks_imagen is not None:
-            dibujo.draw_landmarks(video, brazos.landmarks_imagen, conexiones)
-        if emocion is not None and emocion.rostro is not None:
-            x, y, w, h = emocion.rostro
-            cv2.rectangle(video, (x, y), (x + w, y + h),
-                          (0, 190, 255) if emocion.manos_en_cara else (230, 220, 90), 2)
-        lienzo[:, :ancho] = video
-
+        # Fuera del dibujo: la grabacion y la interfaz los usan con y sin ventana.
         sesion.caducar_aviso()
         hz = _hz(muestras_hz, ahora, publicador.message_count)
-        estado = EstadoPanel(
-            cabeza=pose_publicada,
-            cabeza_tapada=guarda.tapada,
-            recorte_cabeza=cabeza.last_clamp,
-            mando=mando,
-            recortes_brazos=brazos.last_clamp if brazos is not None else {},
-            estimado=brazos.estimado if brazos is not None else {},
-            saludo=brazos.pesos_saludo if brazos is not None else {},
-            mano_cara=brazos.pesos_mano_cara if brazos is not None else {},
-            brazos_activos=brazos is not None,
-            emocion_activa=emocion is not None,
-            emocion=emocion.etiqueta if emocion is not None else None,
-            confianza=emocion.confianza if emocion is not None else None,
-            cruda=emocion.cruda if emocion is not None else None,
-            confianza_cruda=emocion.confianza_cruda if emocion is not None else None,
-            manual=emocion.manual if emocion is not None else None,
-            manos_en_cara=bool(emocion and emocion.manos_en_cara),
-            calibrando=bool(emocion and emocion.calibrando),
-            latencia_emocion_ms=emocion.latencia_ms if emocion is not None else None,
-            errores_emocion=hilo.errores if hilo is not None else 0,
-            fps=_fps(marcas),
-            duplicados=duplicados,
-            ms_cabeza=ms_cabeza,
-            ms_brazos=ms_brazos,
-            ms_emocion=ms_emocion,
-            # El del frame anterior: el de este no se sabe hasta pintar el panel.
-            ms_bucle=ms_bucle_previo,
-            enlace=publicador.connected,
-            enviados=publicador.message_count,
-            descartados=publicador.dropped_count,
-            fallidos=publicador.failed_count,
-            hz=hz,
-            errores_publicacion=periodico.errores,
-            pausa=periodico.pausado,
-            pausa_luz=periodico.pausado_por_luz,
-            pausa_cara=periodico.pausado_sin_cara,
-            ruido_malla=ruido.sigma,
-            zona_muerta=zona,
-            brillo=brillo,
-            grabando=grabacion is not None,
-            etiqueta=sesion.etiqueta,
-            aviso=sesion.aviso,
-        )
-        dibujar_panel(lienzo, ancho, estado)
+        # Sin ventana (P10.3) no se dibuja nada: ni el esqueleto ni el panel.
+        if ventana:
+            # -- dibujo: video limpio a la izquierda, panel a la derecha --------
+            if lienzo is None or lienzo.shape[:2] != (alto, ancho + ANCHO_PANEL):
+                lienzo = np.zeros((alto, ancho + ANCHO_PANEL, 3), dtype=np.uint8)
+            video = frame.copy()
+            if brazos is not None and brazos.landmarks_imagen is not None:
+                dibujo.draw_landmarks(video, brazos.landmarks_imagen, conexiones)
+            if emocion is not None and emocion.rostro is not None:
+                x, y, w, h = emocion.rostro
+                cv2.rectangle(video, (x, y), (x + w, y + h),
+                              (0, 190, 255) if emocion.manos_en_cara else (230, 220, 90), 2)
+            lienzo[:, :ancho] = video
+
+            estado = EstadoPanel(
+                cabeza=pose_publicada,
+                cabeza_tapada=guarda.tapada,
+                recorte_cabeza=cabeza.last_clamp,
+                mando=mando,
+                recortes_brazos=brazos.last_clamp if brazos is not None else {},
+                estimado=brazos.estimado if brazos is not None else {},
+                saludo=brazos.pesos_saludo if brazos is not None else {},
+                mano_cara=brazos.pesos_mano_cara if brazos is not None else {},
+                brazos_activos=brazos is not None,
+                emocion_activa=emocion is not None,
+                emocion=emocion.etiqueta if emocion is not None else None,
+                confianza=emocion.confianza if emocion is not None else None,
+                cruda=emocion.cruda if emocion is not None else None,
+                confianza_cruda=emocion.confianza_cruda if emocion is not None else None,
+                manual=emocion.manual if emocion is not None else None,
+                manos_en_cara=bool(emocion and emocion.manos_en_cara),
+                calibrando=bool(emocion and emocion.calibrando),
+                latencia_emocion_ms=emocion.latencia_ms if emocion is not None else None,
+                errores_emocion=hilo.errores if hilo is not None else 0,
+                fps=_fps(marcas),
+                duplicados=duplicados,
+                ms_cabeza=ms_cabeza,
+                ms_brazos=ms_brazos,
+                ms_emocion=ms_emocion,
+                # El del frame anterior: el de este no se sabe hasta pintar el panel.
+                ms_bucle=ms_bucle_previo,
+                enlace=publicador.connected,
+                enviados=publicador.message_count,
+                descartados=publicador.dropped_count,
+                fallidos=publicador.failed_count,
+                hz=hz,
+                errores_publicacion=periodico.errores,
+                pausa=periodico.pausado,
+                pausa_luz=periodico.pausado_por_luz,
+                pausa_cara=periodico.pausado_sin_cara,
+                ruido_malla=ruido.sigma,
+                zona_muerta=zona,
+                brillo=brillo,
+                grabando=grabacion is not None,
+                etiqueta=sesion.etiqueta,
+                aviso=sesion.aviso,
+            )
+            dibujar_panel(lienzo, ancho, estado)
         # Todo lo del frame salvo esperar a la cámara y el imshow/waitKey:
         # estimadores, grabación y dibujo.
         ms_bucle = ms_bucle_previo = 1000.0 * (time.perf_counter() - ahora)
 
-        cv2.imshow(VENTANA, lienzo)
+        if ventana:
+            cv2.imshow(VENTANA, lienzo)
         if abrir_navegador and interfaz is not None and not navegador_abierto:
             # Después del primer imshow, para que el navegador quede delante de
             # la ventana de OpenCV.
@@ -1741,7 +1760,8 @@ def _bucle(cfg, cap, cabeza, brazos, hilo, periodico, publicador, grabacion,
 
             webbrowser.open(interfaz.url)
             navegador_abierto = True
-        tecla = cv2.waitKey(1) & 0xFF
+        # Sin ventana no hay teclado de OpenCV: 255 es «ninguna tecla».
+        tecla = cv2.waitKey(1) & 0xFF if ventana else 255
         orden = ORDENES_DE_TECLA.get(tecla)
         if orden is not None:
             ejecutar_orden(sesion, orden)

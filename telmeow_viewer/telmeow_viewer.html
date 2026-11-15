@@ -473,8 +473,17 @@
   cam.position.set(700, -900, 550);
   cam.up.set(0,0,1);
 
+  /* En el modo narración el navegador comparte procesador con MediaPipe, y
+     dibujar el robot le quitaba al bucle de visión un 15-19 % de sus vueltas
+     (sesión de velocidad del 2026-11-14). Así que ahí el robot se dibuja con
+     menos píxeles (ESCALA_NARRACION por píxel de la página; el navegador lo
+     estira) y a CUADROS_NARRACION por segundo: las poses llegan a 20 por
+     segundo, así que a 30 no se pierde ninguna. La geometría, las colisiones y
+     los límites son los mismos: solo cambia cuántos píxeles se pintan. */
+  const ESCALA_NARRACION = 0.75;
+  const CUADROS_NARRACION = 30;
   const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setPixelRatio(MODO_NARRACION ? ESCALA_NARRACION : Math.min(devicePixelRatio,2));
   host.appendChild(renderer.domElement);
 
   const controls = new OrbitControls(cam, renderer.domElement);
@@ -1571,10 +1580,16 @@
   // narración); el ResizeObserver lo sigue.
   new ResizeObserver(resize).observe(host);
 
+  const PERIODO_DIBUJO = MODO_NARRACION ? 1000 / CUADROS_NARRACION : 0;
+  let ultimoDibujo = -Infinity;
   function tick(){
     requestAnimationFrame(tick);
-    controls.update();
     const nowT = performance.now();
+    // El navegador llama a tick a la frecuencia del monitor; en narración solo
+    // se dibuja cada PERIODO_DIBUJO (2 ms de holgura para no saltarse turnos).
+    if(PERIODO_DIBUJO && nowT - ultimoDibujo < PERIODO_DIBUJO - 2) return;
+    ultimoDibujo = nowT;
+    controls.update();
     tickEyeFade(nowT);
     renderer.render(scene,cam);
     if(poseDirty && collisionReady && nowT - lastColCheck > 120){

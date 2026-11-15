@@ -35,6 +35,10 @@ pypdf==6.21.4
 pygame==2.6.1
 pypdfium2==5.15.2
 
+# Para probar en la PC los motores del robot (raspberry/motor_driver.py)
+# contra motores simulados: la biblioteca oficial de ROBOTIS. Trae pyserial.
+dynamixel-sdk==4.1.0
+
 # Broker MQTT en Python puro (tools/dev_broker.py). Levanta los mismos dos
 # listeners que mosquitto.conf (1883 TCP + 9001 WebSocket) sin requerir
 # privilegios de administrador.

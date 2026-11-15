@@ -1,0 +1,45 @@
+# Los motores, al arrancar la Raspberry (P11).
+#
+# No abre ninguna ventana. Antes hay que seguir raspberry/OPENRB.md (el programa
+# puente de la OpenRB, el ID de cada motor y motores.json). Se instala asi, en la Raspberry:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp ~/telmeow/raspberry/telmeow-motores.service ~/.config/systemd/user/
+#   nano ~/.config/systemd/user/telmeow-motores.service    # poner la IP de la PC
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now telmeow-motores
+#
+# Ver que hace:    journalctl --user -u telmeow-motores -f
+# Pararla:         systemctl --user stop telmeow-motores
+#
+# Restart=always: si el programa muriera, systemd lo vuelve a lanzar a los 2 s
+# y los motores, que se quedan quietos mientras tanto, vuelven a obedecer despacio.
+
+[Unit]
+Description=Telmeow - los motores
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+# CAMBIAR: la IP de la PC del narrador (donde corre Mosquitto).
+Environment=TELMEOW_MQTT_HOST=192.168.1.50
+ExecStart=%h/telmeow/venv/bin/python %h/telmeow/raspberry/motor_driver.py --config %h/telmeow/motores.json
+Restart=always: si el programa muriera, systemd lo vuelve a lanzar a los 2 s
+# y los motores, que se quedan quietos mientras tanto, vuelven a obedecer despacio.
+
+[Unit]
+Description=Telmeow - los motores
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+# CAMBIAR: la IP de la PC del narrador (donde corre Mosquitto).
+Environment=TELMEOW_MQTT_HOST=192.168.1.50
+# --display: el numero de los motores (la DSI de 5 pulgadas). Cual
+# es el 0 y cual el 1 depende de la Raspberry: probar con --windowed primero.
+ExecStart=%h/telmeow/venv/bin/python %h/telmeow/raspberry/eye_display.py --display 1
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

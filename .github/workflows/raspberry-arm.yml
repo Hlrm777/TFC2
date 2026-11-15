@@ -10,8 +10,8 @@
 # Mosquitto de verdad cada programa hace lo que debe.
 #
 # QUE NO DEMUESTRA: la salida por HDMI o DSI (aqui la pantalla es falsa), una
-# camara de verdad (aqui es un video o una imagen fabricada), el arranque con
-# systemd, ni la velocidad de una Raspberry: los tiempos que salen aqui son de
+# camara de verdad (aqui es un video o una imagen fabricada), los motores (aqui
+# son simulados, aunque hablan su mismo protocolo), el arranque con systemd, ni la velocidad de una Raspberry: los tiempos que salen aqui son de
 # esta maquina, no del robot.
 name: Raspberry en ARM
 
@@ -21,6 +21,9 @@ on:
       - "raspberry/**"
       - "tools/probar_pantalla.py"
       - "tools/probar_ojos_y_camara.py"
+      - "tools/probar_motores.py"
+      - "tools/simulador_dynamixel.py"
+      - "tests/test_raspberry_motores.py"
       - "tests/test_story_display.py"
       - "tests/test_raspberry_ojos_y_camara.py"
       - "telmeow_viewer/*.png"
@@ -72,8 +75,8 @@ jobs:
           /venv/bin/pip install pytest==8.3.3 pypdf==6.21.4
           /venv/bin/pip check
 
-      - name: Pruebas de los tres programas
-        run: /venv/bin/python -m pytest tests/test_story_display.py tests/test_raspberry_ojos_y_camara.py -q -rs
+      - name: Pruebas de los cuatro programas
+        run: /venv/bin/python -m pytest tests/test_story_display.py tests/test_raspberry_ojos_y_camara.py tests/test_raspberry_motores.py -q -rs
 
       - name: Levantar Mosquitto
         run: |
@@ -89,3 +92,8 @@ jobs:
         run: |
           set -o pipefail
           { echo '```'; /venv/bin/python tools/probar_ojos_y_camara.py --sin-ventana; echo '```'; } 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Los motores, de punta a punta (simulados, por un puerto serie del sistema)
+        run: |
+          set -o pipefail
+          { echo '```'; /venv/bin/python tools/probar_motores.py 2>/dev/null; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"

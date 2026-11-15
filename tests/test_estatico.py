@@ -28,7 +28,7 @@ pyflakes_api = pytest.importorskip(
 from pyflakes.reporter import Reporter  # noqa: E402
 
 RAIZ = Path(__file__).resolve().parent.parent
-OBJETIVOS = ("telmeow_teleop", "tools", "tests", "conftest.py")
+OBJETIVOS = ("telmeow_teleop", "tools", "tests", "raspberry", "conftest.py")
 
 
 def analizar() -> tuple[int, str]:

@@ -28,6 +28,13 @@ paho-mqtt==2.1.0
 # PDF en blanco, porque los libros de verdad no van en git.
 pypdf==6.21.4
 
+# Para probar en la PC la pantalla del cuento de la Raspberry (P11,
+# raspberry/story_display.py): la ventana y el motor que dibuja los PDF. Las
+# mismas versiones que raspberry/requirements.txt. Sin ellas, esas pruebas se
+# saltan. Ninguna trae dependencias: no tocan MediaPipe ni TensorFlow.
+pygame==2.6.1
+pypdfium2==5.15.2
+
 # Broker MQTT en Python puro (tools/dev_broker.py). Levanta los mismos dos
 # listeners que mosquitto.conf (1883 TCP + 9001 WebSocket) sin requerir
 # privilegios de administrador.

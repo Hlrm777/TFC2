@@ -1,0 +1,33 @@
+# La pantalla del cuento, al arrancar la Raspberry (P11).
+#
+# Es un servicio DE USUARIO (no de sistema): necesita el escritorio para poder
+# abrir la ventana. Se instala asi, en la Raspberry:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp ~/telmeow/raspberry/telmeow-pantalla.service ~/.config/systemd/user/
+#   nano ~/.config/systemd/user/telmeow-pantalla.service    # poner la IP de la PC
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now telmeow-pantalla
+#
+# Ver que hace:    journalctl --user -u telmeow-pantalla -f
+# Pararla:         systemctl --user stop telmeow-pantalla
+#
+# Restart=always: si el programa muriera, systemd lo vuelve a lanzar a los 2 s
+# y, como el cuento y la pagina van retenidos en el broker, se pone solo donde
+# iba la lectura.
+
+[Unit]
+Description=Telmeow - la pantalla del cuento
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+# CAMBIAR: la IP de la PC del narrador (donde corre Mosquitto).
+Environment=TELMEOW_MQTT_HOST=192.168.1.50
+Environment=TELMEOW_STORIES_DIR=%h/cuentos
+ExecStart=%h/telmeow/venv/bin/python %h/telmeow/raspberry/story_display.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

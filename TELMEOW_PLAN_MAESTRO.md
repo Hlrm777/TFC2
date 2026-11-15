@@ -172,7 +172,7 @@ cambia respecto al plan original.
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ✅ **cerrado el 2026-11-08** · código hecho el 2026-10-26, sesión con el operador el 2026-11-02 · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cerrado el 2026-11-08 por decisión del operador** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7»; el P7.8 se ve en vivo en la primera sesión del P10 | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a`, `3bd2be8` |
 | P10 — Interfaz de narración | ✅ **cerrado el 2026-11-14** (código el 2026-11-08, sesiones del 2026-11-10 al 11-14) · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **sesión p10 (2026-11-10)**: las teclas, la página con su gesto (21 de 21) y los brazos, bien; al operador la interfaz le pareció intuitiva y prefiere la vista de frente; los fps con la interfaz, 88 % de los de sin ella (se pedía 90); **H70** (la sonrisa con la cabeza baja) y **H71** (la cámara a 15 fps) · **P10.1**: el voto de un enojo descartado va a la segunda opción del modelo (feliz leyendo, 25 → 81 % reproducido) · **H71 corregido**: la compensación de contraluz de la cámara se apaga al abrirla (15 → 30 fps medidos) · **confirmación del 2026-11-12** (de noche, en otra habitación): feliz leyendo 77 % y neutral leyendo 92 % (P10.1 ✅), 18-21 fps sin tramos a 15 y 97 % de los fps de sin interfaz (H71 ✅) · **H72**: al mirar al pie de la pantalla el operador baja más de lo que el cuello del robot sigue (tope a 21° del operador) · **P10.2**: la ganancia hacia abajo se comprime lejos del frente y el tope llega a los 37° (15.8 → 0 s en el tope, reproducido) · **sesión del 2026-11-13**: P10.2 ✅ (0.0 s en el tope bajando hasta 37°), la compensación de contraluz apagada no mete temblor (0.91 veces el ruido de puesta), los dos brazos a la vista quietos (0.0°) y la vista de frente por defecto · **sesión de velocidad del 2026-11-14**: con la interfaz el bucle va al 81 % (robot de frente) y al 85 % (desde detrás) de sin ella, y no al 90; la publicación, en 20.0 Hz · **P10.3** (propuesto por el operador): la narración ya no abre la ventana de OpenCV (22.8 → 26.0 fps medidos, sin navegador) y el robot se dibuja con menos píxeles y a 30 cuadros; repetida la sesión de velocidad, **92 % con las dos vistas** (criterio 90) · límites declarados en «Con qué se cierra el P10» · la sesión se lleva con `tools/sesion_verificacion.py --narracion`, que enseña la tabla de cada grabación antes de lanzarla (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
-| P11 — Pantalla externa (RPi) | ⬜ | |
+| P11 — Pantalla externa (RPi) | 🟡 **código hecho el 2026-11-14, probado en la PC; falta la Raspberry** · `raspberry/story_display.py`: obedece a los dos mensajes retenidos del P10, dibuja todas las páginas del cuento por adelantado en un hilo aparte (la pedida y sus vecinas primero) y nunca enseña un error ni se cierra solo · con libros reales y un Mosquitto, en la PC: primera página a los 0.2 s, un libro de 60 páginas entero en 2.3 s, **cambio de página 24-35 ms** de mediana (máximo 64), y tras un corte del enlace se pone sola en la página vigente a los 3 s · dos desviaciones del enunciado, avisadas: `pypdfium2` en lugar de `pdf2image` + poppler, y las imágenes al tamaño real de la pantalla · **falta**: instalarlo en la Raspberry y medir allí (`tools/probar_pantalla.py`), el arranque con systemd y la entrada del puerto 1883 en la PC | |
 | P9 — Evaluación comparativa | ⬜ | |
 
 **1684 pruebas en verde** (desde el 2026-11-14, P10.3: 1679 + 5 de la sesión sin ventana y el robot más ligero; desde el 2026-11-13, P10.2: 1629 + 21 de la compresión del cabeceo hacia abajo + 18 de la sesión que la confirma + 11 de la sesión corta de velocidad —la medición de la cámara, el brazo a la vista y el tope en el informe, la vista de frente—; desde el 2026-11-10, P10.1 y H71: 1610 + 16 de la segunda opción tras un enojo descartado + 3 de la compensación de contraluz; desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 44 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
@@ -233,7 +233,9 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── broker.py             ✅ P10: comprobar y levantar el broker (salió de tools/)
 │   └── main.py               ✅ P7 · una cámara, los tres, 20 Hz · cerrado el 2026-11-08
 ├── raspberry/
-│   └── story_display.py      ⬜ P11
+│   ├── story_display.py      🟡 P11 · hecho y probado en la PC; falta la Raspberry
+│   ├── telmeow-pantalla.service   el arranque con systemd (sin probar aún)
+│   └── requirements.txt      pygame, pypdfium2, paho-mqtt
 ├── telmeow_viewer/           ✅ el visor 3D y sus 40 STL · en git desde el 2026-09-06
 │   ├── telmeow_viewer.html   la autoridad sobre el rig y los límites
 │   └── *.stl, *.png          mallas de Fusion y texturas de los ojos
@@ -473,8 +475,8 @@ tesis.
 | 6 | **P6** | Clasificador de emoción con backends intercambiables | ✅ backend `combinado` elegido, integrado y verificado en vivo; `min_confidence` 0.5 (P6.4) |
 | 7 | **P8** | Entrenamiento con FER-2013 | ✅ 58.0 % · falta decidir P8.1 |
 | 8 | **P7** | Integración: captura única + HUD | ✅ cerrado el 2026-11-08 con los límites declarados |
-| 9 | **P10** | Panel de control del operador | ⬜ |
-| 10 | **P11** | Servicio de pantalla externa en la Raspberry | ⬜ |
+| 9 | **P10** | Interfaz de narración | ✅ cerrado el 2026-11-14 |
+| 10 | **P11** | Servicio de pantalla externa en la Raspberry | 🟡 código hecho y probado en la PC (2026-11-14); falta la Raspberry |
 | 11 | **P9** | Evaluación comparativa | ⬜ |
 
 **Punto de verificación restante:** después de P8, si la accuracy sobre FER-2013
@@ -5202,7 +5204,7 @@ Commit: "feat: panel de control del operador"
 
 ---
 
-## PROMPT 11 — Servicio de pantalla externa (Raspberry Pi) ⬜
+## PROMPT 11 — Servicio de pantalla externa (Raspberry Pi) 🟡 código hecho el 2026-11-14 · falta la Raspberry
 
 ```
 Crea `raspberry/story_display.py`, un servicio que corre EN LA RASPBERRY PI y
@@ -5248,6 +5250,63 @@ del sistema (poppler-utils).
 
 Commit: "feat: servicio de pantalla externa con prerenderizado"
 ```
+
+### P11 — Lo hecho el 2026-11-14 (en la PC, sin la Raspberry)
+
+**Qué es.** `raspberry/story_display.py`, un solo archivo que no importa nada de
+`telmeow_teleop`: a la Raspberry se copia la carpeta `raspberry/` y los PDF. Cuatro
+piezas, cada una con sus pruebas (`tests/test_story_display.py`, 49):
+
+| Pieza | Qué hace |
+|---|---|
+| `Guion` | qué cuento y qué página toca, según los mensajes. Resuelve el arranque a mitad de sesión: los dos retenidos llegan en cualquier orden, y si la página llega antes que el cuento vale más que el `page: 1` del cuento. El mismo cuento repetido (al reconectar) no vuelve a la 1 |
+| `Prerenderizador` | un hilo aparte que convierte todas las páginas en imágenes del tamaño de la pantalla, en memoria: primero la pedida, luego la siguiente y la anterior, después el resto. Un cuento nuevo tira las del anterior |
+| `Enlace` | la suscripción, con `connect_async` + `reconnect_delay_set` (1 a 30 s). Se suscribe en cada conexión, así que al volver el broker le da otra vez los retenidos |
+| `Pantalla` | la ventana de pygame, a 30 vueltas por segundo. Mientras la imagen no está, se queda lo que había. Una barra gris fina al pie mientras se dibuja el cuento |
+
+**La regla de robustez, punto por punto** (todo con prueba): broker caído, cuento
+que no está en la carpeta, PDF que no abre, página que no se dibuja, página
+fuera del libro, mensaje que no es JSON y un fallo cualquiera dentro de una
+vuelta del bucle → **se queda la última página buena**, se anota en el registro
+y se sigue. El cuento que faltaba aparece solo al copiarlo (se vuelve a buscar
+cada 2 s). Si el proceso muriera, systemd lo relanza a los 2 s
+(`Restart=always`) y los retenidos lo ponen donde iba.
+
+**Medido en la PC** (`tools/probar_pantalla.py`, que hace de PC del narrador
+contra un Mosquitto de verdad, con el bucle real de la pantalla a 1920×1080):
+
+| Libro | Páginas | Primera página | Cuento entero | Cambio de página (publicar → pantalla), 20 cambios | Tras cortar el enlace |
+|---|---|---|---|---|---|
+| `trucas.pdf` | 32 | 0.23 s | 2.4 s | mediana **35 ms**, máximo 64 | se queda la página; vuelve a la vigente a los 3.1 s |
+| `El gato que amaba la mancha naranja.pdf` | 60 | 0.16 s | 2.3 s | mediana **24 ms**, máximo 40 | igual |
+
+El cambio de página incluye la espera a la siguiente vuelta del bucle (33 ms a
+30 vueltas): la imagen ya está hecha. **Estas cifras son de la PC**; las de la
+tesis son las de la Raspberry, que será varias veces más lenta dibujando (el
+cuento entero) pero no al pasar de página.
+
+**Dos desviaciones del enunciado**, a confirmar por el operador:
+
+1. **`pypdfium2` en lugar de `pdf2image` + poppler.** Las dos convierten un PDF
+   en imágenes. `pdf2image` necesita instalar aparte el programa poppler, que en
+   Windows no hay (no se podría probar en la PC); `pypdfium2` trae su motor
+   dentro y se instala igual en la PC y en la Raspberry con `pip`. Volver a
+   `pdf2image` es cambiar una función (`dibujar_pdf`).
+2. **Las imágenes se hacen al tamaño real de la pantalla**, no a 1920×1080 fijo
+   (en una pantalla de 1080p es lo mismo), y **se guardan en memoria, sin caché
+   en disco**: hasta ~6 MB por página, ~370 MB el libro más largo (60 páginas).
+
+**Lo que falta, y de quién es:**
+
+| Qué | Quién | Qué lo dispara | Qué cuesta |
+|---|---|---|---|
+| Copiar `raspberry/` y los PDF a la Raspberry e instalar (README, «La pantalla del cuento») | el operador | tener la Raspberry y la pantalla a mano | ~15 min |
+| Dejar entrar el puerto 1883 en el cortafuegos de la PC | el operador (pide administrador) | la primera prueba con la Raspberry | una regla |
+| Medir en la Raspberry: `python tools/probar_pantalla.py --broker IP_DE_LA_PC` | el operador lo lanza, Claude lee el resultado | lo anterior | 2 min por libro |
+| Caché en disco de las páginas | Claude | si en la Raspberry el cuento entero tarda más de ~10 s, o si tiene 2 GB de memoria | medio día |
+| Probar `telmeow-pantalla.service` (el arranque solo) | el operador, con Claude | la instalación en la Raspberry | 10 min; depende del escritorio de la Raspberry |
+| Una sesión de narración con la pantalla: página y gesto a la vez, a la vista | el operador | todo lo anterior | una sesión corta |
+| Que la interfaz del narrador sepa si la pantalla está viva y con qué página | Claude | si el operador lo quiere: hoy un cuento que falta en la Raspberry solo se ve en su registro | un topic más y un indicador en la página |
 
 ---
 
@@ -5795,7 +5854,8 @@ instancia del repositorio en otro puerto TCP, apuntando el pipeline con
    abre aparte, como diagnóstico. Los demás argumentos van a `main.py`
    (`--camera`, `--no-arms`...); `--stories-dir` cambia la carpeta de los
    cuentos. Sin cámara: `--demo`.
-10. En la Raspberry: `python raspberry/story_display.py --windowed`. *(tras P11)*
+10. En la Raspberry: `python raspberry/story_display.py --broker IP_DE_LA_PC`
+    (`--windowed` para verlo en una ventana; instalación en el README).
 
 Sin Mosquitto disponible: `python tools/dev_broker.py` levanta un broker
 equivalente en Python puro, sin privilegios de administrador.

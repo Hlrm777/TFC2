@@ -1,0 +1,10 @@
+# Lo que necesita la Raspberry Pi para raspberry/story_display.py (P11).
+# Nada mas: ni MediaPipe ni TensorFlow, que corren en la PC del narrador.
+#
+#   pygame     la ventana a pantalla completa
+#   pypdfium2  dibuja las paginas del PDF; trae su propio motor (PDFium), asi
+#              que no hace falta instalar poppler en el sistema
+#   paho-mqtt  la suscripcion al broker (la misma version que en la PC)
+pygame==2.6.1
+pypdfium2==5.15.2
+paho-mqtt==2.1.0

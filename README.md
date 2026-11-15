@@ -439,6 +439,52 @@ de siempre, en el 8000 y sin `?modo=narracion`, no cambia.
 
 ---
 
+## La pantalla del cuento, en la Raspberry Pi (P11)
+
+`raspberry/story_display.py` corre **en la Raspberry del robot** y pinta, a
+pantalla completa en la pantalla externa (HDMI), la página que el narrador
+tiene abierta en su interfaz. Obedece a los dos mensajes retenidos que publica
+la PC (`telmeow/teleop/story` y `telmeow/teleop/page`); el gesto de cabeza no
+sale de aquí, va en el mensaje de pose. Al llegar un cuento dibuja **todas** sus
+páginas por adelantado, así que pasar de página es enseñar una imagen ya hecha.
+Si el broker se cae, o el cuento falta o está roto, **se queda la última página
+buena**: nunca enseña un error ni se cierra solo.
+
+**Probarlo en la PC, sin Raspberry ni broker** (flechas = página, Esc = salir):
+
+```bash
+.venv/Scripts/python.exe raspberry/story_display.py --windowed --prueba "../../02_Informacion/02_Libro Album/Libros Album/trucas.pdf"
+```
+
+**Instalarlo en la Raspberry** (Raspberry Pi OS de 64 bits con escritorio):
+
+```bash
+mkdir -p ~/telmeow ~/cuentos           # y copiar aquí raspberry/ y los PDF
+python3 -m venv ~/telmeow/venv
+~/telmeow/venv/bin/pip install -r ~/telmeow/raspberry/requirements.txt
+~/telmeow/venv/bin/python ~/telmeow/raspberry/story_display.py --windowed --broker IP_DE_LA_PC
+```
+
+- A la Raspberry se copia **solo la carpeta `raspberry/`** y **los PDF**, a
+  `~/cuentos`, con los **mismos nombres de archivo** que en la PC: el nombre es
+  lo que viaja por MQTT. No necesita `poppler` ni nada del sistema: `pypdfium2`
+  trae su propio motor de PDF.
+- `--broker` es la IP de la PC del narrador, donde corre Mosquitto (o
+  `TELMEOW_MQTT_HOST`). La PC tiene que **dejar entrar el puerto 1883** desde
+  la red: una regla de entrada en el cortafuegos de Windows. `mosquitto.conf`
+  ya escucha en todas las interfaces.
+- `--stories-dir CARPETA`, `--display N` (otro monitor), `--windowed` (ventana
+  de 960×540 en vez de pantalla completa).
+- **Al arranque**: `raspberry/telmeow-pantalla.service`, un servicio de usuario
+  de systemd; las instrucciones están dentro del archivo. Y en `raspi-config`,
+  *Display Options → Screen Blanking → No*, para que la pantalla no se apague.
+
+`tools/probar_pantalla.py` hace de PC del narrador contra un broker y mide los
+tiempos (primera página, cuento entero, retardo de cada cambio, y qué pasa si
+se corta el enlace). Sirve igual en la PC y en la Raspberry.
+
+---
+
 ## Contrato MQTT
 
 Un único mensaje JSON en `telmeow/teleop/pose`:
@@ -500,7 +546,12 @@ por segundo cuando solo le interesa uno cada varios segundos.
 │   ├── historias.py    # los cuentos en PDF y la página en que va la lectura (P10)
 │   ├── ordenes.py      # teclas y órdenes, las mismas en OpenCV y en el navegador (P10)
 │   └── broker.py       # comprobar y levantar el broker (P10)
+├── raspberry/          # lo ÚNICO que se copia a la Raspberry del robot (P11)
+│   ├── story_display.py           # la pantalla del cuento: MQTT → página a pantalla completa
+│   ├── telmeow-pantalla.service   # para lanzarla al arranque (systemd)
+│   └── requirements.txt           # pygame, pypdfium2, paho-mqtt
 ├── tools/
+│   ├── probar_pantalla.py # la pantalla del cuento de punta a punta, con sus tiempos (P11)
 │   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/# · --latencia (P7.3)
 │   ├── analizar_sesion.py, medir_latencia_camara.py  # tasas, costes y latencia (P7)
 │   ├── dev_broker.py   # broker MQTT sin privilegios de administrador

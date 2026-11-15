@@ -503,6 +503,113 @@ def direccion_camara_robot(texto: str | None) -> str | None:
     return f"http://{maquina}:{int(puerto)}"
 
 
+#: Donde ``raspberry/motor_driver.py`` cuenta, una vez por segundo, cómo están
+#: los motores del robot. El mismo nombre que su ``TOPIC_ESTADO``.
+TOPIC_MOTORES = "telmeow/robot/motores"
+#: Sin noticias del programa de los motores en este tiempo, se dice.
+MOTORES_SIN_NOTICIAS_S = 3.0
+
+
+def _lista(numeros) -> str:
+    return ", ".join(str(n) for n in numeros)
+
+
+def resumen_motores(estado: dict | None, edad_s: float | None) -> dict:
+    """El estado de los motores en una línea, para la página.
+
+    ``estado`` es lo último que publicó ``raspberry/motor_driver.py`` y
+    ``edad_s`` hace cuánto llegó (``None`` los dos si no ha llegado nada).
+    ``clave`` es ``ok``, ``aviso`` (algo falla) o ``sin_noticias``.
+    """
+    if not isinstance(estado, dict) or edad_s is None:
+        return {"clave": "sin_noticias", "texto": "Motores: sin noticias del robot"}
+    if edad_s > MOTORES_SIN_NOTICIAS_S:
+        return {"clave": "sin_noticias",
+                "texto": f"Motores: sin noticias del robot hace {edad_s:.0f} s"}
+    listos = estado.get("listos") or []
+    faltan = estado.get("faltan") or []
+    averiados = estado.get("averiados") or {}
+    total = len(listos) + len(faltan) + len(averiados)
+    partes = []
+    if averiados:
+        partes.append("apagado por error: " + _lista(sorted(averiados, key=str)))
+    if faltan:
+        partes.append("no responde: " + _lista(faltan))
+    temperaturas = [t for t in (estado.get("temperatura") or {}).values()
+                    if isinstance(t, (int, float))]
+    calor = f" · máx. {max(temperaturas):.0f} °C" if temperaturas else ""
+    if partes:
+        return {"clave": "aviso",
+                "texto": f"Motores: {len(listos)} de {total} · " + " · ".join(partes) + calor}
+    if not listos:
+        return {"clave": "aviso", "texto": "Motores: ninguno responde"}
+    return {"clave": "ok", "texto": f"Motores: {len(listos)} de {total} responden" + calor}
+
+
+class EscuchaMotores:
+    """Lee del broker el estado de los motores del robot (``--estado-motores``).
+
+    Es para quien mantiene el robot, no para quien narra: por eso solo existe
+    si se pide. Un mensaje guardado por el broker (retenido) no cuenta: podría
+    ser de un programa que ya no corre; el vivo llega en un segundo.
+    """
+
+    def __init__(self, host: str, puerto: int = 1883, *, cliente=None, reloj=time.monotonic):
+        self.host, self.puerto, self._reloj = host, puerto, reloj
+        self._ultimo: tuple[dict, float] | None = None
+        if cliente is None:
+            import paho.mqtt.client as mqtt
+
+            cliente = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        self._cliente = cliente
+        cliente.on_connect = self._al_conectar
+        cliente.on_message = self._al_mensaje
+        cliente.reconnect_delay_set(min_delay=1, max_delay=30)
+
+    def arrancar(self) -> None:
+        self._cliente.connect_async(self.host, self.puerto, 30)
+        self._cliente.loop_start()
+
+    def parar(self) -> None:
+        for funcion in (self._cliente.disconnect, self._cliente.loop_stop):
+            try:
+                funcion()
+            except Exception:  # noqa: BLE001 -- al cerrar, nada que hacer
+                pass
+
+    def _al_conectar(self, cliente, userdata, flags, codigo, propiedades=None) -> None:
+        if not getattr(codigo, "is_failure", False):
+            cliente.subscribe(TOPIC_MOTORES, 0)
+
+    def _al_mensaje(self, cliente, userdata, mensaje) -> None:
+        if getattr(mensaje, "retain", False):
+            return
+        try:
+            estado = json.loads(mensaje.payload.decode("utf-8"))
+        except Exception:  # noqa: BLE001 -- nunca tumbar el hilo de MQTT
+            return
+        if isinstance(estado, dict):
+            self._ultimo = (estado, self._reloj())
+
+    def resumen(self) -> dict:
+        ultimo = self._ultimo
+        if ultimo is None:
+            return resumen_motores(None, None)
+        return resumen_motores(ultimo[0], self._reloj() - ultimo[1])
+
+
+class _MotoresDemo:
+    """Los motores de la demo: los seis responden. No hay broker ni robot."""
+
+    def arrancar(self) -> None: ...
+
+    def parar(self) -> None: ...
+
+    def resumen(self) -> dict:
+        return resumen_motores({"listos": [1, 2, 3, 4, 5, 6], "faltan": [], "averiados": {},
+                                "temperatura": {"1": 34}}, 0.0)
+
+
 class ServidorInterfaz:
     """El servidor de la interfaz: lo arranca ``main.py`` con ``--interfaz``.
 
@@ -515,7 +622,9 @@ class ServidorInterfaz:
     def __init__(self, carpeta_visor: Path, biblioteca: Biblioteca, *,
                  host: str = "127.0.0.1", puerto: int = PUERTO,
                  emisor: EmisorVideo | None = None, guia: dict | None = None,
-                 camara_robot: str | None = None) -> None:
+                 camara_robot: str | None = None, motores=None) -> None:
+        #: Quien sabe cómo están los motores (``EscuchaMotores``), si se pidió.
+        self.motores = motores
         self.carpeta_visor = Path(carpeta_visor)
         self.biblioteca = biblioteca
         self.guia = guia
@@ -544,6 +653,8 @@ class ServidorInterfaz:
 
     def arrancar(self) -> None:
         self.emisor.arrancar()
+        if self.motores is not None:
+            self.motores.arrancar()
         self._hilo = threading.Thread(target=self._httpd.serve_forever, name="interfaz",
                                       daemon=True)
         self._hilo.start()
@@ -556,6 +667,8 @@ class ServidorInterfaz:
             self._hilo = None
         self._httpd.server_close()
         self.emisor.parar()
+        if self.motores is not None:
+            self.motores.parar()
 
     def pendientes(self) -> list[Orden]:
         """Las órdenes que llegaron desde la última vez. Las vacía el bucle."""
@@ -573,6 +686,8 @@ class ServidorInterfaz:
                 estado = {**estado, "guia": guia_de(self.guia, int(grabacion.get("etiqueta", 0)))}
         if self.camara_robot:
             estado = {**estado, "camara_robot": self.camara_robot}
+        if self.motores is not None:
+            estado = {**estado, "motores": self.motores.resumen()}
         self.estado = estado
 
 
@@ -662,12 +777,13 @@ class _PipelineDemo:
 
 def ejecutar_demo(puerto: int = PUERTO, carpeta: Path | None = None, abrir: bool = True,
                   duracion_s: float | None = None, guia: dict | None = None,
-                  camara_robot: str | None = None) -> int:
+                  camara_robot: str | None = None, estado_motores: bool = False) -> int:
     """El servidor con video sintético y un estado falso. Ctrl-C (o la orden
     salir) termina. Con ``guia``, el ensayo de una sesión de verificación."""
     carpeta = carpeta or AppConfig.from_env().paths.stories_dir
     servidor = ServidorInterfaz(CARPETA_VISOR, Biblioteca(carpeta), puerto=puerto, guia=guia,
-                                camara_robot=camara_robot)
+                                camara_robot=camara_robot,
+                                motores=_MotoresDemo() if estado_motores else None)
     demo = _PipelineDemo(servidor)
     servidor.arrancar()
     print(f"DEMO de la interfaz en {servidor.url} (cuentos de {carpeta}). Ctrl-C para salir.")
@@ -718,6 +834,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="donde sirve su video la camara del robot (raspberry/"
                              "robot_camera.py), p. ej. 192.168.1.60:8002: la pagina la ensena "
                              "en el panel de lo que ve el robot")
+    parser.add_argument("--estado-motores", action="store_true",
+                        help="ensenar en la pagina como estan los motores del robot (lo cuenta "
+                             "raspberry/motor_driver.py): para quien mantiene el robot, no "
+                             "para quien narra")
     args, resto = parser.parse_known_args(argv)
     try:
         camara_robot = direccion_camara_robot(args.camara_robot)
@@ -733,7 +853,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(exc)
                 return 1
         return ejecutar_demo(args.puerto, args.stories_dir, abrir=not args.sin_navegador,
-                             guia=guia, camara_robot=camara_robot)
+                             guia=guia, camara_robot=camara_robot,
+                             estado_motores=args.estado_motores)
 
     from .broker import asegurar_broker
 
@@ -756,6 +877,8 @@ def main(argv: list[str] | None = None) -> int:
             argumentos += ["--guia-sesion", str(args.guia_sesion)]
         if camara_robot is not None:
             argumentos += ["--camara-robot", camara_robot]
+        if args.estado_motores:
+            argumentos.append("--estado-motores")
         return pipeline(argumentos + resto)
     finally:
         for proceso in arrancados:

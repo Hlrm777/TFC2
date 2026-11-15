@@ -22,7 +22,7 @@
     {
       "name": "interfaz-demo-robot",
       "runtimeExecutable": ".venv/Scripts/python.exe",
-      "runtimeArgs": ["-m", "telmeow_teleop.control_panel", "--demo", "--sin-navegador", "--camara-robot", "localhost:8002"],
+      "runtimeArgs": ["-m", "telmeow_teleop.control_panel", "--demo", "--sin-navegador", "--camara-robot", "localhost:8002", "--estado-motores"],
       "port": 8001
     },
     {

@@ -1337,6 +1337,12 @@ def _parser() -> argparse.ArgumentParser:
              "(raspberry/robot_camera.py), p. ej. 192.168.1.60:8002. La página la "
              "enseña en «Lo que ve el robot». También TELMEOW_ROBOT_CAM.",
     )
+    propios.add_argument(
+        "--estado-motores", action="store_true",
+        help="Con --interfaz: la página enseña cómo están los motores del robot "
+             "(cuántos responden, cuál falla, temperatura), que cuenta "
+             "raspberry/motor_driver.py. Para quien mantiene el robot, no para quien narra.",
+    )
     add_cli_args(parser)
     return parser
 
@@ -1483,7 +1489,8 @@ def main(argv: list[str] | None = None) -> int:
             hilo.arrancar()
 
         if args.interfaz is not None:
-            interfaz = _crear_interfaz(cfg, args.interfaz, guia, camara_robot)
+            interfaz = _crear_interfaz(cfg, args.interfaz, guia, camara_robot,
+                                       args.estado_motores)
             if interfaz is None:
                 return 1
             print(f"Interfaz de narracion en {interfaz.url} (cuentos de "
@@ -1521,15 +1528,17 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _crear_interfaz(cfg: AppConfig, puerto: int, guia: dict | None = None,
-                    camara_robot: str | None = None):
+                    camara_robot: str | None = None, estado_motores: bool = False):
     """El servidor de la interfaz de narración (P10), ya arrancado, o ``None``
     si el puerto está ocupado (otra sesión abierta)."""
     # Aquí y no arriba: sin --interfaz no se carga nada de esto.
-    from .control_panel import CARPETA_VISOR, ServidorInterfaz
+    from .control_panel import CARPETA_VISOR, EscuchaMotores, ServidorInterfaz
 
+    motores = EscuchaMotores(cfg.mqtt.host, cfg.mqtt.port) if estado_motores else None
     try:
         interfaz = ServidorInterfaz(CARPETA_VISOR, Biblioteca(cfg.paths.stories_dir),
-                                    puerto=puerto, guia=guia, camara_robot=camara_robot)
+                                    puerto=puerto, guia=guia, camara_robot=camara_robot,
+                                    motores=motores)
     except OSError as exc:
         print(f"No se pudo abrir la interfaz en el puerto {puerto} ({exc}). "
               f"Hay otra sesion abierta?")

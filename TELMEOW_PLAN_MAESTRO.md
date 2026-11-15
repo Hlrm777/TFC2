@@ -5472,24 +5472,37 @@ en el navegador.
 - **En el robot físico nadie comprueba los choques contra la geometría.** Los
   evita la PC con sus tablas (`limits.py`) antes de publicar; la segunda
   comprobación, la del visor, no existe en el robot.
-- **La interfaz no enseña el estado de los motores.** «Robot conectado» quiere
-  decir que hay enlace con el broker; lo que publica `motor_driver.py` en
-  `telmeow/robot/motores` todavía no lo lee nadie.
+- **El estado de los motores solo se ve si se pide** (`--estado-motores`,
+  2026-11-15). Decisión del operador: a quien narra no le interesa ni lo
+  notaría; es para quien mantiene el robot. Con la opción, la página añade una
+  línea al panel de estado («Motores: 6 de 6 responden · máx. 34 °C», o cuál no
+  responde o se apagó por error, o «sin noticias del robot» tras 3 s sin
+  mensajes), leída de `telmeow/robot/motores`. Sin ella la página no cambia, y
+  «Robot conectado» sigue queriendo decir solo que hay enlace con el broker.
+  Comprobado con `motor_driver.py` contra los motores simulados (seis bien; uno
+  averiado y otro desenchufado; el programa parado) y en la página con la demo.
 - **El audio no tiene código**: ni la voz del narrador hacia el altavoz del
-  robot ni el micrófono hacia el narrador. Y el micrófono del esquema es
-  analógico: la Raspberry no tiene entradas analógicas, así que por GPIO no lo
-  puede leer sin un conversor.
+  robot ni el micrófono hacia el narrador. El operador lo reabrió el 2026-11-15:
+  sin la voz del narrador la teleoperación queda muda. Los dos módulos del
+  esquema no sirven para voz con una Raspberry: el micrófono es analógico (la
+  Raspberry no tiene entradas analógicas) y el altavoz Gravity es un zumbador
+  amplificado pensado para tonos de Arduino, y la Raspberry Pi 5 ya no trae
+  salida de audio analógica. Propuesta de Claude: audio por USB (un altavoz y
+  un micrófono USB, o un altavoz-micrófono de conferencia), que Linux reconoce
+  sin cableado ni programa de bajo nivel. A decidir por el operador.
 
 **Pendientes, con quién los lleva:**
 
 | Qué | Quién | Qué lo dispara | Qué cuesta |
 |---|---|---|---|
-| Confirmar las dos desviaciones (`pypdfium2`; páginas en memoria) y el reparto del panel «Lo que ve el robot» | el operador | cuando lo vea | una respuesta |
+| ~~Confirmar `pypdfium2` en lugar de `pdf2image`~~ | ✅ confirmado por el operador (2026-11-15) | | |
+| Confirmar las páginas en memoria y el reparto del panel «Lo que ve el robot» | el operador | cuando lo vea | una respuesta |
 | ~~El programa de los motores~~ | ✅ hecho en el P11.4 (2026-11-15) | | |
-| Enseñar en la interfaz el estado de los motores (`telmeow/robot/motores`) | Claude | si el operador lo quiere | un indicador más en la página, medio día |
+| ~~Enseñar en la interfaz el estado de los motores~~ | ✅ hecho como opción, `--estado-motores` (2026-11-15) | | |
 | Calibrar el cero y el sentido de cada articulación, y afinar velocidades | quien construya el robot | que exista el robot | `raspberry/OPENRB.md`, apartado 4 |
-| El audio (voz del narrador al robot, micrófono del robot al narrador) | Claude, si el operador lo pide | el operador lo dejó a criterio de Claude (2026-11-14) y **no se hace**: no se puede probar nada de él sin el hardware, obliga a cambiar el esquema (el micrófono es analógico y la Raspberry no lee señales analógicas) y queda lejos del aporte de la tesis, que es la teleoperación por visión. Se declara como límite | varios días |
-| Corregir en el documento de la tesis el esquema de conexiones (datos de la OpenRB, micrófono) | el operador | al redactar el capítulo de electrónica | un dibujo |
+| El audio: la voz del narrador al altavoz del robot (y, si se quiere, el micrófono del robot al narrador) | Claude | que el operador elija los componentes (propuesta: altavoz y micrófono USB) y diga si quiere el programa. Reabierto el 2026-11-15: el 2026-11-14 quedó a criterio de Claude y no se hizo | el programa de la voz, con una salida de sonido de prueba como las de la cámara: uno o dos días; sin hardware solo se prueba que el sonido llega entero y con qué retraso, no cómo suena |
+| Añadir a la figura de conexiones el USB-C de datos Raspberry–OpenRB | el operador (lo asumió el 2026-11-15) | al redactar el capítulo de electrónica | un dibujo |
+| Cambiar en la figura y en la tabla de componentes el altavoz y el micrófono | el operador | la decisión del audio | un dibujo y dos filas |
 | Ejecutarlo en una Raspberry de verdad | quien construya el robot | que exista el hardware | README, «Los programas de la Raspberry Pi» |
 
 ---

@@ -486,6 +486,12 @@ del P10, sin cambios. Para verlo sin robot, en dos terminales:
 .venv/Scripts/python.exe -m telmeow_teleop.control_panel --demo --camara-robot localhost:8002
 ```
 
+**El estado de los motores, a petición.** Con `--estado-motores` el panel de
+estado de la página añade una línea con lo que cuenta `raspberry/motor_driver.py`
+(«Motores: 6 de 6 responden · máx. 34 °C», o cuál no responde o se apagó por
+error). Es para quien mantiene el robot, no para quien narra: sin el argumento
+no aparece. Con `--demo` enseña un estado de ejemplo.
+
 La cámara **no graba nada**: solo retransmite la foto más reciente, por la red
 local y sin contraseña. La red de la sesión tiene que ser de confianza.
 

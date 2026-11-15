@@ -136,6 +136,7 @@
   #n-estado .linea{display:flex;align-items:center;gap:8px}
   #n-estado .dot.pausa{background:var(--accent);box-shadow:0 0 8px var(--accent)}
   #n-estado .tenue{color:var(--ink-dim);font-size:11.5px}
+  #n-estado #n-motores.aviso{color:var(--warn)}
   #n-estado .grab{color:var(--warn);font-size:12px}
   #n-aviso{color:var(--accent);font-size:12.5px;min-height:1.3em}
   #n-controles{grid-area:controles;flex-direction:column;gap:8px;padding:10px 14px;background:var(--panel);
@@ -312,6 +313,7 @@
     <div id="n-expresion">Expresión: —</div>
     <div class="tenue" id="n-titulo">Sin cuento</div>
     <div class="tenue" id="n-visor">Visor: sin conexión al broker</div>
+    <div class="tenue" id="n-motores" hidden></div>
     <div class="grab" id="n-grab"></div>
     <div id="n-aviso"></div>
   </div>
@@ -1478,6 +1480,13 @@
   function pintarEstado(e){
     pintarGuia(e.guia);
     if(e.camara_robot && !narr.camaraRobot) iniciarCamaraRobot(e.camara_robot);
+    // Solo con --estado-motores: es para quien mantiene el robot.
+    const motores = document.getElementById('n-motores');
+    motores.hidden = !e.motores;
+    if(e.motores){
+      motores.textContent = e.motores.texto;
+      motores.className = 'tenue' + (e.motores.clave==='ok' ? '' : ' aviso');
+    }
     const robot = e.robot || {clave:'sin_enlace', texto:'—'};
     document.getElementById('n-robot').textContent = robot.texto;
     document.getElementById('n-robot-dot').className = 'dot' +

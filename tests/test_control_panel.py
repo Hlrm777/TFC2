@@ -561,3 +561,72 @@ def test_la_pagina_tiene_el_panel_de_lo_que_ve_el_robot_y_sin_camara_no_cambia()
 
     assert "base + '/video.mjpg" in html and "base + '/estado'" in html
     assert f"const SIN_SENAL_MS = {int(robot_camera.SIN_SENAL_S * 1000)};" in html
+
+
+# -- el estado de los motores (--estado-motores) ----------------------------
+
+
+@pytest.mark.parametrize("estado, edad, clave, trozos", [
+    (None, None, "sin_noticias", ["sin noticias"]),
+    ({"listos": [1, 2, 3, 4, 5, 6]}, 9.0, "sin_noticias", ["hace 9 s"]),
+    ({"listos": [1, 2, 3, 4, 5, 6], "faltan": [], "averiados": {},
+      "temperatura": {"1": 34, "2": 41}}, 0.5, "ok", ["6 de 6 responden", "41 °C"]),
+    ({"listos": [1, 2, 4, 6], "faltan": [5], "averiados": {"3": 32}}, 0.5, "aviso",
+     ["4 de 6", "apagado por error: 3", "no responde: 5"]),
+    ({"listos": [], "faltan": [], "averiados": {}}, 0.5, "aviso", ["ninguno responde"]),
+])
+def test_el_resumen_de_los_motores(estado, edad, clave, trozos):
+    resumen = cp.resumen_motores(estado, edad)
+    assert resumen["clave"] == clave
+    for trozo in trozos:
+        assert trozo in resumen["texto"]
+
+
+class _ClienteFalso:
+    def __init__(self):
+        self.suscritos = []
+
+    def reconnect_delay_set(self, **_): ...
+
+    def subscribe(self, topic, qos):
+        self.suscritos.append(topic)
+
+
+class _Mensaje:
+    def __init__(self, texto, retain=False):
+        self.payload, self.retain = texto.encode("utf-8"), retain
+
+
+def test_la_escucha_de_los_motores_lee_el_topic_del_programa_del_robot():
+    from raspberry import motor_driver
+
+    assert cp.TOPIC_MOTORES == motor_driver.TOPIC_ESTADO
+    reloj = [100.0]
+    cliente = _ClienteFalso()
+    escucha = cp.EscuchaMotores("localhost", cliente=cliente, reloj=lambda: reloj[0])
+    escucha._al_conectar(cliente, None, None, 0)
+    assert cliente.suscritos == [cp.TOPIC_MOTORES]
+    assert escucha.resumen()["clave"] == "sin_noticias"
+    # Lo guardado por el broker puede ser de un programa que ya no corre.
+    escucha._al_mensaje(cliente, None, _Mensaje('{"listos":[1,2,3,4,5,6]}', retain=True))
+    assert escucha.resumen()["clave"] == "sin_noticias"
+    escucha._al_mensaje(cliente, None, _Mensaje("esto no es JSON"))
+    escucha._al_mensaje(cliente, None, _Mensaje('{"listos":[1,2,3,4,5,6]}'))
+    assert escucha.resumen()["clave"] == "ok"
+    reloj[0] += cp.MOTORES_SIN_NOTICIAS_S + 1
+    assert escucha.resumen()["clave"] == "sin_noticias"
+
+
+@pytest.mark.parametrize("pedido", [False, True])
+def test_el_estado_lleva_los_motores_solo_si_se_piden(tmp_path, pedido):
+    servidor = cp.ServidorInterfaz(tmp_path, Biblioteca(tmp_path), puerto=0,
+                                   motores=cp._MotoresDemo() if pedido else None)
+    servidor.publicar_estado(cp.estado_interfaz(enlace=True))
+    servidor.parar()
+    assert ("motores" in servidor.estado) == pedido
+
+
+def test_la_pagina_solo_muestra_los_motores_si_el_estado_los_trae():
+    html = (cp.CARPETA_VISOR / "telmeow_viewer.html").read_text(encoding="utf-8")
+    assert '<div class="tenue" id="n-motores" hidden></div>' in html
+    assert "motores.hidden = !e.motores;" in html

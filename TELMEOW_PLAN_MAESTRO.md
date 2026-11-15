@@ -5144,7 +5144,6 @@ eso se cierra.
 |---|---|---|---|
 | **Los requisitos de cómputo del equipo del teleoperador** | Quien lleve el P9 (la evaluación), que es donde se reportan las cifras | Al escribir el P9 | Declarar el equipo de referencia (arriba) y el presupuesto medido: lo que tarda cada red por foto y la vuelta entera, con y sin la interfaz. Un «mínimo» de verdad pide medir en un equipo más modesto: si hay uno a mano, la misma sesión `--velocidad` en él; si no, se declara como equipo de referencia y no como mínimo |
 | **Por qué la sesión acabó sin las preguntas** | Quien lleve el paso | Que vuelva a pasar | Mirar la salida de la terminal en ese momento; hoy no hay rastro |
-| **La skill `telmeow-viewer`** dice que la vista arranca desde detrás | Quien lleve el paso propone el archivo; el operador lo sube a claude.ai | La próxima vez que se toque el visor | Una línea de la sección «Modo narración» |
 
 ### Enunciado original
 

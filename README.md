@@ -439,49 +439,81 @@ de siempre, en el 8000 y sin `?modo=narracion`, no cambia.
 
 ---
 
-## La pantalla del cuento, en la Raspberry Pi (P11)
+## Los programas de la Raspberry Pi del robot (P11)
 
-`raspberry/story_display.py` corre **en la Raspberry del robot** y pinta, a
-pantalla completa en la pantalla externa (HDMI), la página que el narrador
-tiene abierta en su interfaz. Obedece a los dos mensajes retenidos que publica
-la PC (`telmeow/teleop/story` y `telmeow/teleop/page`); el gesto de cabeza no
-sale de aquí, va en el mensaje de pose. Al llegar un cuento dibuja **todas** sus
-páginas por adelantado, así que pasar de página es enseñar una imagen ya hecha.
-Si el broker se cae, o el cuento falta o está roto, **se queda la última página
-buena**: nunca enseña un error ni se cierra solo.
+La carpeta `raspberry/` es **lo único que corre en el robot**. Son tres
+programas sueltos, que no importan nada de `telmeow_teleop` ni entre ellos:
 
-**Probarlo en la PC, sin Raspberry ni broker** (flechas = página, Esc = salir):
+| Programa | Qué hace | De dónde lo saca |
+|---|---|---|
+| `story_display.py` | la página del cuento, a pantalla completa en el monitor externo (HDMI) | los mensajes retenidos `telmeow/teleop/story` y `telmeow/teleop/page` |
+| `eye_display.py` | la expresión, en la pantalla de los ojos (DSI, 800×480) | el campo `emo` del mensaje de pose; las mismas seis imágenes y el mismo fundido de 350 ms que el visor |
+| `robot_camera.py` | la cámara de la frente, como video por HTTP (puerto 8002) | la cámara de la Raspberry (`picamera2`), una USB, un video o una imagen de prueba |
+
+Los tres siguen la misma regla: **nunca enseñan un error ni se cierran solos**.
+Si el broker se cae, el cuento falta, llega una expresión que no existe o la
+cámara se desconecta, se quedan con lo último bueno, lo anotan y reintentan.
+
+> **El robot no se ha fabricado.** Estos programas están probados en la PC y en
+> un procesador ARM de 64 bits (abajo), con pantallas y cámara simuladas. No se
+> han ejecutado nunca en una Raspberry Pi con sus pantallas y su cámara.
+
+**Probarlos en la PC, sin Raspberry ni broker** (Esc = salir):
 
 ```bash
 .venv/Scripts/python.exe raspberry/story_display.py --windowed --prueba "../../02_Informacion/02_Libro Album/Libros Album/trucas.pdf"
 ```
 
-**Instalarlo en la Raspberry** (Raspberry Pi OS de 64 bits con escritorio):
-
 ```bash
-mkdir -p ~/telmeow ~/cuentos           # y copiar aquí raspberry/ y los PDF
-python3 -m venv ~/telmeow/venv
-~/telmeow/venv/bin/pip install -r ~/telmeow/raspberry/requirements.txt
-~/telmeow/venv/bin/python ~/telmeow/raspberry/story_display.py --windowed --broker IP_DE_LA_PC
+.venv/Scripts/python.exe raspberry/eye_display.py --windowed --prueba
 ```
 
-- A la Raspberry se copia **solo la carpeta `raspberry/`** y **los PDF**, a
-  `~/cuentos`, con los **mismos nombres de archivo** que en la PC: el nombre es
-  lo que viaja por MQTT. No necesita `poppler` ni nada del sistema: `pypdfium2`
-  trae su propio motor de PDF.
-- `--broker` es la IP de la PC del narrador, donde corre Mosquitto (o
-  `TELMEOW_MQTT_HOST`). La PC tiene que **dejar entrar el puerto 1883** desde
-  la red: una regla de entrada en el cortafuegos de Windows. `mosquitto.conf`
-  ya escucha en todas las interfaces.
-- `--stories-dir CARPETA`, `--display N` (otro monitor), `--windowed` (ventana
-  de 960×540 en vez de pantalla completa).
-- **Al arranque**: `raspberry/telmeow-pantalla.service`, un servicio de usuario
-  de systemd; las instrucciones están dentro del archivo. Y en `raspi-config`,
-  *Display Options → Screen Blanking → No*, para que la pantalla no se apague.
+En el primero las flechas pasan de página; en el segundo las teclas 1 a 6
+cambian la expresión.
 
-`tools/probar_pantalla.py` hace de PC del narrador contra un broker y mide los
-tiempos (primera página, cuento entero, retardo de cada cambio, y qué pasa si
-se corta el enlace). Sirve igual en la PC y en la Raspberry.
+**«Lo que ve el robot» en la interfaz de narración.** Con `--camara-robot`, la
+página enseña el video de la cámara del robot donde estaba la del narrador, que
+pasa a un recuadro en la esquina. Si la última foto tiene más de 2 s avisa «Sin
+señal» en vez de dejar una imagen congelada. Sin ese argumento la página es la
+del P10, sin cambios. Para verlo sin robot, en dos terminales:
+
+```bash
+.venv/Scripts/python.exe raspberry/robot_camera.py --fuente prueba --solo-local
+```
+
+```bash
+.venv/Scripts/python.exe -m telmeow_teleop.control_panel --demo --camara-robot localhost:8002
+```
+
+La cámara **no graba nada**: solo retransmite la foto más reciente, por la red
+local y sin contraseña. La red de la sesión tiene que ser de confianza.
+
+**Instalarlos en una Raspberry** (Raspberry Pi OS de 64 bits con escritorio):
+
+```bash
+sudo apt install python3-picamera2
+mkdir -p ~/telmeow ~/cuentos           # y copiar aquí raspberry/ y los PDF
+python3 -m venv --system-site-packages ~/telmeow/venv
+~/telmeow/venv/bin/pip install -r ~/telmeow/raspberry/requirements.txt
+```
+
+- Se copia la carpeta `raspberry/`, los PDF a `~/cuentos` con los **mismos
+  nombres de archivo** que en la PC, y los seis PNG de los ojos
+  (`telmeow_viewer/0*.png`) a `raspberry/ojos/`.
+- `--broker IP_DE_LA_PC` (o `TELMEOW_MQTT_HOST`): la PC del narrador, donde
+  corre Mosquitto. La PC tiene que dejar entrar el puerto 1883 (cortafuegos).
+- `--display N` elige el monitor: el HDMI para el cuento, la DSI para los ojos.
+- **Al arranque**: `raspberry/telmeow-pantalla.service`, `telmeow-ojos.service`
+  y `telmeow-camara.service` (systemd de usuario; instrucciones dentro).
+
+**La prueba en ARM.** `.github/workflows/raspberry-arm.yml` instala
+`raspberry/requirements.txt` y corre las pruebas y las dos herramientas de punta
+a punta (`tools/probar_pantalla.py`, `tools/probar_ojos_y_camara.py`) en una
+máquina de GitHub con procesador ARM de 64 bits, dentro de Debian 12 y Debian
+13 (la base de Raspberry Pi OS), contra un Mosquitto de verdad. Corre sola cada
+vez que cambia algo de `raspberry/`. Demuestra que las dependencias existen
+para ARM y que el código funciona allí; **no** demuestra la salida por HDMI o
+DSI, una cámara real, el arranque con systemd ni la velocidad de una Raspberry.
 
 ---
 
@@ -547,11 +579,14 @@ por segundo cuando solo le interesa uno cada varios segundos.
 │   ├── ordenes.py      # teclas y órdenes, las mismas en OpenCV y en el navegador (P10)
 │   └── broker.py       # comprobar y levantar el broker (P10)
 ├── raspberry/          # lo ÚNICO que se copia a la Raspberry del robot (P11)
-│   ├── story_display.py           # la pantalla del cuento: MQTT → página a pantalla completa
-│   ├── telmeow-pantalla.service   # para lanzarla al arranque (systemd)
-│   └── requirements.txt           # pygame, pypdfium2, paho-mqtt
+│   ├── story_display.py    # la pantalla del cuento: MQTT → página a pantalla completa
+│   ├── eye_display.py      # la pantalla de los ojos: `emo` → la expresión, con fundido
+│   ├── robot_camera.py     # la cámara de la frente, por HTTP, para «Lo que ve el robot»
+│   ├── telmeow-*.service   # para lanzarlos al arranque (systemd)
+│   └── requirements.txt    # pygame, pypdfium2, paho-mqtt, opencv-python-headless
+├── .github/workflows/raspberry-arm.yml  # la prueba de raspberry/ en ARM de 64 bits
 ├── tools/
-│   ├── probar_pantalla.py # la pantalla del cuento de punta a punta, con sus tiempos (P11)
+│   ├── probar_pantalla.py, probar_ojos_y_camara.py  # raspberry/ de punta a punta, con tiempos (P11)
 │   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/# · --latencia (P7.3)
 │   ├── analizar_sesion.py, medir_latencia_camara.py  # tasas, costes y latencia (P7)
 │   ├── dev_broker.py   # broker MQTT sin privilegios de administrador

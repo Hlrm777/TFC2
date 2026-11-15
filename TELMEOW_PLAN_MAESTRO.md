@@ -172,7 +172,7 @@ cambia respecto al plan original.
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ✅ **cerrado el 2026-11-08** · código hecho el 2026-10-26, sesión con el operador el 2026-11-02 · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cerrado el 2026-11-08 por decisión del operador** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7»; el P7.8 se ve en vivo en la primera sesión del P10 | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a`, `3bd2be8` |
 | P10 — Interfaz de narración | ✅ **cerrado el 2026-11-14** (código el 2026-11-08, sesiones del 2026-11-10 al 11-14) · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **sesión p10 (2026-11-10)**: las teclas, la página con su gesto (21 de 21) y los brazos, bien; al operador la interfaz le pareció intuitiva y prefiere la vista de frente; los fps con la interfaz, 88 % de los de sin ella (se pedía 90); **H70** (la sonrisa con la cabeza baja) y **H71** (la cámara a 15 fps) · **P10.1**: el voto de un enojo descartado va a la segunda opción del modelo (feliz leyendo, 25 → 81 % reproducido) · **H71 corregido**: la compensación de contraluz de la cámara se apaga al abrirla (15 → 30 fps medidos) · **confirmación del 2026-11-12** (de noche, en otra habitación): feliz leyendo 77 % y neutral leyendo 92 % (P10.1 ✅), 18-21 fps sin tramos a 15 y 97 % de los fps de sin interfaz (H71 ✅) · **H72**: al mirar al pie de la pantalla el operador baja más de lo que el cuello del robot sigue (tope a 21° del operador) · **P10.2**: la ganancia hacia abajo se comprime lejos del frente y el tope llega a los 37° (15.8 → 0 s en el tope, reproducido) · **sesión del 2026-11-13**: P10.2 ✅ (0.0 s en el tope bajando hasta 37°), la compensación de contraluz apagada no mete temblor (0.91 veces el ruido de puesta), los dos brazos a la vista quietos (0.0°) y la vista de frente por defecto · **sesión de velocidad del 2026-11-14**: con la interfaz el bucle va al 81 % (robot de frente) y al 85 % (desde detrás) de sin ella, y no al 90; la publicación, en 20.0 Hz · **P10.3** (propuesto por el operador): la narración ya no abre la ventana de OpenCV (22.8 → 26.0 fps medidos, sin navegador) y el robot se dibuja con menos píxeles y a 30 cuadros; repetida la sesión de velocidad, **92 % con las dos vistas** (criterio 90) · límites declarados en «Con qué se cierra el P10» · la sesión se lleva con `tools/sesion_verificacion.py --narracion`, que enseña la tabla de cada grabación antes de lanzarla (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
-| P11 — Pantalla externa (RPi) | 🟡 **código hecho el 2026-11-14, probado en la PC; falta la Raspberry** · `raspberry/story_display.py`: obedece a los dos mensajes retenidos del P10, dibuja todas las páginas del cuento por adelantado en un hilo aparte (la pedida y sus vecinas primero) y nunca enseña un error ni se cierra solo · con libros reales y un Mosquitto, en la PC: primera página a los 0.2 s, un libro de 60 páginas entero en 2.3 s, **cambio de página 24-35 ms** de mediana (máximo 64), y tras un corte del enlace se pone sola en la página vigente a los 3 s · dos desviaciones del enunciado, avisadas: `pypdfium2` en lugar de `pdf2image` + poppler, y las imágenes al tamaño real de la pantalla · **falta**: instalarlo en la Raspberry y medir allí (`tools/probar_pantalla.py`), el arranque con systemd y la entrada del puerto 1883 en la PC | |
+| P11 — Los programas de la Raspberry | ✅ **código hecho y probado sin hardware el 2026-11-14** (el robot no se fabrica: decisión del operador) · `raspberry/story_display.py` (el cuento), `eye_display.py` (los ojos) y `robot_camera.py` (la cámara de la frente), los tres con la regla de no enseñar errores ni cerrarse · la interfaz gana «Lo que ve el robot» (`--camara-robot`), con aviso de «sin señal» · **probado en ARM de 64 bits** (GitHub, Debian 12 y 13, Mosquitto de verdad): 80 pruebas y las dos de punta a punta en verde · en la PC, con libros reales: cambio de página 24-35 ms, expresión nueva 35 ms + 350 de fundido, video a 15 fotos por segundo · desviación avisada: `pypdfium2` en lugar de `pdf2image` · **límites declarados**: nunca ejecutado en una Raspberry; sin probar HDMI/DSI, la cámara real (`picamera2`), systemd ni la velocidad allí; motores, altavoz y micrófono sin código | `634c0fd`, `189793a` |
 | P9 — Evaluación comparativa | ⬜ | |
 
 **1684 pruebas en verde** (desde el 2026-11-14, P10.3: 1679 + 5 de la sesión sin ventana y el robot más ligero; desde el 2026-11-13, P10.2: 1629 + 21 de la compresión del cabeceo hacia abajo + 18 de la sesión que la confirma + 11 de la sesión corta de velocidad —la medición de la cámara, el brazo a la vista y el tope en el informe, la vista de frente—; desde el 2026-11-10, P10.1 y H71: 1610 + 16 de la segunda opción tras un enojo descartado + 3 de la compensación de contraluz; desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 44 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
@@ -233,9 +233,11 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── broker.py             ✅ P10: comprobar y levantar el broker (salió de tools/)
 │   └── main.py               ✅ P7 · una cámara, los tres, 20 Hz · cerrado el 2026-11-08
 ├── raspberry/
-│   ├── story_display.py      🟡 P11 · hecho y probado en la PC; falta la Raspberry
-│   ├── telmeow-pantalla.service   el arranque con systemd (sin probar aún)
-│   └── requirements.txt      pygame, pypdfium2, paho-mqtt
+│   ├── story_display.py      ✅ P11 · el cuento · probado en la PC y en ARM, nunca en una Raspberry
+│   ├── eye_display.py        ✅ P11.1 · los ojos · ídem
+│   ├── robot_camera.py       ✅ P11.2 · la cámara de la frente · ídem (picamera2 sin probar)
+│   ├── telmeow-*.service     el arranque con systemd (sin probar)
+│   └── requirements.txt      pygame, pypdfium2, paho-mqtt, opencv-python-headless
 ├── telmeow_viewer/           ✅ el visor 3D y sus 40 STL · en git desde el 2026-09-06
 │   ├── telmeow_viewer.html   la autoridad sobre el rig y los límites
 │   └── *.stl, *.png          mallas de Fusion y texturas de los ojos
@@ -476,7 +478,7 @@ tesis.
 | 7 | **P8** | Entrenamiento con FER-2013 | ✅ 58.0 % · falta decidir P8.1 |
 | 8 | **P7** | Integración: captura única + HUD | ✅ cerrado el 2026-11-08 con los límites declarados |
 | 9 | **P10** | Interfaz de narración | ✅ cerrado el 2026-11-14 |
-| 10 | **P11** | Servicio de pantalla externa en la Raspberry | 🟡 código hecho y probado en la PC (2026-11-14); falta la Raspberry |
+| 10 | **P11** | Los programas de la Raspberry: cuento, ojos y cámara | ✅ código hecho y probado sin hardware (PC y ARM) el 2026-11-14; el robot no se fabrica |
 | 11 | **P9** | Evaluación comparativa | ⬜ |
 
 **Punto de verificación restante:** después de P8, si la accuracy sobre FER-2013
@@ -4572,7 +4574,7 @@ pasándola, una guía rota que para antes de abrir la cámara—).
 
 | Pendiente | Quién | Qué lo dispara | Qué cuesta |
 |---|---|---|---|
-| Panel «lo que ve el robot» | el paso que integre la cámara del robot físico | que el robot tenga cámara | un panel y un segundo video |
+| ~~Panel «lo que ve el robot»~~ | ✅ hecho en el P11.2 (2026-11-14): `--camara-robot`, con la cámara de `raspberry/robot_camera.py` | | |
 | Elegir la cámara por nombre (§4.4) | un P10.x | que en una sesión se abra la cámara equivocada por el índice | una dependencia para leer los nombres de DirectShow |
 | El visor depende de internet (three, mqtt.js y pdf.js por CDN) | antes de las sesiones con niños, o un P10.x si una sesión falla por la red | una sesión sin internet fiable | ~3 MB de JavaScript copiados al repositorio |
 
@@ -5204,7 +5206,7 @@ Commit: "feat: panel de control del operador"
 
 ---
 
-## PROMPT 11 — Servicio de pantalla externa (Raspberry Pi) 🟡 código hecho el 2026-11-14 · falta la Raspberry
+## PROMPT 11 — Los programas de la Raspberry Pi ✅ código hecho y probado sin hardware el 2026-11-14
 
 ```
 Crea `raspberry/story_display.py`, un servicio que corre EN LA RASPBERRY PI y
@@ -5296,17 +5298,120 @@ cuento entero) pero no al pasar de página.
    (en una pantalla de 1080p es lo mismo), y **se guardan en memoria, sin caché
    en disco**: hasta ~6 MB por página, ~370 MB el libro más largo (60 páginas).
 
-**Lo que falta, y de quién es:**
+### El robot no se fabrica (decisión del operador, 2026-11-14)
+
+El operador no va a imprimir el robot ni a comprar la Raspberry, las pantallas,
+la cámara ni los motores: no puede costearlo. **El trabajo es de diseño y de
+simulación**, y el código del robot se deja preparado y probado hasta donde se
+puede sin el hardware. Todo lo que solo se podría comprobar con él se declara
+como límite (abajo), no como pendiente.
+
+El hardware del diseño, del esquema de conexiones del operador:
+
+| Pieza | Modelo | Qué programa la usa |
+|---|---|---|
+| Computador del robot | Raspberry Pi 5, 4 GB | los tres de `raspberry/` |
+| Pantalla del cuento | monitor portátil de 15.6", 1920×1080, HDMI | `story_display.py` |
+| Pantalla de los ojos | 5", 800×480, DSI (cable FPC) | `eye_display.py` |
+| Cámara de la frente | Raspberry Pi Camera Module 3 (cable FPC) | `robot_camera.py --fuente picamera2` |
+| Motores | 6 DYNAMIXEL XL430-W250-T, por una placa OpenRB | **ninguno** (abajo) |
+| Altavoz y micrófono | módulos Gravity, por GPIO | **ninguno** (abajo) |
+
+Con 4 GB, guardar en memoria las páginas del libro más largo (~370 MB) cabe:
+la caché en disco no hace falta.
+
+### P11.1 — La pantalla de los ojos ✅ 2026-11-14
+
+`raspberry/eye_display.py`. Se suscribe al topic de pose y solo lee `emo` (o
+`emotion`). Es la pantalla de ojos del visor llevada a la Raspberry: las mismas
+seis imágenes de `telmeow_viewer/` (ya estaban a 800×480), los mismos nombres y
+alias en inglés, el mismo fundido de 350 ms; una prueba compara las tres cosas
+contra el HTML del visor, para que no se separen. Arranca en neutral sin esperar
+mensajes. Una expresión desconocida, una imagen que falta o un broker caído
+dejan la expresión que había.
+
+### P11.2 — La cámara de la frente y «Lo que ve el robot» ✅ 2026-11-14
+
+`raspberry/robot_camera.py` sirve la cámara por HTTP en el puerto 8002, con el
+mismo mecanismo que la cámara del narrador en el P10 (MJPEG: fotos JPEG
+seguidas, siempre la más reciente, así que no acumula retraso). Fuentes: la
+cámara de la Raspberry (`picamera2`), una USB, un video grabado o una imagen
+fabricada. Si la cámara falla, reintenta cada 2 s.
+
+La interfaz cierra el pendiente «Panel "lo que ve el robot"» del P10: con
+`--camara-robot DIRECCION` (o `TELMEOW_ROBOT_CAM`), el video del robot ocupa el
+sitio de la cámara del narrador, que pasa a un recuadro en la esquina (como en
+una videollamada; **reparto elegido por Claude, a confirmar por el operador**).
+La página pregunta cada segundo la edad de la última foto: con más de 2 s, o sin
+respuesta, tapa la imagen con «Sin señal de la cámara del robot», para que una
+foto congelada no parezca en vivo; al volver, reengancha sola. **Sin
+`--camara-robot` la página es la del P10, sin cambios**, y las cifras con que se
+cerró el P10 siguen valiendo. Comprobado en el navegador con la cámara de
+prueba: video a 640×480, aviso al parar la cámara, recuperación al relanzarla.
+
+**Privacidad, a declarar:** la imagen es de niños. El programa no graba nada,
+pero la retransmite por la red local sin contraseña ni cifrado.
+
+### P11.3 — La prueba en un procesador ARM ✅ 2026-11-14
+
+Sin Raspberry, lo más cerca que se llega: `.github/workflows/raspberry-arm.yml`
+corre en una máquina de GitHub con procesador ARM de 64 bits (`aarch64`, la
+familia del de la Raspberry Pi 5), dentro de Debian 12 y Debian 13, que son la
+base de Raspberry Pi OS. Instala `raspberry/requirements.txt`, corre las 80
+pruebas de los tres programas y las dos herramientas de punta a punta contra un
+Mosquitto de verdad, con una pantalla que no existe y la cámara de prueba.
+
+Resultado del 2026-11-14 (commit `189793a`), igual en los dos sistemas:
+
+| | Debian 12 · Python 3.11 | Debian 13 · Python 3.13 |
+|---|---|---|
+| Dependencias instaladas desde paquetes ya hechos para ARM | sí | sí |
+| Pruebas | 80 de 80 | 80 de 80 |
+| Cuento: cambio de página, 20 cambios | mediana 15 ms, máx. 32 | mediana 15 ms, máx. 32 |
+| Cuento: tras cortar el enlace | se queda; vuelve a la vigente en 1.1 s | ídem, 1.0 s |
+| Ojos: expresión nueva, 10 cambios | mediana 23 ms, máx. 57 (+350 de fundido) | 22 ms, máx. 54 |
+| Ojos: expresión que no existe y basura | no la mueven | no la mueven |
+| Cámara de prueba | 15.1 fotos por segundo, JPEG válidos | 15.0 |
+
+**Estos tiempos son de la máquina de GitHub, no de una Raspberry**, y el cuento
+de la prueba es uno fabricado, mucho más sencillo de dibujar que un libro
+escaneado. Valen como «funciona», no como cifra de velocidad. En la PC, con
+libros reales, está la tabla de arriba; los ojos dan 35 ms de mediana (máximo
+65) y la cámara de prueba 15.0 fotos por segundo.
+
+### Con qué se cierra el P11
+
+**Hecho y comprobado sin hardware:** los tres programas, sus 80 pruebas, la
+prueba de punta a punta con broker en la PC y en ARM, y el panel de la interfaz
+en el navegador.
+
+**Límites que se declaran** (nada de esto se ha ejecutado nunca en el robot):
+
+- **La salida de imagen real.** Que pygame abra a pantalla completa el monitor
+  HDMI y la pantalla DSI de la Raspberry, y cuál es el `--display` de cada una.
+- **La cámara real.** `--fuente picamera2` está escrita contra la documentación
+  de la biblioteca y no se ha ejecutado nunca: es la parte con más riesgo.
+- **La velocidad en la Raspberry**: cuánto tarda en dibujar un libro entero, y
+  el retraso del video por la wifi entre el robot y la PC.
+- **El arranque solo** (los tres `.service` de systemd).
+- **Los motores no tienen código.** Nadie convierte las poses en órdenes para
+  los DYNAMIXEL. Además, en el esquema de conexiones la OpenRB recibe 12 V pero
+  no tiene dibujado ningún cable de datos con la Raspberry: haría falta uno
+  (su USB-C) para que las poses lleguen a los motores.
+- **El audio no tiene código**: ni la voz del narrador hacia el altavoz del
+  robot ni el micrófono hacia el narrador. Y el micrófono del esquema es
+  analógico: la Raspberry no tiene entradas analógicas, así que por GPIO no lo
+  puede leer sin un conversor.
+
+**Pendientes, con quién los lleva:**
 
 | Qué | Quién | Qué lo dispara | Qué cuesta |
 |---|---|---|---|
-| Copiar `raspberry/` y los PDF a la Raspberry e instalar (README, «La pantalla del cuento») | el operador | tener la Raspberry y la pantalla a mano | ~15 min |
-| Dejar entrar el puerto 1883 en el cortafuegos de la PC | el operador (pide administrador) | la primera prueba con la Raspberry | una regla |
-| Medir en la Raspberry: `python tools/probar_pantalla.py --broker IP_DE_LA_PC` | el operador lo lanza, Claude lee el resultado | lo anterior | 2 min por libro |
-| Caché en disco de las páginas | Claude | si en la Raspberry el cuento entero tarda más de ~10 s, o si tiene 2 GB de memoria | medio día |
-| Probar `telmeow-pantalla.service` (el arranque solo) | el operador, con Claude | la instalación en la Raspberry | 10 min; depende del escritorio de la Raspberry |
-| Una sesión de narración con la pantalla: página y gesto a la vez, a la vista | el operador | todo lo anterior | una sesión corta |
-| Que la interfaz del narrador sepa si la pantalla está viva y con qué página | Claude | si el operador lo quiere: hoy un cuento que falta en la Raspberry solo se ve en su registro | un topic más y un indicador en la página |
+| Confirmar las dos desviaciones (`pypdfium2`; páginas en memoria) y el reparto del panel «Lo que ve el robot» | el operador | cuando lo vea | una respuesta |
+| El programa de los motores (poses → DYNAMIXEL por la OpenRB), probado contra motores simulados | Claude | si el operador lo quiere dentro del trabajo; si no, queda como límite declarado | uno o dos días; decidir antes el cable de datos Raspberry–OpenRB |
+| El audio (voz del narrador al robot, micrófono del robot al narrador) | Claude, tras decidir el operador | ídem | varios días; cambia el esquema (micrófono analógico) |
+| Corregir en el documento de la tesis el esquema de conexiones (datos de la OpenRB, micrófono) | el operador | al redactar el capítulo de electrónica | un dibujo |
+| Ejecutarlo en una Raspberry de verdad | quien construya el robot | que exista el hardware | README, «Los programas de la Raspberry Pi» |
 
 ---
 

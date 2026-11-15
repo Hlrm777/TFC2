@@ -5341,9 +5341,14 @@ cámara de la Raspberry (`picamera2`), una USB, un video grabado o una imagen
 fabricada. Si la cámara falla, reintenta cada 2 s.
 
 La interfaz cierra el pendiente «Panel "lo que ve el robot"» del P10: con
-`--camara-robot DIRECCION` (o `TELMEOW_ROBOT_CAM`), el video del robot ocupa el
-sitio de la cámara del narrador, que pasa a un recuadro en la esquina (como en
-una videollamada; **reparto elegido por Claude, a confirmar por el operador**).
+`--camara-robot DIRECCION` (o `TELMEOW_ROBOT_CAM`), la página pasa a tres
+columnas (**reparto pedido por el operador el 2026-11-15**; el primero, de
+Claude, ponía la cámara del narrador en un recuadro sobre la del robot): a la
+izquierda, como siempre, el robot, la cámara del narrador y el estado; en el
+centro el libro, con toda la altura; a la derecha lo que ve el robot y, debajo,
+los botones. Comprobado en el navegador a 1600×900 con la cámara de prueba: el
+libro queda en 880 px de ancho y toda la altura; un libro apaisado sale algo
+más pequeño que sin cámara de robot (antes tenía 1088 px), uno vertical gana.
 La página pregunta cada segundo la edad de la última foto: con más de 2 s, o sin
 respuesta, tapa la imagen con «Sin señal de la cámara del robot», para que una
 foto congelada no parezca en vivo; al volver, reengancha sola. **Sin
@@ -5489,18 +5494,29 @@ en el navegador.
   amplificado pensado para tonos de Arduino, y la Raspberry Pi 5 ya no trae
   salida de audio analógica. Propuesta de Claude: audio por USB (un altavoz y
   un micrófono USB, o un altavoz-micrófono de conferencia), que Linux reconoce
-  sin cableado ni programa de bajo nivel. A decidir por el operador.
+  sin cableado ni programa de bajo nivel. El operador aceptó el audio por
+  USB el 2026-11-15; falta que elija la pieza. Candidatos buscados ese día
+  (ninguno probado): (a) Waveshare «USB TO AUDIO», una tarjeta de sonido USB
+  sin controladores con micrófono en la placa y amplificador para altavoces
+  (2.6 W por canal), la más barata, sin cancelación de eco; (b) Seeed ReSpeaker
+  USB Mic Array, con cancelación de eco en el propio chip, más cara; (c) un
+  altavoz-micrófono de conferencia USB, con cancelación de eco pero grande
+  para el pecho del robot. Con (a) o (b) el micrófono va tras la espiral del
+  pecho y el altavoz, con su cable, tras el orificio de la boca, como en el
+  diseño original. El monitor del cuento también puede dar sonido por HDMI si
+  su modelo trae altavoces (hay que mirarlo en su ficha).
 
 **Pendientes, con quién los lleva:**
 
 | Qué | Quién | Qué lo dispara | Qué cuesta |
 |---|---|---|---|
 | ~~Confirmar `pypdfium2` en lugar de `pdf2image`~~ | ✅ confirmado por el operador (2026-11-15) | | |
-| Confirmar las páginas en memoria y el reparto del panel «Lo que ve el robot» | el operador | cuando lo vea | una respuesta |
+| ~~El reparto del panel «Lo que ve el robot»~~ | ✅ el operador pidió tres columnas y se hizo (2026-11-15) | | |
+| Confirmar las páginas del cuento en memoria | el operador | cuando lo vea | una respuesta |
 | ~~El programa de los motores~~ | ✅ hecho en el P11.4 (2026-11-15) | | |
 | ~~Enseñar en la interfaz el estado de los motores~~ | ✅ hecho como opción, `--estado-motores` (2026-11-15) | | |
 | Calibrar el cero y el sentido de cada articulación, y afinar velocidades | quien construya el robot | que exista el robot | `raspberry/OPENRB.md`, apartado 4 |
-| El audio: la voz del narrador al altavoz del robot (y, si se quiere, el micrófono del robot al narrador) | Claude | que el operador elija los componentes (propuesta: altavoz y micrófono USB) y diga si quiere el programa. Reabierto el 2026-11-15: el 2026-11-14 quedó a criterio de Claude y no se hizo | el programa de la voz, con una salida de sonido de prueba como las de la cámara: uno o dos días; sin hardware solo se prueba que el sonido llega entero y con qué retraso, no cómo suena |
+| El audio: la voz del narrador al altavoz del robot (y, si se quiere, el micrófono del robot al narrador) | Claude | que el operador elija la pieza de audio USB (candidatos arriba) y diga si quiere el programa. Reabierto el 2026-11-15: el 2026-11-14 quedó a criterio de Claude y no se hizo | el programa de la voz, con una salida de sonido de prueba como las de la cámara: uno o dos días; sin hardware solo se prueba que el sonido llega entero y con qué retraso, no cómo suena |
 | Añadir a la figura de conexiones el USB-C de datos Raspberry–OpenRB | el operador (lo asumió el 2026-11-15) | al redactar el capítulo de electrónica | un dibujo |
 | Cambiar en la figura y en la tabla de componentes el altavoz y el micrófono | el operador | la decisión del audio | un dibujo y dos filas |
 | Ejecutarlo en una Raspberry de verdad | quien construya el robot | que exista el hardware | README, «Los programas de la Raspberry Pi» |

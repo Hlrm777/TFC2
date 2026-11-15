@@ -115,18 +115,34 @@
   #n-camara img{max-width:100%;max-height:100%;object-fit:contain;display:block}
   #n-camara .vacio{position:absolute;color:var(--ink-dim);font-size:12px}
   /* «Lo que ve el robot»: solo si main.py dice dónde está la cámara del robot
-     (--camara-robot). Ocupa el sitio de la cámara del narrador, que pasa a ser
-     un recuadro pequeño en su esquina, como en una videollamada. Sin cámara de
-     robot la página queda exactamente como en el P10. */
+     (--camara-robot). Reparto elegido por el operador el 2026-11-15: tres
+     columnas. A la izquierda, como siempre, el robot, la cámara del narrador
+     y el estado; en el centro el libro, que gana toda la altura; a la derecha
+     lo que ve el robot y, debajo, los botones. Sin cámara de robot la página
+     queda exactamente como en el P10. */
   body.narracion #n-robot-cam{display:none}
-  body.narracion.con-camara-robot #n-robot-cam{display:flex;grid-area:camara;min-height:0;
-    background:#05070c;align-items:center;justify-content:center;position:relative}
+  body.narracion.con-camara-robot{
+    grid-template-columns:minmax(220px,20vw) 1fr minmax(280px,25vw);
+    grid-template-areas:"robot libro robotcam" "camara libro controles" "estado libro controles";
+  }
+  body.narracion.con-camara-robot.con-guia{
+    grid-template-areas:"guia guia guia" "robot libro robotcam" "camara libro controles" "estado libro controles";
+  }
+  body.narracion.con-camara-robot #n-robot-cam{display:flex;grid-area:robotcam;min-height:0;
+    background:#05070c;align-items:center;justify-content:center;position:relative;
+    border-left:1px solid var(--line)}
   #n-robot-cam img{max-width:100%;max-height:100%;object-fit:contain;display:block}
   #n-robot-cam .vacio{position:absolute;color:var(--warn);font-size:13px;text-align:center;padding:0 12px}
   #n-robot-cam .rotulo{position:absolute;top:8px;left:10px;font-size:10px;letter-spacing:.08em;
     text-transform:uppercase;color:var(--ink-dim);background:rgba(5,7,12,.6);padding:2px 6px;border-radius:3px}
-  body.narracion.con-camara-robot #n-camara{z-index:2;align-self:end;justify-self:end;
-    width:34%;height:38%;margin:0 8px 8px 0;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  /* Los botones, en columna estrecha: cada fila se parte en varias líneas. */
+  body.narracion.con-camara-robot #n-controles{gap:12px;padding:14px;min-height:0;overflow:auto}
+  body.narracion.con-camara-robot #n-controles .fila{flex-wrap:wrap}
+  body.narracion.con-camara-robot #n-controles select{flex:1 1 100%;min-width:0;max-width:100%;box-sizing:border-box}
+  body.narracion.con-camara-robot #n-controles .fila > button{flex:1 1 34%}
+  body.narracion.con-camara-robot #n-pag{flex:1 1 100%;order:-1}
+  body.narracion.con-camara-robot #emo-row{flex-wrap:wrap}
+  body.narracion.con-camara-robot #emo-row .emo{flex:1 1 30%}
   #n-libro{grid-area:libro;min-height:0;min-width:0;background:#0a0d16;border-left:1px solid var(--line);
     align-items:center;justify-content:center;position:relative;overflow:hidden}
   #n-libro canvas{display:block;box-shadow:0 6px 30px rgba(0,0,0,.55)}
@@ -300,7 +316,7 @@
   </div>
   <div id="n-libro" class="narr">
     <canvas id="n-pagina"></canvas>
-    <div class="vacio" id="n-libro-vacio">Elige un cuento en la lista de abajo.</div>
+    <div class="vacio" id="n-libro-vacio">Elige un cuento en la lista.</div>
   </div>
   <div id="n-guia" aria-live="polite">
     <div class="cab"><b id="n-guia-num">Etiqueta —</b><span id="n-guia-tiempo"></span>

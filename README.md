@@ -473,8 +473,9 @@ En el primero las flechas pasan de página; en el segundo las teclas 1 a 6
 cambian la expresión.
 
 **«Lo que ve el robot» en la interfaz de narración.** Con `--camara-robot`, la
-página enseña el video de la cámara del robot donde estaba la del narrador, que
-pasa a un recuadro en la esquina. Si la última foto tiene más de 2 s avisa «Sin
+página pasa a tres columnas: a la izquierda el robot, la cámara del narrador y
+el estado; en el centro el libro; a la derecha el video de la cámara del robot
+y, debajo, los botones. Si la última foto tiene más de 2 s avisa «Sin
 señal» en vez de dejar una imagen congelada. Sin ese argumento la página es la
 del P10, sin cambios. Para verlo sin robot, en dos terminales:
 

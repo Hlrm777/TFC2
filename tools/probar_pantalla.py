@@ -28,6 +28,7 @@ import os
 import socket
 import statistics
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -37,6 +38,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from raspberry import story_display as sd  # noqa: E402
 
 
+def fabricar_cuento(ruta: Path, paginas: int) -> Path:
+    """Un PDF con texto y figuras en cada página (no en blanco: que dibujarlo
+    cueste algo), alternando hojas apaisadas y verticales."""
+    cuerpo = [b"%PDF-1.4\n"]
+    objetos: list[bytes] = []
+    hijos = " ".join(f"{3 + 2 * i} 0 R" for i in range(paginas))
+    objetos.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    objetos.append(f"<< /Type /Pages /Kids [{hijos}] /Count {paginas} >>".encode())
+    for i in range(paginas):
+        ancho, alto = (842, 595) if i % 2 == 0 else (595, 842)
+        dibujo = (f"0.9 0.8 0.6 rg 40 40 {ancho - 80} {alto - 80} re f "
+                  f"0.2 0.4 0.7 rg {60 + 10 * i} 120 200 200 re f "
+                  f"BT /F1 64 Tf 0 0 0 rg 80 {alto - 140} Td (Pagina {i + 1}) Tj ET").encode()
+        objetos.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {ancho} {alto}] "
+            f"/Contents {4 + 2 * i} 0 R /Resources << /Font << /F1 << /Type /Font "
+            f"/Subtype /Type1 /BaseFont /Helvetica >> >> >> >>".encode())
+        objetos.append(b"<< /Length " + str(len(dibujo)).encode() + b" >>\nstream\n"
+                       + dibujo + b"\nendstream")
+    posiciones = []
+    for numero, objeto in enumerate(objetos, start=1):
+        posiciones.append(sum(len(c) for c in cuerpo))
+        cuerpo.append(f"{numero} 0 obj\n".encode() + objeto + b"\nendobj\n")
+    inicio = sum(len(c) for c in cuerpo)
+    cuerpo.append(f"xref\n0 {len(objetos) + 1}\n0000000000 65535 f \n".encode())
+    cuerpo += [f"{pos:010d} 00000 n \n".encode() for pos in posiciones]
+    cuerpo.append(f"trailer\n<< /Size {len(objetos) + 1} /Root 1 0 R >>\n"
+                  f"startxref\n{inicio}\n%%EOF\n".encode())
+    ruta.write_bytes(b"".join(cuerpo))
+    return ruta
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--broker", default="localhost:1883")
@@ -44,6 +77,9 @@ def main(argv: list[str] | None = None) -> int:
                    default=Path(os.environ.get("TELMEOW_STORIES_DIR", Path.home() / "cuentos")))
     p.add_argument("--cuento", default=None, help="Nombre del PDF; por defecto el primero.")
     p.add_argument("--cambios", type=int, default=20, help="Cambios de página a medir.")
+    p.add_argument("--fabricar", type=int, default=0, metavar="PAGINAS",
+                   help="Sin libros a mano (los de verdad no van en git): fabrica un PDF "
+                        "de ese numero de paginas y lo usa de cuento.")
     p.add_argument("--sin-ventana", action="store_true")
     p.add_argument("--captura", type=Path, default=None,
                    help="Guarda en este PNG lo que queda en pantalla al final.")
@@ -52,6 +88,9 @@ def main(argv: list[str] | None = None) -> int:
     import paho.mqtt.client as mqtt
 
     carpeta = args.stories_dir.expanduser()
+    if args.fabricar:
+        carpeta = Path(tempfile.mkdtemp(prefix="telmeow_cuento_"))
+        args.cuento = fabricar_cuento(carpeta / "cuento de prueba.pdf", args.fabricar).name
     nombre = args.cuento or next((r.name for r in sorted(carpeta.glob("*.pdf"))), None)
     if nombre is None or sd.buscar_cuento(carpeta, nombre) is None:
         print(f"No encuentro el cuento ({nombre}) en {carpeta}.", file=sys.stderr)

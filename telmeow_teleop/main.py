@@ -53,6 +53,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import os
 import threading
 import time
 from collections import deque
@@ -1330,6 +1331,12 @@ def _parser() -> argparse.ArgumentParser:
              "página enseña arriba (sesiones de verificación; la escribe "
              "tools/sesion_verificacion.py).",
     )
+    propios.add_argument(
+        "--camara-robot", metavar="DIRECCION", default=os.environ.get("TELMEOW_ROBOT_CAM"),
+        help="Con --interfaz: dónde sirve su video la cámara del robot "
+             "(raspberry/robot_camera.py), p. ej. 192.168.1.60:8002. La página la "
+             "enseña en «Lo que ve el robot». También TELMEOW_ROBOT_CAM.",
+    )
     add_cli_args(parser)
     return parser
 
@@ -1384,6 +1391,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.sin_ventana and args.interfaz is None:
         parser.error("--sin-ventana necesita --interfaz: sin ventana ni navegador no hay "
                      "donde pulsar las teclas")
+    camara_robot = None
+    if args.interfaz is not None:
+        from .control_panel import direccion_camara_robot
+
+        try:
+            camara_robot = direccion_camara_robot(args.camara_robot)
+        except ValueError as exc:
+            parser.error(str(exc))
     guia = None
     if args.guia_sesion is not None:
         if args.interfaz is None:
@@ -1468,7 +1483,7 @@ def main(argv: list[str] | None = None) -> int:
             hilo.arrancar()
 
         if args.interfaz is not None:
-            interfaz = _crear_interfaz(cfg, args.interfaz, guia)
+            interfaz = _crear_interfaz(cfg, args.interfaz, guia, camara_robot)
             if interfaz is None:
                 return 1
             print(f"Interfaz de narracion en {interfaz.url} (cuentos de "
@@ -1505,7 +1520,8 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _crear_interfaz(cfg: AppConfig, puerto: int, guia: dict | None = None):
+def _crear_interfaz(cfg: AppConfig, puerto: int, guia: dict | None = None,
+                    camara_robot: str | None = None):
     """El servidor de la interfaz de narración (P10), ya arrancado, o ``None``
     si el puerto está ocupado (otra sesión abierta)."""
     # Aquí y no arriba: sin --interfaz no se carga nada de esto.
@@ -1513,7 +1529,7 @@ def _crear_interfaz(cfg: AppConfig, puerto: int, guia: dict | None = None):
 
     try:
         interfaz = ServidorInterfaz(CARPETA_VISOR, Biblioteca(cfg.paths.stories_dir),
-                                    puerto=puerto, guia=guia)
+                                    puerto=puerto, guia=guia, camara_robot=camara_robot)
     except OSError as exc:
         print(f"No se pudo abrir la interfaz en el puerto {puerto} ({exc}). "
               f"Hay otra sesion abierta?")

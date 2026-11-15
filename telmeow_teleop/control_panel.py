@@ -55,6 +55,7 @@ import functools
 import json
 import math
 import queue
+import re
 import shutil
 import socket
 import threading
@@ -473,6 +474,35 @@ def guia_de(guia: dict, etiqueta: int) -> dict:
     return {**base, **paso}
 
 
+#: Lo único que puede ser el nombre de la máquina del robot: letras, cifras,
+#: puntos y guiones (una IP o un nombre como ``robot.local``).
+_MAQUINA = re.compile(r"[A-Za-z0-9.-]+")
+
+
+def direccion_camara_robot(texto: str | None) -> str | None:
+    """La dirección de la cámara del robot (``raspberry/robot_camera.py``), tal
+    como la usará la página: ``http://MAQUINA:PUERTO``, sin barra final.
+
+    Acepta ``192.168.1.60`` (puerto 8002), ``robot.local:8002`` o la dirección
+    entera con ``http://``. ``None`` si no se dio. ``ValueError`` si no es una
+    dirección: va a parar al ``src`` de una imagen de la página, así que solo
+    vale una máquina con su puerto, sin ruta ni nada más.
+    """
+    if texto is None or not texto.strip():
+        return None
+    limpio = texto.strip().rstrip("/")
+    if limpio.startswith("http://"):
+        limpio = limpio[len("http://"):]
+    maquina, sep, puerto = limpio.partition(":")
+    if not sep:
+        puerto = "8002"
+    if (not _MAQUINA.fullmatch(maquina) or not puerto.isdigit()
+            or not 1 <= int(puerto) <= 65535):
+        raise ValueError(f"--camara-robot: {texto!r} no es una direccion "
+                         f"(ejemplo: 192.168.1.60:8002)")
+    return f"http://{maquina}:{int(puerto)}"
+
+
 class ServidorInterfaz:
     """El servidor de la interfaz: lo arranca ``main.py`` con ``--interfaz``.
 
@@ -484,10 +514,13 @@ class ServidorInterfaz:
 
     def __init__(self, carpeta_visor: Path, biblioteca: Biblioteca, *,
                  host: str = "127.0.0.1", puerto: int = PUERTO,
-                 emisor: EmisorVideo | None = None, guia: dict | None = None) -> None:
+                 emisor: EmisorVideo | None = None, guia: dict | None = None,
+                 camara_robot: str | None = None) -> None:
         self.carpeta_visor = Path(carpeta_visor)
         self.biblioteca = biblioteca
         self.guia = guia
+        #: Dónde sirve su video la cámara del robot (``direccion_camara_robot``).
+        self.camara_robot = camara_robot
         self.emisor = emisor or EmisorVideo()
         self.ordenes: queue.SimpleQueue[Orden] = queue.SimpleQueue()
         #: Lo que devuelve ``/api/estado``. Se sustituye entero, nunca se edita.
@@ -538,6 +571,8 @@ class ServidorInterfaz:
             grabacion = estado.get("grabacion") or {}
             if grabacion.get("activa"):
                 estado = {**estado, "guia": guia_de(self.guia, int(grabacion.get("etiqueta", 0)))}
+        if self.camara_robot:
+            estado = {**estado, "camara_robot": self.camara_robot}
         self.estado = estado
 
 
@@ -626,11 +661,13 @@ class _PipelineDemo:
 
 
 def ejecutar_demo(puerto: int = PUERTO, carpeta: Path | None = None, abrir: bool = True,
-                  duracion_s: float | None = None, guia: dict | None = None) -> int:
+                  duracion_s: float | None = None, guia: dict | None = None,
+                  camara_robot: str | None = None) -> int:
     """El servidor con video sintético y un estado falso. Ctrl-C (o la orden
     salir) termina. Con ``guia``, el ensayo de una sesión de verificación."""
     carpeta = carpeta or AppConfig.from_env().paths.stories_dir
-    servidor = ServidorInterfaz(CARPETA_VISOR, Biblioteca(carpeta), puerto=puerto, guia=guia)
+    servidor = ServidorInterfaz(CARPETA_VISOR, Biblioteca(carpeta), puerto=puerto, guia=guia,
+                                camara_robot=camara_robot)
     demo = _PipelineDemo(servidor)
     servidor.arrancar()
     print(f"DEMO de la interfaz en {servidor.url} (cuentos de {carpeta}). Ctrl-C para salir.")
@@ -677,7 +714,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--guia-sesion", type=Path, default=None, metavar="JSON",
                         help="la instruccion de cada etiqueta, arriba en la pagina (sesiones de "
                              "verificacion; la escribe tools/sesion_verificacion.py)")
+    parser.add_argument("--camara-robot", default=None, metavar="DIRECCION",
+                        help="donde sirve su video la camara del robot (raspberry/"
+                             "robot_camera.py), p. ej. 192.168.1.60:8002: la pagina la ensena "
+                             "en el panel de lo que ve el robot")
     args, resto = parser.parse_known_args(argv)
+    try:
+        camara_robot = direccion_camara_robot(args.camara_robot)
+    except ValueError as exc:
+        print(exc)
+        return 1
     if args.demo:
         guia = None
         if args.guia_sesion is not None:
@@ -686,7 +732,8 @@ def main(argv: list[str] | None = None) -> int:
             except ValueError as exc:
                 print(exc)
                 return 1
-        return ejecutar_demo(args.puerto, args.stories_dir, abrir=not args.sin_navegador, guia=guia)
+        return ejecutar_demo(args.puerto, args.stories_dir, abrir=not args.sin_navegador,
+                             guia=guia, camara_robot=camara_robot)
 
     from .broker import asegurar_broker
 
@@ -707,6 +754,8 @@ def main(argv: list[str] | None = None) -> int:
             argumentos += ["--stories-dir", str(args.stories_dir)]
         if args.guia_sesion is not None:
             argumentos += ["--guia-sesion", str(args.guia_sesion)]
+        if camara_robot is not None:
+            argumentos += ["--camara-robot", camara_robot]
         return pipeline(argumentos + resto)
     finally:
         for proceso in arrancados:

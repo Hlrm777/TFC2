@@ -1,0 +1,91 @@
+# Los programas de la Raspberry (raspberry/), en un procesador ARM de 64 bits.
+#
+# El robot no se fabrica, asi que no hay Raspberry donde probarlos. Esto es lo
+# mas cerca que se llega sin ella: una maquina de GitHub con procesador ARM de
+# 64 bits (la misma familia que el de la Raspberry Pi 5) y, dentro, el mismo
+# sistema en que se basa Raspberry Pi OS (Debian 12 "bookworm" y 13 "trixie").
+#
+# QUE DEMUESTRA: que las dependencias se instalan en ARM, que el codigo corre en
+# Linux sobre ese procesador con el Python de cada Debian, y que con un broker
+# Mosquitto de verdad cada programa hace lo que debe.
+#
+# QUE NO DEMUESTRA: la salida por HDMI o DSI (aqui la pantalla es falsa), una
+# camara de verdad (aqui es un video o una imagen fabricada), el arranque con
+# systemd, ni la velocidad de una Raspberry: los tiempos que salen aqui son de
+# esta maquina, no del robot.
+name: Raspberry en ARM
+
+on:
+  push:
+    paths:
+      - "raspberry/**"
+      - "tools/probar_pantalla.py"
+      - "tools/probar_ojos_y_camara.py"
+      - "tests/test_story_display.py"
+      - "tests/test_raspberry_ojos_y_camara.py"
+      - "telmeow_viewer/*.png"
+      - ".github/workflows/raspberry-arm.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  raspberry:
+    name: ${{ matrix.sistema }} en ARM de 64 bits
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        sistema: ["debian:bookworm", "debian:trixie"]
+    container: ${{ matrix.sistema }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - name: Instalar Python, git y Mosquitto
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 python3-venv git ca-certificates mosquitto
+
+      - uses: actions/checkout@v4
+
+      - name: Que maquina es
+        run: |
+          {
+            echo "### ${{ matrix.sistema }}"
+            echo '```'
+            echo "procesador: $(uname -m)"
+            grep -m1 PRETTY_NAME /etc/os-release
+            python3 --version
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$(uname -m)" = "aarch64"
+
+      - name: Instalar lo de raspberry/requirements.txt
+        run: |
+          python3 -m venv /venv
+          /venv/bin/pip install --only-binary=:all: -r raspberry/requirements.txt
+          /venv/bin/pip install pytest==8.3.3 pypdf==6.21.4
+          /venv/bin/pip check
+
+      - name: Pruebas de los tres programas
+        run: /venv/bin/python -m pytest tests/test_story_display.py tests/test_raspberry_ojos_y_camara.py -q -rs
+
+      - name: Levantar Mosquitto
+        run: |
+          mosquitto -d
+          sleep 2
+
+      - name: La pantalla del cuento, de punta a punta
+        run: |
+          set -o pipefail
+          { echo '```'; /venv/bin/python tools/probar_pantalla.py --fabricar 30 --sin-ventana; echo '```'; } 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Los ojos y la camara, de punta a punta
+        run: |
+          set -o pipefail
+          { echo '```'; /venv/bin/python tools/probar_ojos_y_camara.py --sin-ventana; echo '```'; } 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

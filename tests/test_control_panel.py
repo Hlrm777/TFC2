@@ -516,3 +516,48 @@ def test_el_comando_pasa_la_guia_al_pipeline(comando):
 def test_la_demo_con_una_guia_que_no_vale_no_arranca(tmp_path, capsys):
     assert cp.main(["--demo", "--guia-sesion", str(tmp_path / "no.json")]) == 1
     assert "no se pudo leer la guia" in capsys.readouterr().out
+
+
+# -- la cámara del robot («Lo que ve el robot») -----------------------------
+
+
+@pytest.mark.parametrize("texto, esperado", [
+    (None, None), ("", None), ("  ", None),
+    ("192.168.1.60", "http://192.168.1.60:8002"),
+    ("robot.local:9000", "http://robot.local:9000"),
+    ("http://192.168.1.60:8002/", "http://192.168.1.60:8002"),
+    ("localhost:8002", "http://localhost:8002"),
+])
+def test_la_direccion_de_la_camara_del_robot(texto, esperado):
+    assert cp.direccion_camara_robot(texto) == esperado
+
+
+@pytest.mark.parametrize("malo", [
+    "javascript:alert(1)", "https://robot:8002", "robot:8002/video.mjpg", "robot:0",
+    "robot:99999", "robot:abc", "ro bot", "a\"onerror=x", "robot:8002?x=1", "usuario@robot",
+    "<img>", ":8002",
+])
+def test_una_direccion_rara_de_la_camara_del_robot_no_llega_a_la_pagina(malo):
+    with pytest.raises(ValueError):
+        cp.direccion_camara_robot(malo)
+
+
+@pytest.mark.parametrize("camara", [None, "http://192.168.1.60:8002"])
+def test_el_estado_lleva_la_camara_del_robot_solo_si_la_hay(tmp_path, camara):
+    servidor = cp.ServidorInterfaz(tmp_path, Biblioteca(tmp_path), puerto=0, camara_robot=camara)
+    servidor.publicar_estado(cp.estado_interfaz(enlace=True))
+    servidor.parar()
+    assert servidor.estado.get("camara_robot") == camara
+
+
+def test_la_pagina_tiene_el_panel_de_lo_que_ve_el_robot_y_sin_camara_no_cambia():
+    html = (cp.CARPETA_VISOR / "telmeow_viewer.html").read_text(encoding="utf-8")
+    assert 'id="n-robot-cam"' in html and 'id="n-robot-video"' in html
+    # Oculto salvo que el estado traiga la cámara: sin robot, la página del P10.
+    assert "body.narracion #n-robot-cam{display:none}" in html
+    assert "if(e.camara_robot && !narr.camaraRobot) iniciarCamaraRobot(e.camara_robot);" in html
+    # Las mismas rutas y el mismo umbral que raspberry/robot_camera.py.
+    from raspberry import robot_camera
+
+    assert "base + '/video.mjpg" in html and "base + '/estado'" in html
+    assert f"const SIN_SENAL_MS = {int(robot_camera.SIN_SENAL_S * 1000)};" in html

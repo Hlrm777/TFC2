@@ -1,0 +1,29 @@
+# La camara de la frente, al arrancar la Raspberry (P11).
+#
+# No abre ninguna ventana y no usa el broker: sirve el video en el puerto 8002.
+# Se instala asi, en la Raspberry:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp ~/telmeow/raspberry/telmeow-camara.service ~/.config/systemd/user/
+#   nano ~/.config/systemd/user/telmeow-camara.service    # elegir la --fuente
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now telmeow-camara
+#
+# Ver que hace:    journalctl --user -u telmeow-camara -f
+# Pararla:         systemctl --user stop telmeow-camara
+#
+# Restart=always: si el programa muriera, systemd lo vuelve a lanzar a los 2 s
+# y la pagina del narrador, que avisa "sin senal", vuelve a enganchar el video.
+
+[Unit]
+Description=Telmeow - la camara de la frente
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/telmeow/venv/bin/python %h/telmeow/raspberry/robot_camera.py --fuente picamera2
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

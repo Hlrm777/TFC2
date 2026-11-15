@@ -1,10 +1,19 @@
-# Lo que necesita la Raspberry Pi para raspberry/story_display.py (P11).
+# Lo que necesita la Raspberry Pi para los programas de raspberry/.
 # Nada mas: ni MediaPipe ni TensorFlow, que corren en la PC del narrador.
 #
-#   pygame     la ventana a pantalla completa
+#   pygame     las ventanas a pantalla completa (el cuento y los ojos)
 #   pypdfium2  dibuja las paginas del PDF; trae su propio motor (PDFium), asi
 #              que no hace falta instalar poppler en el sistema
 #   paho-mqtt  la suscripcion al broker (la misma version que en la PC)
+#   opencv-python-headless + numpy
+#              solo robot_camera.py: comprimir cada foto a JPEG y leer una
+#              camara USB o un video. "headless" = sin ventanas, mas ligero.
+#
+# La camara CSI de la Raspberry (--fuente picamera2) no se instala con pip:
+#   sudo apt install python3-picamera2
+# y el entorno virtual se crea con --system-site-packages para que la vea.
 pygame==2.6.1
 pypdfium2==5.15.2
 paho-mqtt==2.1.0
+opencv-python-headless==4.10.0.84
+numpy>=1.26

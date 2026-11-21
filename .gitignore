@@ -37,3 +37,7 @@ venv/
 # los blendshapes del dataset que extrae tools/entrenar_blendshapes.py. Origen y
 # SHA-256 en el plan maestro, §7.19.
 modelos_externos/
+
+# El "10k US Adult Faces Database" (MIT): fotos de personas, licencia solo de
+# investigacion y sin reproducirlas. Se analiza con tools/analizar_10k_faces.py.
+otherDataset/

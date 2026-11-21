@@ -538,6 +538,69 @@ velocidad de una Raspberry.
 
 ---
 
+## Narrar desde otro sitio, por internet
+
+Todo lo anterior funciona tal cual si el robot y la PC del narrador están en
+la misma red (el mismo wifi). Si están lejos —en otra casa, otra ciudad u otro
+país— hay dos problemas: los routers de las casas no dejan entrar conexiones
+desde internet (el robot no llegaría al broker de la PC, ni la página a la
+cámara del robot), y la imagen y la voz de los niños viajan sin cifrar. Las dos
+cosas se resuelven con una **VPN**: un programa en cada equipo que los une en
+una red privada y cifrada, como si estuvieran en el mismo wifi. Los programas
+no cambian: solo se les da la dirección de cada equipo en esa red.
+
+La propuesta es **Tailscale** (tiene un plan gratuito de uso personal; valen
+igual WireGuard a mano o ZeroTier). **Sin probar: no hay robot.**
+
+1. Crear una cuenta de Tailscale (la crea el operador, con su correo).
+2. En la PC (Windows): instalar Tailscale desde su página y entrar con la cuenta.
+3. En la Raspberry:
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up            # da un enlace para entrar con la misma cuenta
+   ```
+4. En cada uno, `tailscale ip -4` dice su dirección en la VPN (empieza por
+   `100.`). Se queda fija, y Tailscale arranca solo con el equipo.
+5. Usar esas direcciones en lugar de las del wifi:
+   - en la Raspberry, `--broker IP_PC_VPN` (cuento, ojos, motores) y
+     `robot_audio.py --pc IP_PC_VPN` (también en los `.service`);
+   - en la PC, `control_panel --camara-robot IP_ROBOT_VPN:8002 --audio IP_ROBOT_VPN`.
+6. El cortafuegos de Windows tiene que dejar entrar, desde la VPN, el 1883
+   (TCP, el broker) y el 8003 (UDP, la voz), como en el wifi.
+7. La cámara gasta lo que más: a 640×480 y 15 fotos por segundo, del orden de
+   3-6 Mbit/s de subida desde el robot (una foto JPEG de calidad 80 pesa unos
+   30-50 kB, según la escena). Por internet conviene
+   `robot_camera.py --fps 10 --calidad 60`, del orden de 1-2 Mbit/s.
+
+**Qué cambia por internet** (medido con una red simulada,
+`python tools/probar_audio.py --internet --comparar`; `tools/red_simulada.py`
+retrasa, desordena y pierde paquetes como lo haría internet):
+
+- **El retraso.** A todo se le suma lo que tarde la red en cruzar: de 10-40 ms
+  dentro de un país a 70-150 ms de un continente a otro (orden de magnitud).
+  El robot copia los movimientos y la voz llega a los niños con ese retraso
+  de más. Para una conversación, por debajo de ~150 ms de ida se nota poco.
+- **La voz llega irregular**, y el colchón de audio crece solo lo justo para
+  esa irregularidad (en un wifi se queda en 60 ms). Con 80 ms de retraso, 30 ms
+  de irregularidad y 1 % de pérdidas: el colchón fijo de 60 ms metía un corte
+  en el 18 % de los trozos; el que se ajusta solo, en el 5 % (casi todos, los
+  paquetes perdidos de verdad, que además suenan como el anterior a media voz
+  en vez de un corte seco), a cambio de ~220 ms de la PC al altavoz del robot.
+  Con una red más regular (10 ms de irregularidad), ~140 ms.
+- **Los movimientos, suaves aunque la red no lo sea.** Las poses también
+  llegan a tirones; movidas tal cual, el robot se pararía y daría saltos. Cada
+  pose lleva la hora en que salió de la PC (`ts`), y el robot las reproduce
+  con su ritmo original, unos ms más tarde, interpolando entre una y otra: con
+  30 ms de irregularidad, guarda ~130 ms y avanza sin saltos (como mucho un
+  25 % más rápido para alcanzar tras un corte); en un wifi guarda ~20 ms.
+- **El eco no cambia**: el cancelador del robot trabaja dentro del robot, entre
+  su altavoz y su micrófono, y la distancia no le afecta.
+- **Los auriculares del narrador pasan a ser obligatorios.** Sin ellos, el
+  micrófono de la PC recoge a los niños por los altavoces y ellos se oyen a sí
+  mismos con el retraso de ida y vuelta, que por internet molesta mucho.
+
+---
+
 ## Contrato MQTT
 
 Un único mensaje JSON en `telmeow/teleop/pose`:
@@ -557,6 +620,10 @@ Un único mensaje JSON en `telmeow/teleop/pose`:
 - `gesture` acepta `page_next` o `page_prev` y dispara el gesto de cabeza.
 - `t` (opcional): hora Unix en ms de la captura del frame del que sale la pose,
   para medir la latencia. El visor no la necesita para mover el robot.
+- `ts` (opcional, desde el P11.6): la hora de envío, en ms de un reloj de la PC
+  que solo avanza (solo valen las diferencias entre mensajes). Con ella el
+  robot reproduce las poses con su ritmo original aunque la red las entregue a
+  tirones (`raspberry/motor_driver.py`). La pone el pipeline; el visor la ignora.
 - Los mensajes con `gesture` o `page` **nunca** se descartan por límite de tasa:
   son eventos discretos que tienen que llegar.
 

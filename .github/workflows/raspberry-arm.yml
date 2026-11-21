@@ -26,6 +26,7 @@ on:
       - "tools/simulador_dynamixel.py"
       - "tools/probar_audio.py"
       - "tools/simulador_sala.py"
+      - "tools/red_simulada.py"
       - "telmeow_teleop/audio_operador.py"
       - "tests/test_raspberry_audio.py"
       - "tests/test_raspberry_motores.py"
@@ -108,4 +109,4 @@ jobs:
       - name: La voz, de punta a punta (eco y ninos simulados, por UDP)
         run: |
           set -o pipefail
-          { echo '```'; /venv/bin/python tools/probar_audio.py 2>/dev/null; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          { echo '```'; /venv/bin/python tools/probar_audio.py 2>/dev/null; echo; /venv/bin/python tools/probar_audio.py --internet --comparar 2>/dev/null; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"

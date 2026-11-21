@@ -17,10 +17,17 @@ una línea de estado.
   cancelador de eco también corre aquí y lo atenúa, pero con micrófono y
   altavoz de tarjetas distintas sus relojes se desfasan y no lo quita del
   todo. Con auriculares no hay eco que quitar.
+- El colchón (lo que se guarda antes de sonar, 60 ms al empezar) se ajusta
+  solo si la red llega irregular, como por internet; la página dice cuánto
+  lleva. ``TELMEOW_AUDIO_COLCHON_MS`` cambia el de partida.
+- Por internet, la PC y el robot se unen con una VPN (README, «Narrar desde
+  otro sitio»): a ``--audio`` se le da la IP del robot en la VPN.
 - No graba nada: el sonido solo se retransmite.
 """
 
 from __future__ import annotations
+
+import os
 
 from .config import PROJECT_ROOT
 
@@ -38,7 +45,8 @@ __all__ = ["AudioOperador", "resumen_audio", "SIN_SONIDO_S"]
 SIN_SONIDO_S = 2.0
 
 
-def resumen_audio(*, abierto: bool, error: str = "", edad_s: float | None) -> dict:
+def resumen_audio(*, abierto: bool, error: str = "", edad_s: float | None,
+                  colchon_ms: int | None = None) -> dict:
     """El estado del audio en una línea, para la página. ``clave``: ``ok``,
     ``aviso`` (sin sonido del robot) o ``error`` (sin micrófono)."""
     if not abierto:
@@ -48,7 +56,10 @@ def resumen_audio(*, abierto: bool, error: str = "", edad_s: float | None) -> di
         return {"clave": "aviso", "texto": "Audio: tu micrófono va abierto; aún no llega el robot"}
     if edad_s > SIN_SONIDO_S:
         return {"clave": "aviso", "texto": f"Audio: sin sonido del robot hace {edad_s:.0f} s"}
-    return {"clave": "ok", "texto": "Audio: hablando con el robot"}
+    texto = "Audio: hablando con el robot"
+    if colchon_ms is not None:
+        texto += f" · colchón {colchon_ms} ms"
+    return {"clave": "ok", "texto": texto}
 
 
 class AudioOperador:
@@ -57,8 +68,12 @@ class AudioOperador:
     una sintética); por defecto, el micrófono y la salida de Windows."""
 
     def __init__(self, *, puerto: int = ra.PUERTO, robot: str | None = None,
-                 cancelar: bool = True, dispositivo=None, host_local: str = "0.0.0.0") -> None:
-        self.colchon = ra.Colchon()
+                 cancelar: bool = True, dispositivo=None, host_local: str = "0.0.0.0",
+                 colchon_ms: float | None = None) -> None:
+        if colchon_ms is None:
+            colchon_ms = float(os.environ.get("TELMEOW_AUDIO_COLCHON_MS", "60"))
+        self.colchon = ra.Colchon(ra.bloques_de_ms(colchon_ms),
+                                  objetivo_max=ra.bloques_de_ms(max(colchon_ms, 400)))
         self.enlace = ra.EnlaceAudio(self.colchon, puerto_local=puerto, solo_de=robot or None,
                                      host_local=host_local)
         self.nucleo = ra.Nucleo(self.enlace, ra.Cancelador() if cancelar else None)
@@ -78,7 +93,7 @@ class AudioOperador:
 
     def resumen(self) -> dict:
         return resumen_audio(abierto=self.supervisor.abierto, error=self.supervisor.error,
-                             edad_s=self.enlace.edad_s())
+                             edad_s=self.enlace.edad_s(), colchon_ms=self.colchon.retraso_ms)
 
 
 class AudioDemo:

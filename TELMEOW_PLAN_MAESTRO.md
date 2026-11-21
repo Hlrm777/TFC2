@@ -4407,8 +4407,69 @@ Fija semillas en todo. No reentrenes nada aquí.
     sin elegir una a priori, y la diferencia entre los dos C es lo que aporta
     la arquitectura.
 
+--- AÑADIDO EL 2026-11-21 ---
+
+22. UN DATASET EXTERNO, SOLO PARA MEDIR: el «10k US Adult Faces Database»
+    (Bainbridge, Isola y Oliva, 2013; hecho en el MIT, hoy lo distribuye el
+    laboratorio de Bainbridge en la Universidad de Chicago). El operador pidió
+    acceso; está en `otherDataset/`, FUERA de git (fotos de personas; la
+    licencia es solo de investigación y prohíbe reproducirlas: ninguna foto en
+    la tesis ni en el repositorio). 10 168 fotos de adultos de EE. UU. sacadas
+    de Google Images; solo 2 222 tienen etiquetas, de 12 evaluadores cada una,
+    entre ellas la emoción. Con al menos la mitad de acuerdo: feliz 1501,
+    neutral 576, triste 20, enojado 18, sorprendido 7 (`tools/analizar_10k_faces.py`).
+    **No sirve para entrenar** las cinco clases (un modelo entrenado ahí diría
+    casi siempre «feliz»); **sí para medir neutral contra feliz** en caras que
+    ningún modelo vio, que son las dos que más pesan al narrar. Configuración
+    H del P9. Hecho el 2026-11-21 (abajo, «Medido antes del P9»).
+
 Commit: "test: evaluacion comparativa de reconocimiento de emociones"
 ```
+
+**Medido antes del P9: neutral contra feliz en el dataset externo (configuración
+H, 2026-11-21).** `tools/evaluar_10k_faces.py` (cifras en
+`reports/evaluacion_10k_faces.csv`, sin fotos ni nombres). Sin entrenar ni
+ajustar nada. Cada foto pasa por lo mismo que la cara del narrador: el Haar de
+OpenCV (la mayor, `minSize` 60) y el recorte al modelo, sin espejo. «Equilibrada»
+es la media de los aciertos en neutral y en feliz (no premia decir siempre
+feliz, que es lo que más hay); cuenta como acierto decir exactamente esa clase
+de entre las cinco.
+
+| Modelo | Neutral | Feliz | Equilibrada | Equilibrada, 60+ |
+|---|---|---|---|---|
+| Propio (solo las caras del operador) | 29 % | 45 % | 37 % | 38 % |
+| FER-2013, red legacy | 30 % | 87 % | 58 % | 58 % |
+| **FER-2013, red VGG** | **83 %** | **86 %** | **84 %** | **81 %** |
+| HSEmotion `mbf_va_mtl` (la mitad del de operación) | 38 % | 91 % | 65 % | 53 % |
+| Blendshapes FACS, absolutos | 11 % | 83 % | 47 % | 36 % |
+| HSEmotion + blendshapes absolutos | 17 % | 88 % | 53 % | 44 % |
+
+Con al menos la mitad de los 12 de acuerdo: 510 neutrales y 1332 felices con
+cara encontrada (133 aparentan 60+). Con al menos 9 de 12 de acuerdo (262 y
+1182), todos suben unos puntos y el orden no cambia: VGG 89 %, HSEmotion 72 %.
+**El Haar no encontró la cara en 235 de 2077 fotos (11 %)**: son fotos
+recortadas en óvalo, de frente o no, y quedan fuera de todas las cifras.
+
+Lo que dice, y lo que no:
+
+- **El modelo propio no generaliza a otras personas** (37 %, cerca de lo que
+  daría el azar entre neutral, feliz y las tres de las que se equivoca): es lo
+  esperable de un modelo entrenado con una sola cara, y la cifra honesta que
+  le faltaba junto al 99 % con fuga de datos (bug 13).
+- **Las caras neutras de desconocidos se leen como enojo** en HSEmotion (224 de
+  510) y en los blendshapes absolutos (267 de 510): la cara en reposo de mucha
+  gente parece seria. Es el argumento, medido, de por qué el clasificador de
+  operación mide los blendshapes RELATIVOS a la cara neutra de cada narrador,
+  calibrada al empezar.
+- **El de operación no se puede medir aquí tal cual**: de un desconocido en una
+  foto no hay cara neutra con que calibrar. La fila «HSEmotion + blendshapes
+  absolutos» es lo más cercano, y no es él.
+- **La red VGG de FER-2013 es la que mejor generaliza** en neutral contra feliz
+  (84 %, y 81 % en caras mayores). No cambia la decisión del P6.4, que se tomó
+  con las sesiones del operador, las cinco clases y la estabilidad en vivo; es
+  un dato para el capítulo de resultados.
+- Son fotos de internet, quietas y de ángulos variados, de adultos de EE. UU.:
+  no es la cámara del narrador leyendo un cuento.
 
 **Rangos esperados**
 
@@ -5489,7 +5550,7 @@ espiral del pecho y el altavoz, con su cable, tras el orificio de la boca.
 
 **Por la red**: paquetes UDP de 20 ms (16 000 muestras/s, 16 bits, una voz;
 256 kbit/s por sentido). Cada uno lleva su número de orden; un colchón de 60 ms
-los ordena, rellena con silencio los perdidos y tira los que llegan tarde o
+(que desde el P11.6 se ajusta solo a la irregularidad de la red) los ordena, rellena con silencio los perdidos y tira los que llegan tarde o
 sobran: nunca se atasca ni acumula retraso. El robot manda a la PC del broker;
 la PC responde a la dirección de la que le llega el robot, y con la IP del robot
 no acepta a nadie más (para que nadie de la red se lleve la voz del narrador).
@@ -5541,6 +5602,91 @@ lanza el programa con `--sin-cancelar` y el dispositivo «echo-cancel» del
 sistema. El narrador tiene que usar **auriculares**: por los altavoces de la PC
 los niños se oirían a sí mismos con retraso (el cancelador también corre en la
 PC, pero con micrófono y altavoz de tarjetas distintas no lo quita del todo).
+
+### P11.6 — Narrar desde otro sitio, por internet ✅ 2026-11-21
+
+**El caso** (operador, 2026-11-21): el narrador y el robot pueden estar en
+países distintos. Todo lo anterior suponía la misma red local. Dos problemas y
+lo que se hizo:
+
+1. **Conectarse y cifrar.** Los routers de las casas no dejan entrar conexiones
+   desde internet, y la imagen y la voz de los niños iban sin cifrar. Se
+   resuelve con una VPN (propuesta: Tailscale, que cifra con WireGuard): los
+   programas no cambian, solo reciben la dirección de cada equipo en la VPN.
+   Va como guía en el README («Narrar desde otro sitio, por internet»). Revisado
+   que nada se lo impide: el broker del repositorio escucha en todas las
+   interfaces (`mosquitto.conf`), `--camara-robot` acepta las direcciones
+   `100.x.y.z` y los nombres de Tailscale, la voz aprende la dirección del
+   robot de lo que llega, y el robot se queda quieto si las poses dejan de
+   llegar más de 1 s (P11.4).
+2. **La irregularidad de la red.** El colchón de la voz era fijo, de 60 ms.
+   Ahora **se ajusta solo**: mide cuánto se retrasa cada paquete respecto al
+   más rápido de los últimos ~10 s y guarda lo justo para que llegue a tiempo
+   el 97 % (esperar al último 3 % añadiría retraso a todo lo demás); si se
+   vacía, crece 20 ms en el acto; cuando la red se calma, encoge de 20 en 20 ms
+   saltándose trozos de silencio, para que no se oiga. Un paquete perdido suena
+   como el anterior a media voz en vez de un corte seco. La interfaz enseña el
+   colchón («Audio: hablando con el robot · colchón 140 ms»).
+
+**Medido con internet simulado** (`tools/red_simulada.py`: un relé UDP que
+retrasa, desordena y pierde paquetes; `tools/probar_audio.py --internet
+--comparar`, 24 s, en la PC), con 80 ms de ida, irregularidad exponencial de
+30 ms de media y 1 % de pérdidas:
+
+| | Colchón fijo de 60 ms | Colchón que se ajusta solo |
+|---|---|---|
+| Trozos de 20 ms que suenan a corte (los dos sentidos) | 435 (18 %) | 114 (5 %; ~1 % son pérdidas de verdad) |
+| De ellos, llegaron tarde | 205 | 42 |
+| Colchón al terminar (robot / PC) | 60 / 60 ms | 140 / 160 ms |
+| Del micrófono de la PC al altavoz del robot (mediana) | 156 ms | 219 ms |
+| Eco quitado | 27 dB | 28 dB |
+
+Con 10 ms de irregularidad: 49 cortes, colchón de 80 ms, 141 ms de la PC al
+altavoz. En el wifi (sin red simulada): 0 cortes, colchón de 60 ms, 47 ms;
+nada cambia respecto al P11.5.
+
+**Los movimientos, también suaves** (lo pidió el operador el 2026-11-21: los
+cortes de la red tienen que verse como movimientos suaves, como en una
+videollamada). Por internet las poses llegan a tirones, y `motor_driver.py`
+mandaba a los motores la última que llegaba: el robot se paraba en los huecos
+y saltaba cuando llegaban varias juntas. Ahora:
+
+- la PC pone en cada pose su hora de envío (`ts`, ms de `time.monotonic`; campo
+  nuevo y opcional del contrato, que el visor ignora);
+- `Pose` (en el robot) mide la irregularidad igual que el colchón de la voz
+  (97 % de los mensajes a tiempo, tope 0.5 s) y reproduce las poses con su
+  ritmo original ese tiempo más tarde, **interpolando** entre una y otra;
+- en un corte se queda en la última pose, sin inventarse hacia dónde iba, y al
+  volver alcanza el ritmo acelerando como mucho un 25 %; nunca va hacia atrás;
+  con más de 1 s de desfase salta al presente (lo frenan el perfil de
+  velocidad y, tras 1 s sin poses, el arranque lento del P11.4);
+- el bucle de los motores pasa de 20 a 50 vueltas por segundo, para que la
+  interpolación se note; sin `ts` (publicadores viejos) todo es como antes.
+
+Medido con una rampa de 20°/s (una pose cada 50 ms, 80 ms de retraso, en orden
+como TCP, leída cada 20 ms; `tests/test_raspberry_motores.py`):
+
+| Irregularidad de la red | Colchón | Paradas (de 500 lecturas) | Paso máximo en 20 ms | Tal cual: paradas / paso máximo |
+|---|---|---|---|---|
+| 2 ms (wifi) | 18 ms | 4 | 0.50° | 300 / 1.0° |
+| 10 ms | 48 ms | 15 | 0.50° | 301 / 2.0° |
+| 30 ms | 133 ms | 17 | 0.50° | 333 / 4.0° |
+| corte de 400 ms | — | — | 0.50° | — / 8.0° |
+
+La rampa avanza 0.40° cada 20 ms: 0.50° es el 25 % de más para alcanzar.
+«Tal cual» se para entre pose y pose aun en el wifi (20 poses/s leídas 50
+veces/s); el perfil de velocidad de los motores lo suaviza en parte, pero no
+los saltos de varios grados.
+
+**Límites**: no se ha probado por un internet de verdad ni con Tailscale (no
+hay robot; las cifras de retraso de la guía son de orden de magnitud, no
+medidas aquí). La suavidad de los movimientos se probó con la clase `Pose` y
+llegadas fabricadas, no con motores reales ni con el broker en medio. El retraso de la red se suma también a los movimientos: el
+objetivo de menos de 150 ms del contrato MQTT se midió en local y por internet
+no está garantizado. La cámara (MJPEG) es lo que más gasta, 3-6 Mbit/s a
+15 fotos por segundo; por internet se baja con `--fps` y `--calidad`. La
+pérdida de una conexión en mitad de la sesión deja la página avisando «sin
+señal» / «sin sonido del robot» y reenganchando sola, como en el wifi.
 
 ### Con qué se cierra el P11
 
@@ -5618,6 +5764,7 @@ en el navegador.
 | Calibrar el cero y el sentido de cada articulación, y afinar velocidades | quien construya el robot | que exista el robot | `raspberry/OPENRB.md`, apartado 4 |
 | ~~El programa de la voz, en los dos sentidos~~ | ✅ hecho en el P11.5 (2026-11-21) | | |
 | Probar la voz con la tarjeta y el altavoz de verdad (volumen, distorsión, si basta el cancelador de aquí o hace falta el de PipeWire) | quien construya el robot | que exista el hardware | `robot_audio.py --listar` y una sesión de prueba |
+| Probar una sesión por internet de verdad, con la VPN (retraso real de la voz, la cámara y los movimientos) | el operador, con quien construya el robot | que exista el robot; la VPN la monta el operador con su cuenta | README, «Narrar desde otro sitio, por internet» |
 | Añadir a la figura de conexiones el USB-C de datos Raspberry–OpenRB | el operador (lo asumió el 2026-11-15) | al redactar el capítulo de electrónica | un dibujo |
 | Cambiar en la figura y en la tabla de componentes el altavoz y el micrófono | el operador | la decisión del audio | un dibujo y dos filas |
 | Elegir si el sonido del cuento sale por el monitor (HDMI) o solo por el robot | el operador | saber si su monitor trae altavoces (lo sabe por su ficha) | una respuesta |

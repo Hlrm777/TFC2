@@ -69,14 +69,21 @@ def test_el_colchon_ordena_lo_que_llega_desordenado():
     assert [round(float(c.sacar()[0]), 2) for _ in range(3)] == [0.0, 0.1, 0.2]
 
 
-def test_un_paquete_perdido_es_silencio_y_se_sigue():
+def test_un_paquete_perdido_suena_como_el_anterior_a_media_voz_y_se_sigue():
     c = ra.Colchon(objetivo=3)
     for orden in (0, 2, 3):
         c.meter(orden, 0, _bloque(0.5))
-    salidas = [float(c.sacar()[0]) for _ in range(4)]
-    assert salidas == [pytest.approx(0.5, abs=1e-6), 0.0, pytest.approx(0.5, abs=1e-6),
-                       pytest.approx(0.5, abs=1e-6)]
+    salidas = [round(float(c.sacar()[0]), 3) for _ in range(4)]
+    assert salidas == [0.5, 0.25, 0.5, 0.5]
     assert c.perdidos == 1
+
+
+def test_dos_perdidos_seguidos_ya_son_silencio():
+    c = ra.Colchon(objetivo=2, adaptable=False)
+    for orden in (0, 3, 4):
+        c.meter(orden, 0, _bloque(0.5))
+    salidas = [round(float(c.sacar()[0]), 3) for _ in range(4)]
+    assert salidas == [0.5, 0.25, 0.0, 0.5]
 
 
 def test_uno_que_llega_tarde_se_tira():
@@ -106,7 +113,7 @@ def test_si_el_otro_lado_se_reinicia_se_empieza_de_cero():
 
 
 def test_si_se_vacia_vuelve_a_llenar_antes_de_sonar():
-    c = ra.Colchon(objetivo=2)
+    c = ra.Colchon(objetivo=2, adaptable=False)
     c.meter(0, 0, _bloque())
     c.meter(1, 0, _bloque())
     c.sacar(), c.sacar()
@@ -115,6 +122,89 @@ def test_si_se_vacia_vuelve_a_llenar_antes_de_sonar():
     assert not c.sacar().any()             # aún uno solo: espera
     c.meter(3, 0, _bloque(0.4))
     assert round(float(c.sacar()[0]), 2) == 0.3
+
+
+def test_si_se_vacia_crece_20_ms():
+    c = ra.Colchon(objetivo=3)
+    for orden in range(3):
+        c.meter(orden, 0, _bloque())
+    for _ in range(10):
+        c.sacar()
+    assert c.objetivo == 4 and c.retraso_ms == 80 and c.huecos == 1
+
+
+def _red_irregular(colchon, variacion_ms, n=600, semilla=0):
+    """Paquetes cada 20 ms que tardan 80 ms más una parte irregular."""
+    rng = np.random.default_rng(semilla)
+    reloj = {"ms": 0}
+    colchon._reloj = lambda: reloj["ms"]
+    llegadas = sorted((k * 20 + 80 + rng.exponential(variacion_ms) if variacion_ms else k * 20 + 80, k)
+                      for k in range(n))
+    for llegada, k in llegadas:
+        reloj["ms"] = int(llegada)
+        colchon.meter(k, k * 20, _bloque())
+        colchon._ajustar()
+
+
+def test_guarda_lo_justo_para_la_irregularidad_que_mide():
+    c = ra.Colchon(objetivo=3, objetivo_max=20)
+    _red_irregular(c, variacion_ms=30)
+    # Exponencial de 30 ms de media: su 97 % está en ~105 ms -> 6 paquetes + 1.
+    assert 6 <= c.deseado() <= 8
+
+
+def test_en_una_red_sin_irregularidad_se_queda_en_lo_minimo():
+    c = ra.Colchon(objetivo=3)
+    _red_irregular(c, variacion_ms=0)
+    assert c.deseado() == 3
+
+
+def test_crece_como_mucho_hasta_el_maximo():
+    c = ra.Colchon(objetivo=3, objetivo_max=5)
+    for _ in range(50):
+        c.sacar()
+        c._problema()
+        for _ in range(5):
+            c.sacar()
+    assert c.objetivo == 5
+
+
+def test_cuando_la_red_se_calma_encoge_y_quita_retraso_saltando_silencios():
+    reloj = {"ms": 0}
+    c = ra.Colchon(objetivo=3, calma_s=1.0, reloj=lambda: reloj["ms"])
+    c.objetivo = 6                     # venía de una mala racha
+    orden = 0
+    for _ in range(6):
+        reloj["ms"] = orden * 20 + 50
+        c.meter(orden, orden * 20, np.zeros(B, dtype=np.float32))
+        orden += 1
+    for _ in range(600):               # 12 s llegando puntuales, uno por cada uno que suena
+        reloj["ms"] = orden * 20 + 50
+        c.meter(orden, orden * 20, np.zeros(B, dtype=np.float32))
+        orden += 1
+        c.sacar()
+    assert c.objetivo == 3 and c.encogidas == 3
+    assert c.saltados >= 3 and len(c._paquetes) <= 4
+
+
+def test_nunca_se_salta_un_trozo_con_voz():
+    c = ra.Colchon(objetivo=1, calma_s=0.1)
+    for orden in range(8):
+        c.meter(orden, 0, _bloque(0.3))
+    for _ in range(8):
+        c.sacar()
+    assert c.saltados == 0
+
+
+def test_sin_adaptar_el_colchon_no_cambia():
+    c = ra.Colchon(objetivo=3, adaptable=False)
+    c._problema()
+    assert c.objetivo == 3
+
+
+@pytest.mark.parametrize("ms, bloques", [(20, 1), (60, 3), (61, 4), (150, 8), (0, 1)])
+def test_ms_a_paquetes(ms, bloques):
+    assert ra.bloques_de_ms(ms) == bloques
 
 
 # -- el cancelador de eco -----------------------------------------------------
@@ -332,3 +422,36 @@ def test_el_resumen_del_audio_para_la_pagina():
     assert "aún no llega" in resumen_audio(abierto=True, edad_s=None)["texto"]
     assert "hace 5 s" in resumen_audio(abierto=True, edad_s=5.0)["texto"]
     assert resumen_audio(abierto=True, edad_s=0.1)["clave"] == "ok"
+
+
+# -- por internet (simulado) -----------------------------------------------------------
+
+
+def test_la_red_simulada_retrasa_y_devuelve_las_respuestas():
+    from red_simulada import RedSimulada
+
+    pc = ra.EnlaceAudio(ra.Colchon(objetivo=1), host_local="127.0.0.1").empezar()
+    red = RedSimulada(("127.0.0.1", pc.puerto), retraso_ms=50, variacion_ms=0,
+                      perdida=0).empezar()
+    robot = ra.EnlaceAudio(ra.Colchon(objetivo=1), destino=("127.0.0.1", red.puerto),
+                           host_local="127.0.0.1").empezar()
+    try:
+        inicio = time.monotonic()
+        robot.enviar(_bloque(0.25))
+        assert _esperar(lambda: pc.colchon.recibidos == 1)
+        assert time.monotonic() - inicio >= 0.045
+        pc.enviar(_bloque(0.5))         # la PC responde al relé, que se lo pasa al robot
+        assert _esperar(lambda: robot.colchon.recibidos == 1)
+    finally:
+        robot.cerrar()
+        red.cerrar()
+        pc.cerrar()
+
+
+def test_por_internet_irregular_el_colchon_crece_y_casi_nada_llega_tarde():
+    from probar_audio import correr
+
+    r = correr(8.0, nino=(4.0, 6.0), red={"retraso_ms": 80, "variacion_ms": 30, "perdida": 0.01})
+    assert min(r["colchon_final_ms"]) > 60
+    assert r["suena_en_el_robot"] and r["llega_a_la_pc"]
+    assert r["tarde"] < 0.05 * 2 * r["bloques_robot"]

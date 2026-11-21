@@ -48,6 +48,13 @@ SEGURIDAD
 - Si un motor o el cable USB desaparecen, se reintenta cada 2 s. El programa no
   se cierra solo.
 
+POR INTERNET
+------------
+Por una red lejana las poses llegan a tirones. Con la hora de envío que pone la
+PC en cada mensaje (``ts``), ``Pose`` las reproduce con su ritmo original unos
+ms más tarde e interpola entre ellas: el robot se mueve suave aunque la red no
+lo sea. El estado que publica dice cuánto guarda (``colchon_ms``).
+
 USO
 ---
     python motor_driver.py --broker 192.168.1.50
@@ -130,7 +137,7 @@ class Ajustes:
     aceleracion: int = 40
     sin_pose_s: float = 1.0       # sin poses este tiempo, el robot se queda quieto
     reintento_s: float = 2.0
-    hz: float = 20.0
+    hz: float = 50.0              # vueltas por segundo sin poses nuevas (interpolando)
 
 
 def a_pulsos(grados: float, articulacion: Articulacion) -> int:
@@ -176,15 +183,46 @@ def cargar_config(ruta: Path | None) -> tuple[tuple[Articulacion, ...], Ajustes]
 
 
 class Pose:
-    """La última pose recibida. Como en el visor, cada campo es opcional y el
-    que falta conserva su último valor. La escribe el hilo de MQTT."""
+    """La pose que tiene que tener el robot. Como en el visor, cada campo es
+    opcional y el que falta conserva su último valor. La escribe el hilo de MQTT.
 
-    def __init__(self, campos, reloj: Callable[[], float] = time.monotonic) -> None:
+    POR INTERNET, MOVIMIENTOS SUAVES. La PC publica 20 poses por segundo, pero
+    por una red lejana no llegan igual de espaciadas: se retrasan unas más que
+    otras y llegan a tirones (varias juntas tras un hueco). Movidas tal cual
+    llegan, el robot se pararía y luego daría un salto. Si el mensaje trae la
+    hora de envío (``ts``, ms de un reloj de la PC que solo avanza), la pose se
+    reproduce con su ritmo original, ``retraso_s`` más tarde, y entre una pose y
+    la siguiente se interpola, como el colchón de la voz:
+
+    - ``retraso_s`` se mide solo: cuánto se retrasa cada mensaje respecto al
+      más rápido de los últimos ``ventana_s`` segundos; se guarda lo justo para
+      que llegue a tiempo el ``cuantil`` de ellos (97 %), con un tope de
+      ``max_retraso_s``. En un wifi queda en unos pocos ms.
+    - Si se acaban las poses (un hueco más largo que el colchón), el robot se
+      queda en la última, sin inventarse hacia dónde iba; cuando vuelven, sigue
+      desde ahí y alcanza el ritmo acelerando como mucho un 25 %: no hay saltos.
+      Con más de 1 s de desfase sí se salta al presente (lo frena el perfil de
+      velocidad de los motores y, tras 1 s sin poses, el arranque lento).
+    - Nunca va hacia atrás.
+
+    Sin ``ts`` (un publicador viejo, las pruebas), la última pose tal cual.
+    """
+
+    def __init__(self, campos, reloj: Callable[[], float] = time.monotonic, *,
+                 cuantil: float = 97.0, max_retraso_s: float = 0.5,
+                 ventana_s: float = 10.0) -> None:
         self._campos = tuple(campos)
         self._reloj = reloj
         self._candado = threading.Lock()
         self._valores: dict[str, float] = {}
         self._cuando: float | None = None
+        self.cuantil, self.max_retraso_s, self.ventana_s = cuantil, max_retraso_s, ventana_s
+        self._muestras: list[tuple[float, dict[str, float]]] = []   # (hora de envío, pose)
+        self._transitos: list[tuple[float, float]] = []             # (llegada, llegada - envío)
+        self._p: float | None = None          # por dónde va la reproducción (hora de envío)
+        self._t_prev: float | None = None
+        #: Lo que se guarda antes de mover, en segundos (se mide solo).
+        self.retraso_s = 0.0
         #: Se enciende con cada pose nueva: el bucle no espera a su turno.
         self.nueva = threading.Event()
 
@@ -196,17 +234,75 @@ class Pose:
                   and math.isfinite(datos[c])}
         if not nuevos:
             return False
+        ts = datos.get("ts")
+        marca = isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts)
         with self._candado:
+            llegada = self._reloj()
             self._valores.update(nuevos)
-            self._cuando = self._reloj()
+            self._cuando = llegada
+            if not marca:
+                self._muestras.clear()
+                self._transitos.clear()
+            else:
+                envio = float(ts) / 1000.0
+                if self._muestras and envio <= self._muestras[-1][0]:
+                    if envio == self._muestras[-1][0]:
+                        self._muestras[-1] = (envio, dict(self._valores))
+                else:
+                    self._muestras.append((envio, dict(self._valores)))
+                    self._transitos.append((llegada, llegada - envio))
+                desde = llegada - self.ventana_s
+                while self._transitos and self._transitos[0][0] < desde:
+                    self._transitos.pop(0)
+                while len(self._muestras) > 2 and self._muestras[1][0] < envio - self.ventana_s:
+                    self._muestras.pop(0)
         self.nueva.set()
         return True
+
+    def _interpolar(self, p: float) -> dict[str, float]:
+        muestras = self._muestras
+        if p <= muestras[0][0]:
+            return dict(muestras[0][1])
+        if p >= muestras[-1][0]:
+            return dict(muestras[-1][1])
+        bajo, alto = 0, len(muestras) - 1
+        while alto - bajo > 1:
+            medio = (bajo + alto) // 2
+            if muestras[medio][0] <= p:
+                bajo = medio
+            else:
+                alto = medio
+        (s0, v0), (s1, v1) = muestras[bajo], muestras[alto]
+        f = (p - s0) / (s1 - s0)
+        return {c: (v0[c] + f * (v1[c] - v0[c])) if (c in v0 and c in v1) else v1.get(c, v0.get(c))
+                for c in set(v0) | set(v1)}
 
     def leer(self) -> tuple[dict[str, float], float | None]:
         """``(valores, segundos desde la última pose)``; ``None`` si no hubo."""
         with self._candado:
-            edad = None if self._cuando is None else self._reloj() - self._cuando
-            return dict(self._valores), edad
+            ahora = self._reloj()
+            edad = None if self._cuando is None else ahora - self._cuando
+            if not self._muestras or not self._transitos:
+                return dict(self._valores), edad
+            transitos = [t for _, t in self._transitos]
+            base = min(transitos)
+            orden = sorted(t - base for t in transitos)
+            irregular = orden[min(len(orden) - 1, int(len(orden) * self.cuantil / 100))]
+            objetivo = min(self.max_retraso_s, irregular + 0.01) if len(orden) > 1 else 0.0
+            if objetivo > self.retraso_s:
+                self.retraso_s = objetivo                              # crecer: en el acto
+            else:
+                self.retraso_s += 0.02 * (objetivo - self.retraso_s)   # encoger: despacio
+            deseada = ahora - base - self.retraso_s
+            ultima = self._muestras[-1][0]
+            if self._p is None or abs(deseada - self._p) > 1.0:
+                p = deseada
+            else:
+                dt = max(0.0, ahora - self._t_prev)
+                p = min(max(deseada, self._p + 0.75 * dt), self._p + 1.25 * dt)
+                p = max(self._p, min(p, ultima))   # ni hacia atrás ni más allá de lo que hay
+            self._p, self._t_prev = p, ahora
+            return self._interpolar(p), edad
 
 
 def abrir_bus(puerto: str, baudios: int):
@@ -491,6 +587,7 @@ class Controlador:
             "averiados": {str(i): e for i, e in sorted(self.motores.averiados.items())},
             "temperatura": {str(i): t for i, t in sorted(self.motores.temperaturas.items())},
             "moviendo": self.moviendo,
+            "colchon_ms": round(self.pose.retraso_s * 1000),
             "sin_pose_s": None if edad is None else round(edad, 1),
         })
 

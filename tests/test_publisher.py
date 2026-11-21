@@ -527,3 +527,18 @@ def test_timestamp_opcional():
     payload = _ultimo_payload(cliente)
     assert isinstance(payload["t"], int)
     assert payload["t"] > 1_700_000_000_000  # milisegundos, no segundos
+
+
+def test_la_hora_de_envio_para_que_el_robot_mueva_suave():
+    cliente = ClienteFalso()
+    pub = PosePublisher(MQTTConfig(), client_factory=lambda: cliente, clock=RelojFalso(),
+                        marca_envio=True)
+    pub.publish(**POSE)
+    assert isinstance(_ultimo_payload(cliente)["ts"], int)
+
+
+def test_sin_pedirla_no_va_la_hora_de_envio():
+    cliente = ClienteFalso()
+    pub = PosePublisher(MQTTConfig(), client_factory=lambda: cliente, clock=RelojFalso())
+    pub.publish(**POSE)
+    assert "ts" not in _ultimo_payload(cliente)

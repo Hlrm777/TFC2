@@ -392,3 +392,83 @@ def test_el_motor_simulado_se_mueve_a_la_velocidad_del_perfil():
     assert abs(motor.posicion - (2048 + 469)) < 1.0
     reloj.t = 10.0
     assert motor.posicion == 3072
+
+
+# -- por internet: las poses llegan a tirones y el robot se mueve suave ------------
+
+
+def _rampa_por_internet(pose_suave, segundos=12.0, variacion_s=0.03, semilla=0, hueco=None):
+    """La PC manda pan = 20 grados/s (una pose cada 50 ms, con su ``ts``); llegan
+    80 ms más tarde, con un retraso irregular y en orden (MQTT va por TCP). El
+    robot lee cada 20 ms. Devuelve el pan que habría mandado a los motores con
+    la pose suave y con la última pose tal cual."""
+    import random
+
+    azar = random.Random(semilla)
+    reloj = {"t": 0.0}
+    suave = md.Pose(("pan",), reloj=lambda: reloj["t"])
+    tal_cual = md.Pose(("pan",), reloj=lambda: reloj["t"])
+    llegadas, anterior = [], 0.0
+    for k in range(int(segundos * 20)):
+        envio = k * 0.05
+        llega = max(anterior, envio + 0.08 + azar.expovariate(1 / variacion_s))
+        if hueco and hueco[0] <= envio < hueco[1]:
+            llega = max(llega, hueco[1] + 0.08)      # la red se corta y luego suelta todo
+        anterior = llega
+        llegadas.append((llega, {"pan": 20.0 * envio, "ts": envio * 1000.0}))
+    salida_suave, salida_tal_cual = [], []
+    i = 0
+    t = 0.0
+    while t < segundos:
+        while i < len(llegadas) and llegadas[i][0] <= t:
+            reloj["t"] = llegadas[i][0]
+            suave.recibir(llegadas[i][1])
+            tal_cual.recibir({"pan": llegadas[i][1]["pan"]})
+            i += 1
+        reloj["t"] = t
+        salida_suave.append(suave.leer()[0].get("pan"))
+        salida_tal_cual.append(tal_cual.leer()[0].get("pan"))
+        t += 0.02
+    return salida_suave, salida_tal_cual, suave
+
+
+def _pasos(serie, desde=100):
+    valores = [v for v in serie[desde:] if v is not None]
+    return [b - a for a, b in zip(valores, valores[1:])]
+
+
+def test_por_internet_la_pose_suave_no_se_para_ni_da_saltos():
+    suave, tal_cual, pose = _rampa_por_internet(None)
+    p_suave, p_tal = _pasos(suave), _pasos(tal_cual)
+    # La rampa avanza 0.4 grados cada 20 ms.
+    assert max(p_suave) < 0.55                       # como mucho un 25 % más rápido
+    assert sum(1 for d in p_suave if d == 0) < 0.05 * len(p_suave)   # alguno, si llega tardísimo
+    assert max(p_tal) > 1.5                          # tal cual: saltos de varios pasos
+    assert sum(1 for d in p_tal if d == 0) > 0.4 * len(p_tal)   # y paradas
+    assert 0.03 < pose.retraso_s <= pose.max_retraso_s
+
+
+def test_nunca_va_hacia_atras():
+    suave, _, _ = _rampa_por_internet(None, variacion_s=0.08, semilla=3)
+    assert min(_pasos(suave, desde=1)) >= 0
+
+
+def test_tras_un_corte_espera_en_la_ultima_y_alcanza_sin_saltar():
+    suave, _, _ = _rampa_por_internet(None, hueco=(5.0, 5.4))
+    pasos = _pasos(suave, desde=150)
+    assert max(pasos) < 0.55 and min(pasos) >= 0
+
+
+def test_en_un_wifi_el_colchon_es_casi_nada():
+    suave, _, pose = _rampa_por_internet(None, variacion_s=0.002)
+    assert pose.retraso_s < 0.03
+    assert max(_pasos(suave)) < 0.55
+
+
+def test_sin_hora_de_envio_es_la_ultima_pose_tal_cual():
+    reloj = {"t": 0.0}
+    pose = md.Pose(("pan",), reloj=lambda: reloj["t"])
+    pose.recibir({"pan": 5.0})
+    reloj["t"] = 0.3
+    pose.recibir({"pan": 9.0})
+    assert pose.leer()[0] == {"pan": 9.0} and pose.retraso_s == 0.0

@@ -105,6 +105,11 @@ class PosePublisher:
             realidad el intervalo entre mensajes (``now - lastMsg``), no el
             retardo extremo a extremo; medirlo de verdad requiere un timestamp
             en el payload y un cambio en el visor.
+        marca_envio: si es True añade ``ts``, la hora de envío en ms de un reloj
+            que solo avanza (``time.monotonic``; solo valen las diferencias).
+            Con ella el robot reproduce las poses con su ritmo original aunque
+            la red las entregue a tirones (``raspberry/motor_driver.py``,
+            P11.6). El pipeline la pone; el visor la ignora.
         client_factory: fábrica alternativa de cliente MQTT. Solo para pruebas.
         clock: fuente de tiempo. Debe ser monótona y de alta resolución;
             ver ``_DEFAULT_CLOCK``. Se inyecta solo en las pruebas.
@@ -116,12 +121,14 @@ class PosePublisher:
         rates: RateConfig | None = None,
         *,
         include_timestamp: bool = False,
+        marca_envio: bool = False,
         client_factory: Callable[[], Any] | None = None,
         clock: Callable[[], float] = _DEFAULT_CLOCK,
     ) -> None:
         self.config = mqtt_config or MQTTConfig()
         self.rates = rates or RateConfig()
         self.include_timestamp = include_timestamp
+        self.marca_envio = marca_envio
         self._clock = clock
 
         self._min_period = (1.0 / self.rates.publish_hz) * (1.0 - _RATE_TOLERANCE)
@@ -310,6 +317,8 @@ class PosePublisher:
             payload["t"] = int(t)
         elif self.include_timestamp:
             payload["t"] = int(time.time() * 1000)
+        if self.marca_envio:
+            payload["ts"] = int(time.monotonic() * 1000)
 
         # QoS 0 y sin wait_for_publish(): no se bloquea ni se espera ack.
         info = self._client.publish(

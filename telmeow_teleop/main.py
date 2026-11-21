@@ -1369,7 +1369,9 @@ def _crear_publicador(cfg: AppConfig):
     # es como corre en la mayoría de las pruebas.
     from .publisher import PosePublisher
 
-    return PosePublisher(cfg.mqtt, cfg.rates)
+    # ``ts``: con la hora de envío, el robot mueve suave aunque la red entregue a
+    # tirones (P11.6).
+    return PosePublisher(cfg.mqtt, cfg.rates, marca_envio=True)
 
 
 def _fps(marcas: deque) -> float:

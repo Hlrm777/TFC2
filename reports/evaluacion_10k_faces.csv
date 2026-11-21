@@ -1,0 +1,13 @@
+acuerdo_min,modelo,spec,neutrales,felices,neutral_bien,feliz_bien,precision_equilibrada,equilibrada_60_mas,caras_60_mas,sin_cara,ms_por_foto
+0.5,propio (solo el operador),keras,510,1332,0.2882,0.4489,0.3686,0.3848,133,235,16.4
+0.5,"FER-2013, red legacy",keras:emotion_model_fer2013.keras,510,1332,0.2961,0.8701,0.5831,0.5762,133,235,16.4
+0.5,"FER-2013, red VGG",keras:emotion_model_fer2013_vgg.keras,510,1332,0.8275,0.8619,0.8447,0.8114,133,235,27.8
+0.5,HSEmotion mbf_va_mtl,onnx:modelos_externos/mbf_va_mtl.onnx,510,1332,0.3843,0.9062,0.6452,0.5325,133,235,13.8
+0.5,blendshapes FACS (absolutos),blendshapes:emotion_blendshapes_facs.json,510,1332,0.1098,0.8311,0.4704,0.3629,133,235,17.8
+0.5,HSEmotion + blendshapes absolutos,combinado:onnx:modelos_externos/mbf_va_mtl.onnx+blendshapes:emotion_blendshapes_facs.json,510,1332,0.1745,0.8806,0.5276,0.4386,133,235,25.7
+0.75,propio (solo el operador),keras,262,1182,0.2824,0.4577,0.3701,0.4307,90,171,14.5
+0.75,"FER-2013, red legacy",keras:emotion_model_fer2013.keras,262,1182,0.313,0.9112,0.6121,0.6537,90,171,16.8
+0.75,"FER-2013, red VGG",keras:emotion_model_fer2013_vgg.keras,262,1182,0.874,0.9146,0.8943,0.9147,90,171,28.4
+0.75,HSEmotion mbf_va_mtl,onnx:modelos_externos/mbf_va_mtl.onnx,262,1182,0.4962,0.9484,0.7223,0.5777,90,171,14.2
+0.75,blendshapes FACS (absolutos),blendshapes:emotion_blendshapes_facs.json,262,1182,0.145,0.8697,0.5074,0.4654,90,171,18.0
+0.75,HSEmotion + blendshapes absolutos,combinado:onnx:modelos_externos/mbf_va_mtl.onnx+blendshapes:emotion_blendshapes_facs.json,262,1182,0.2443,0.9205,0.5824,0.5059,90,171,26.1

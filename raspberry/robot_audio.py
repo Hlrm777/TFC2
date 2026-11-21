@@ -38,7 +38,17 @@ Paquetes UDP de 20 ms de sonido (16 000 muestras por segundo, 16 bits, una
 voz): 256 kbit/s en cada sentido, nada para una red local. Cada paquete lleva
 su número de orden; ``Colchon`` los guarda unos 60 ms antes de reproducirlos
 para que lleguen ordenados, rellena con silencio los que se pierden y tira los
-que llegan tarde: el sonido nunca se atasca ni acumula retraso.
+que llegan tarde: el sonido nunca se atasca ni acumula retraso. El colchón se
+ajusta solo: por internet, donde los paquetes llegan más irregulares, crece
+hasta donde haga falta, y cuando la red se calma vuelve a encoger.
+
+POR INTERNET (el robot y el narrador en sitios distintos)
+---------------------------------------------------------
+Los routers de las casas no dejan entrar conexiones desde fuera, y el sonido va
+sin cifrar. Las dos cosas se resuelven con una VPN (Tailscale u otra): une la PC
+y la Raspberry en una red privada y cifrada, como si estuvieran en el mismo
+wifi, y a este programa se le da la dirección de la PC en esa red. Lo explica
+el README («Narrar desde otro sitio, por internet»).
 
 El robot manda a la PC (``--pc``, la misma máquina del broker) y la PC responde
 a la dirección de la que le llega el sonido del robot: no hay que decirle a la
@@ -76,7 +86,7 @@ from typing import Callable
 
 import numpy as np
 
-__all__ = ["TASA", "MUESTRAS", "PUERTO", "codificar", "decodificar", "Colchon",
+__all__ = ["TASA", "MUESTRAS", "PUERTO", "codificar", "decodificar", "bloques_de_ms", "Colchon",
            "Cancelador", "EnlaceAudio", "Nucleo", "DispositivoReal", "Supervisor", "main"]
 
 TASA = 16_000            # muestras por segundo: de sobra para la voz
@@ -124,25 +134,103 @@ def _ms() -> int:
 # --------------------------------------------------------------------------
 
 
+def _energia(x: np.ndarray) -> float:
+    return float(np.dot(x, x)) / len(x)
+
+
+def bloques_de_ms(ms: float) -> int:
+    """Cuántos paquetes de 20 ms caben en ``ms`` (al menos uno)."""
+    return max(1, math.ceil(ms * TASA / 1000 / MUESTRAS))
+
+
 class Colchon:
     """Guarda ``objetivo`` paquetes antes de empezar a sonar.
 
     ``sacar()`` da SIEMPRE 20 ms: el paquete que toca, o silencio si se perdió
-    o aún no hay nada. Si se acumulan más de ``maximo`` (la red se atascó y
-    luego soltó todo de golpe), tira los más viejos: mejor un salto que ir
-    cada vez más retrasado. Un número de orden muy por debajo del esperado es
-    que el otro lado se reinició: se empieza de cero.
+    o aún no hay nada. Si se acumulan demasiados (la red se atascó y luego
+    soltó todo de golpe), tira los más viejos: mejor un salto que ir cada vez
+    más retrasado. Un número de orden muy por debajo del esperado es que el
+    otro lado se reinició: se empieza de cero.
+
+    **Se ajusta solo** (``adaptable``), para que sirva igual en un wifi que
+    por internet entre países. Mide cuánto se retrasa cada paquete respecto al
+    más rápido de los últimos ~10 s (la irregularidad de la red) y guarda lo
+    justo para que llegue a tiempo el ``cuantil`` de ellos (97 %): el resto,
+    los que se retrasan muchísimo, se dan por perdidos, porque esperarlos
+    añadiría retraso a todo lo demás. Si el colchón llega a vaciarse, crece
+    20 ms en el acto. Encoge de 20 en 20 ms, sin bajar del ``objetivo`` del
+    principio, y para que encoger quite retraso de verdad se salta un paquete
+    sobrante, solo si es silencio (entre frase y frase), para que no se oiga.
+
+    Un paquete perdido suena como el anterior, a media voz, en vez de un corte
+    seco; si se pierden dos seguidos, silencio.
     """
 
-    def __init__(self, objetivo: int = 3, maximo: int = 10,
+    def __init__(self, objetivo: int = 3, maximo: int = 10, *, adaptable: bool = True,
+                 objetivo_max: int = 20, calma_s: float = 2.0, cuantil: float = 97.0,
                  reloj: Callable[[], int] = _ms) -> None:
-        self.objetivo, self.maximo, self._reloj = objetivo, maximo, reloj
+        self.objetivo_min = self.objetivo = objetivo
+        self.objetivo_max = max(objetivo, objetivo_max) if adaptable else objetivo
+        self.maximo, self._reloj = maximo, reloj
+        self._calma = max(1, int(calma_s * TASA / MUESTRAS))
         self._lock = threading.Lock()
         self._paquetes: dict[int, tuple[int, np.ndarray]] = {}
         self._siguiente: int | None = None
         self._sonando = False
+        self._desde_problema = 0
+        self._desde_crecer = 10**9
+        self._desde_salto = 0
+        self.adaptable = adaptable
+        self.cuantil = cuantil
+        self._transitos: list[int] = []
+        self._desde_calculo = 0
+        self._anterior: np.ndarray | None = None
+        self._perdidos_seguidos = 0
         self.recibidos = self.perdidos = self.tarde = self.tirados = self.huecos = 0
+        self.crecidas = self.encogidas = self.saltados = 0
         self.latencias_ms: list[int] = []     # solo tiene sentido con el mismo reloj
+
+    @property
+    def retraso_ms(self) -> int:
+        """Lo que guarda antes de sonar, en ms."""
+        return self.objetivo * MUESTRAS * 1000 // TASA
+
+    def _limite(self) -> int:
+        return max(self.maximo, self.objetivo + 7)
+
+    def _problema(self) -> None:
+        """Se vació: crecer 20 ms (como mucho, una vez cada 100 ms)."""
+        self._desde_problema = 0
+        if self.objetivo < self.objetivo_max and self._desde_crecer >= 5:
+            self.objetivo += 1
+            self.crecidas += 1
+            self._desde_crecer = 0
+
+    def deseado(self) -> int | None:
+        """Los paquetes que harían falta según la irregularidad medida."""
+        if len(self._transitos) < 50:
+            return None
+        t = np.asarray(self._transitos, dtype=np.int64)
+        irregular = float(np.percentile(t - t.min(), self.cuantil))
+        return min(self.objetivo_max,
+                   max(self.objetivo_min, math.ceil(irregular * TASA / 1000 / MUESTRAS) + 1))
+
+    def _ajustar(self) -> None:
+        self._desde_calculo += 1
+        if not self.adaptable or self._desde_calculo < 10:
+            return
+        self._desde_calculo = 0
+        deseado = self.deseado()
+        if deseado is None:
+            return
+        if deseado > self.objetivo:
+            self.crecidas += deseado - self.objetivo
+            self.objetivo = deseado
+            self._desde_problema = 0
+        elif deseado < self.objetivo and self._desde_problema >= self._calma:
+            self.objetivo -= 1
+            self.encogidas += 1
+            self._desde_problema = 0
 
     def meter(self, orden: int, t_ms: int, muestras: np.ndarray) -> None:
         with self._lock:
@@ -151,13 +239,18 @@ class Colchon:
             if referencia is not None and referencia - orden > 500:   # el otro lado se reinició
                 self._paquetes.clear()
                 self._siguiente, self._sonando = None, False
-            elif self._sonando and orden < self._siguiente:
+            if self.adaptable:
+                # Llegada (reloj de aquí) menos salida (reloj del otro): el desfase
+                # entre relojes es fijo, así que lo que varía es lo que tardó.
+                self._transitos.append((self._reloj() - t_ms) & 0xFFFFFFFF)
+                del self._transitos[:-500]
+            if self._sonando and orden < self._siguiente:
                 self.tarde += 1
                 return
             self._paquetes[orden] = (t_ms, muestras)
             if self._siguiente is None:
                 self._siguiente = orden
-            while len(self._paquetes) > self.maximo:
+            while len(self._paquetes) > self._limite():
                 viejo = min(self._paquetes)
                 del self._paquetes[viejo]
                 self.tirados += 1
@@ -165,6 +258,8 @@ class Colchon:
 
     def sacar(self) -> np.ndarray:
         with self._lock:
+            self._desde_crecer += 1
+            self._desde_salto += 1
             if not self._sonando:
                 if len(self._paquetes) < self.objetivo:
                     return np.zeros(MUESTRAS, dtype=np.float32)
@@ -173,15 +268,32 @@ class Colchon:
             if not self._paquetes:
                 # Se vació: volver a llenar antes de sonar otra vez.
                 self.huecos += 1
+                self._problema()
                 self._sonando = False
                 self._siguiente = None
                 return np.zeros(MUESTRAS, dtype=np.float32)
+            self._desde_problema += 1
+            self._ajustar()
             dato = self._paquetes.pop(self._siguiente, None)
             self._siguiente += 1
+            # Sobran paquetes (el colchón encogió o la red soltó varios juntos):
+            # saltarse este si es silencio, y así quitar 20 ms de retraso.
+            while (dato is not None and len(self._paquetes) > self.objetivo
+                   and self._desde_salto >= 5 and _energia(dato[1]) < 1e-5
+                   and self._siguiente in self._paquetes):
+                self.saltados += 1
+                self._desde_salto = 0
+                dato = self._paquetes.pop(self._siguiente)
+                self._siguiente += 1
             if dato is None:
                 self.perdidos += 1
+                self._perdidos_seguidos += 1
+                if self._perdidos_seguidos == 1 and self._anterior is not None:
+                    return (self._anterior * 0.5).astype(np.float32)
                 return np.zeros(MUESTRAS, dtype=np.float32)
+            self._perdidos_seguidos = 0
             t_ms, muestras = dato
+            self._anterior = muestras
             latencia = (self._reloj() - t_ms) & 0xFFFFFFFF
             if latencia < 60_000:
                 self.latencias_ms.append(latencia)
@@ -192,10 +304,6 @@ class Colchon:
 # --------------------------------------------------------------------------
 # El cancelador de eco
 # --------------------------------------------------------------------------
-
-
-def _energia(x: np.ndarray) -> float:
-    return float(np.dot(x, x)) / len(x)
 
 
 class Cancelador:
@@ -545,6 +653,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dispositivo", default=None,
                    help="La tarjeta de sonido, por numero o parte del nombre (--listar).")
     p.add_argument("--volumen", type=float, default=1.0, help="Multiplica lo que suena.")
+    p.add_argument("--colchon-ms", type=float, default=60.0,
+                   help="Lo que se guarda antes de sonar al empezar (y lo minimo). Crece solo "
+                        "si la red llega irregular; por internet se puede empezar en 120.")
+    p.add_argument("--colchon-max-ms", type=float, default=400.0,
+                   help="Hasta donde puede crecer el colchon.")
     p.add_argument("--sin-cancelar", action="store_true",
                    help="Sin el cancelador de eco de aqui (p. ej. si se usa el de PipeWire).")
     p.add_argument("--listar", action="store_true", help="Dice que tarjetas de sonido hay y sale.")
@@ -557,7 +670,8 @@ def main(argv: list[str] | None = None) -> int:
         print(sd.query_devices())
         return 0
 
-    colchon = Colchon()
+    colchon = Colchon(bloques_de_ms(args.colchon_ms),
+                      objetivo_max=bloques_de_ms(max(args.colchon_ms, args.colchon_max_ms)))
     enlace = EnlaceAudio(colchon, destino=_partir(args.pc, PUERTO)).empezar()
     nucleo = Nucleo(enlace, None if args.sin_cancelar else Cancelador(), volumen=args.volumen)
     tarjeta = _dispositivo(args.dispositivo)

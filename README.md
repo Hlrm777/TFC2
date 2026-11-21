@@ -472,12 +472,12 @@ cámara se desconecta, se quedan con lo último bueno, lo anotan y reintentan.
 En el primero las flechas pasan de página; en el segundo las teclas 1 a 6
 cambian la expresión.
 
-**«Lo que ve el robot» en la interfaz de narración.** Con `--camara-robot`, la
-página pasa a tres columnas: a la izquierda el robot, la cámara del narrador y
-el estado; en el centro el libro; a la derecha el video de la cámara del robot
-y, debajo, los botones. Si la última foto tiene más de 2 s avisa «Sin
-señal» en vez de dejar una imagen congelada. Sin ese argumento la página es la
-del P10, sin cambios. Para verlo sin robot, en dos terminales:
+**«Lo que ve el robot» en la interfaz de narración.** La página va en franjas:
+el estado arriba, los botones abajo y, en medio, una columna estrecha con las
+vistas (el robot 3D y la cámara del narrador) y el libro en todo lo demás. Con
+`--camara-robot`, el video de la cámara del robot entra arriba en esa columna.
+Si la última foto tiene más de 2 s avisa «Sin
+señal» en vez de dejar una imagen congelada. Para verlo sin robot, en dos terminales:
 
 ```bash
 .venv/Scripts/python.exe raspberry/robot_camera.py --fuente prueba --solo-local

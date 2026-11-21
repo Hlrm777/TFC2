@@ -4456,7 +4456,7 @@ operador no tenía ninguno encendido.)
 
 | Tema | Decisión | Por qué |
 |---|---|---|
-| Distribución | **Libro a la derecha**: columna izquierda con el robot arriba y su cámara abajo; a la derecha, grande, la página con los botones debajo | los 20 libros mezclan páginas apaisadas (la mayoría, 720×540) y verticales («Cambios», 612×840); en un monitor 16:9 la página sale grande de las dos maneras. Es su distribución de tres columnas sin la del centro |
+| Distribución (sustituida el 2026-11-21: ver «El reparto de franjas» en el P11.2) | **Libro a la derecha**: columna izquierda con el robot arriba y su cámara abajo; a la derecha, grande, la página con los botones debajo | los 20 libros mezclan páginas apaisadas (la mayoría, 720×540) y verticales («Cambios», 612×840); en un monitor 16:9 la página sale grande de las dos maneras. Es su distribución de tres columnas sin la del centro |
 | «Lo que ve el robot» | **Para el robot físico**: no se pone ahora | el robot virtual no tiene cámara; ese panel solo podría enseñar la escena 3D vista desde su cabeza, sin nadie delante. Queda como pendiente con dueño (abajo) |
 | Ventana de OpenCV | **Abierta aparte**, pero **todas las teclas funcionan con el navegador delante**, también terminar, fijar una expresión y pausar | lo pidió el operador: no se le puede pedir a quien narra que haga clic primero en la ventana de Python para que las teclas funcionen |
 | Pausa y página | **En pausa no se pasa de página** | página y gesto van siempre juntos. Consecuencia aceptada: con la pausa por poca luz no se puede seguir leyendo hasta que vuelva la luz |
@@ -5341,14 +5341,31 @@ cámara de la Raspberry (`picamera2`), una USB, un video grabado o una imagen
 fabricada. Si la cámara falla, reintenta cada 2 s.
 
 La interfaz cierra el pendiente «Panel "lo que ve el robot"» del P10: con
-`--camara-robot DIRECCION` (o `TELMEOW_ROBOT_CAM`), la página pasa a tres
-columnas (**reparto pedido por el operador el 2026-11-15**; el primero, de
-Claude, ponía la cámara del narrador en un recuadro sobre la del robot): a la
-izquierda, como siempre, el robot, la cámara del narrador y el estado; en el
-centro el libro, con toda la altura; a la derecha lo que ve el robot y, debajo,
-los botones. Comprobado en el navegador a 1600×900 con la cámara de prueba: el
-libro queda en 880 px de ancho y toda la altura; un libro apaisado sale algo
-más pequeño que sin cámara de robot (antes tenía 1088 px), uno vertical gana.
+`--camara-robot DIRECCION` (o `TELMEOW_ROBOT_CAM`), lo que ve el robot entra
+arriba en la columna de las vistas (abajo, «El reparto de franjas»).
+
+**El reparto de franjas (2026-11-21, pedido por el operador).** Antes hubo dos:
+el del P10 (el robot y la cámara del narrador a la izquierda; el libro a la
+derecha con el estado y los botones debajo) y, el 2026-11-15, uno de tres
+columnas con lo que ve el robot y los botones a la derecha (el primero de
+todos, de Claude, ponía la cámara del narrador en un recuadro). El operador
+pidió ganar sitio para el cuento, y ahora es así, con y sin cámara de robot:
+
+- **Arriba, una franja fina con el estado** en una sola línea: robot conectado,
+  expresión, cuento, visor, motores (si se pidieron), grabación y avisos.
+- **Abajo, una franja con todos los botones** en una sola fila: el cuento y la
+  página, las seis expresiones, y Automático, Calibrar, Pausa y Vista. Desde
+  unos 1550 px de ancho cabe en una fila; en pantallas más estrechas se parte
+  en dos sin recortar ningún botón.
+- **En medio, una columna estrecha a la izquierda con las vistas**, apiladas:
+  lo que ve el robot (solo con `--camara-robot`), el robot 3D y la cámara del
+  narrador, cada una con su rótulo. **El libro ocupa todo lo demás.**
+
+Comprobado en el navegador: a 1600×900 el libro tiene 1248×806 px (con el de
+tres columnas tenía 880 px de ancho y, con el del P10, 1088×~690), no hay
+desplazamiento en la página y ningún botón queda cortado; a 1366×768 los
+botones pasan a dos filas y el libro queda en 1066×628. Con la franja de guía de
+las sesiones de verificación, la guía va encima del estado.
 La página pregunta cada segundo la edad de la última foto: con más de 2 s, o sin
 respuesta, tapa la imagen con «Sin señal de la cámara del robot», para que una
 foto congelada no parezca en vivo; al volver, reengancha sola. **Sin
@@ -5498,13 +5515,26 @@ en el navegador.
   USB el 2026-11-15; falta que elija la pieza. Candidatos buscados ese día
   (ninguno probado): (a) Waveshare «USB TO AUDIO», una tarjeta de sonido USB
   sin controladores con micrófono en la placa y amplificador para altavoces
-  (2.6 W por canal), la más barata, sin cancelación de eco; (b) Seeed ReSpeaker
+  (2.6 W por canal), la más barata, sin cancelación de eco en la placa; UNA
+  sola basta para los dos sentidos (entrada y salida por el mismo USB); (b) Seeed ReSpeaker
   USB Mic Array, con cancelación de eco en el propio chip, más cara; (c) un
   altavoz-micrófono de conferencia USB, con cancelación de eco pero grande
   para el pecho del robot. Con (a) o (b) el micrófono va tras la espiral del
   pecho y el altavoz, con su cable, tras el orificio de la boca, como en el
   diseño original. El monitor del cuento también puede dar sonido por HDMI si
   su modelo trae altavoces (hay que mirarlo en su ficha).
+  **Hablar a la vez (2026-11-21).** El operador no quiere turnos: si un niño
+  habla mientras él narra, con turnos se perdería. Se puede sin turnos con
+  cancelación de eco POR PROGRAMA en la Raspberry: no es una resta analógica,
+  sino una resta digital entre muestras. El programa sabe exactamente qué
+  sonido mandó al altavoz, aprende con qué retraso y cuánto más débil vuelve
+  por el micrófono, y lo resta de lo que graba; lo que sobra es la voz del
+  niño. Es lo que hacen las videollamadas (el cancelador de WebRTC, que
+  PipeWire, el sistema de sonido de Raspberry Pi OS, trae como módulo). Pide
+  que micrófono y altavoz vayan en la misma tarjeta, con el mismo reloj: con
+  dos tarjetas distintas sus relojes se desfasan poco a poco y el cancelador
+  pierde la pista. Sin hardware solo se puede comprobar con sonidos grabados
+  (un eco fabricado + una voz) cuánto eco quita; cómo suena en el robot, no.
 
 **Pendientes, con quién los lleva:**
 
@@ -5512,13 +5542,14 @@ en el navegador.
 |---|---|---|---|
 | ~~Confirmar `pypdfium2` en lugar de `pdf2image`~~ | ✅ confirmado por el operador (2026-11-15) | | |
 | ~~El reparto del panel «Lo que ve el robot»~~ | ✅ el operador pidió tres columnas y se hizo (2026-11-15) | | |
-| Confirmar las páginas del cuento en memoria | el operador | cuando lo vea | una respuesta |
+| ~~Confirmar las páginas del cuento en memoria~~ | ✅ confirmado por el operador (2026-11-21) | | |
 | ~~El programa de los motores~~ | ✅ hecho en el P11.4 (2026-11-15) | | |
 | ~~Enseñar en la interfaz el estado de los motores~~ | ✅ hecho como opción, `--estado-motores` (2026-11-15) | | |
 | Calibrar el cero y el sentido de cada articulación, y afinar velocidades | quien construya el robot | que exista el robot | `raspberry/OPENRB.md`, apartado 4 |
 | El audio: la voz del narrador al altavoz del robot (y, si se quiere, el micrófono del robot al narrador) | Claude | que el operador elija la pieza de audio USB (candidatos arriba) y diga si quiere el programa. Reabierto el 2026-11-15: el 2026-11-14 quedó a criterio de Claude y no se hizo | el programa de la voz, con una salida de sonido de prueba como las de la cámara: uno o dos días; sin hardware solo se prueba que el sonido llega entero y con qué retraso, no cómo suena |
 | Añadir a la figura de conexiones el USB-C de datos Raspberry–OpenRB | el operador (lo asumió el 2026-11-15) | al redactar el capítulo de electrónica | un dibujo |
 | Cambiar en la figura y en la tabla de componentes el altavoz y el micrófono | el operador | la decisión del audio | un dibujo y dos filas |
+| Elegir si el sonido del cuento sale por el monitor (HDMI) o solo por el robot | el operador | saber si su monitor trae altavoces (lo sabe por su ficha) | una respuesta |
 | Ejecutarlo en una Raspberry de verdad | quien construya el robot | que exista el hardware | README, «Los programas de la Raspberry Pi» |
 
 ---

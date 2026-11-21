@@ -5515,16 +5515,20 @@ sintéticas, con el espectro y el ritmo de la voz). 29 pruebas
 (`tests/test_raspberry_audio.py`) y de punta a punta por UDP
 (`tools/probar_audio.py`, 24 s):
 
-| | PC |
-|---|---|
-| Paquetes en cada sentido / perdidos | 1203-1204 / 0 |
-| Del micrófono de la PC al altavoz del robot | mediana 47 ms (sin las tarjetas de verdad, ~10-40 ms cada una) |
-| Del micrófono del robot a la PC | mediana 62 ms |
-| Eco quitado, solo el narrador (de los 4 a los 10 s) | 27 dB |
-| Eco quitado, hablando el niño a la vez | 33 dB |
-| El niño tras quitar el eco (correlación, 1 = intacto) | 0.999 |
-| Eco quitado tras 6-30 s, con retrasos de 20 a 300 ms | 35-48 dB |
-| Coste por bloque de 20 ms | ~0.1 ms |
+| | PC | ARM · Debian 12 y 13 |
+|---|---|---|
+| Paquetes en cada sentido / perdidos | 1203-1204 / 0 | 1202-1203 / 0 |
+| Del micrófono de la PC al altavoz del robot (sin las tarjetas de verdad, ~10-40 ms cada una) | mediana 47 ms | 41 ms |
+| Del micrófono del robot a la PC | mediana 62 ms | 58 ms |
+| Eco quitado, solo el narrador (de los 4 a los 10 s) | 27 dB | 27 dB |
+| Eco quitado, hablando el niño a la vez | 33 dB | 33 dB |
+| El niño tras quitar el eco (correlación, 1 = intacto) | 0.999 | 0.999 |
+| Eco quitado tras 6-30 s, con retrasos de 20 a 300 ms | 35-48 dB | — |
+| Coste por bloque de 20 ms | ~0.1 ms | — |
+
+En ARM además `sounddevice` encuentra PortAudio (V19.6), la biblioteca con que
+abriría la tarjeta; sin tarjeta no se puede ir más allá. 152 pruebas de
+`raspberry/` en verde en los dos Debian.
 
 **Lo que esto no dice** (límites): cómo suena. El eco simulado es lineal y sin
 ruido de sala; un altavoz pequeño a mucho volumen distorsiona, y esa parte un

@@ -1343,6 +1343,13 @@ def _parser() -> argparse.ArgumentParser:
              "(cuántos responden, cuál falla, temperatura), que cuenta "
              "raspberry/motor_driver.py. Para quien mantiene el robot, no para quien narra.",
     )
+    propios.add_argument(
+        "--audio", nargs="?", const="", default=None, metavar="IP_DEL_ROBOT",
+        help="Con --interfaz: hablar con los niños por el robot "
+             "(raspberry/robot_audio.py). Abre el micrófono y los auriculares de "
+             "esta PC y escucha en el puerto UDP 8003. Con la IP del robot, solo "
+             "acepta su sonido.",
+    )
     add_cli_args(parser)
     return parser
 
@@ -1394,6 +1401,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.guardar_recortes is not None and not args.record:
         parser.error("--guardar-recortes necesita --record: el CSV dice qué recorte es cada fila")
+    if args.audio is not None and args.interfaz is None:
+        parser.error("--audio necesita --interfaz: el estado del audio lo enseña la página")
     if args.sin_ventana and args.interfaz is None:
         parser.error("--sin-ventana necesita --interfaz: sin ventana ni navegador no hay "
                      "donde pulsar las teclas")
@@ -1490,7 +1499,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.interfaz is not None:
             interfaz = _crear_interfaz(cfg, args.interfaz, guia, camara_robot,
-                                       args.estado_motores)
+                                       args.estado_motores, args.audio)
             if interfaz is None:
                 return 1
             print(f"Interfaz de narracion en {interfaz.url} (cuentos de "
@@ -1528,17 +1537,26 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _crear_interfaz(cfg: AppConfig, puerto: int, guia: dict | None = None,
-                    camara_robot: str | None = None, estado_motores: bool = False):
+                    camara_robot: str | None = None, estado_motores: bool = False,
+                    audio: str | None = None):
     """El servidor de la interfaz de narración (P10), ya arrancado, o ``None``
     si el puerto está ocupado (otra sesión abierta)."""
     # Aquí y no arriba: sin --interfaz no se carga nada de esto.
     from .control_panel import CARPETA_VISOR, EscuchaMotores, ServidorInterfaz
 
     motores = EscuchaMotores(cfg.mqtt.host, cfg.mqtt.port) if estado_motores else None
+    voz = None
+    if audio is not None:
+        from .audio_operador import AudioOperador
+
+        try:
+            voz = AudioOperador(robot=audio or None)
+        except OSError as exc:
+            print(f"AVISO: sin audio con el robot: no puedo abrir el puerto UDP ({exc}).")
     try:
         interfaz = ServidorInterfaz(CARPETA_VISOR, Biblioteca(cfg.paths.stories_dir),
                                     puerto=puerto, guia=guia, camara_robot=camara_robot,
-                                    motores=motores)
+                                    motores=motores, audio=voz)
     except OSError as exc:
         print(f"No se pudo abrir la interfaz en el puerto {puerto} ({exc}). "
               f"Hay otra sesion abierta?")

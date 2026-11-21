@@ -1,0 +1,31 @@
+# La voz del robot, al arrancar la Raspberry (P11.5).
+#
+# Lleva la voz del narrador al altavoz de la boca y lo que oye el microfono del
+# pecho a la PC del narrador. Se instala asi, en la Raspberry:
+#
+#   sudo apt install libportaudio2
+#   mkdir -p ~/.config/systemd/user
+#   cp ~/telmeow/raspberry/telmeow-audio.service ~/.config/systemd/user/
+#   nano ~/.config/systemd/user/telmeow-audio.service    # poner la IP de la PC
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now telmeow-audio
+#
+# Que tarjeta usar: python ~/telmeow/raspberry/robot_audio.py --listar
+# (se le pasa con --dispositivo si no es la de por defecto).
+# Ver que hace:    journalctl --user -u telmeow-audio -f
+#
+# Restart=always: si el programa muriera, systemd lo vuelve a lanzar a los 2 s.
+# SIN PROBAR: no hay Raspberry ni tarjeta de sonido.
+
+[Unit]
+Description=Telmeow - la voz del robot
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/telmeow/venv/bin/python %h/telmeow/raspberry/robot_audio.py --pc IP_DE_LA_PC
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

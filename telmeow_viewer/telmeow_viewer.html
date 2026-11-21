@@ -142,7 +142,7 @@
   #n-estado .linea{display:flex;align-items:center;gap:8px}
   #n-estado .dot.pausa{background:var(--accent);box-shadow:0 0 8px var(--accent)}
   #n-estado .tenue{color:var(--ink-dim);font-size:12px}
-  #n-estado #n-motores.aviso{color:var(--warn)}
+  #n-estado #n-motores.aviso, #n-estado #n-audio.aviso{color:var(--warn)}
   #n-estado .grab{color:var(--warn);font-size:12px}
   #n-estado .grab:empty{display:none}
   #n-aviso{color:var(--accent);font-size:12.5px;margin-left:auto}
@@ -331,6 +331,7 @@
     <div class="tenue" id="n-titulo">Sin cuento</div>
     <div class="tenue" id="n-visor">Visor: sin conexión al broker</div>
     <div class="tenue" id="n-motores" hidden></div>
+    <div class="tenue" id="n-audio" hidden></div>
     <div class="grab" id="n-grab"></div>
     <div id="n-aviso"></div>
   </div>
@@ -1503,6 +1504,13 @@
     if(e.motores){
       motores.textContent = e.motores.texto;
       motores.className = 'tenue' + (e.motores.clave==='ok' ? '' : ' aviso');
+    }
+    // Solo con --audio: la voz con los niños por el robot.
+    const audio = document.getElementById('n-audio');
+    audio.hidden = !e.audio;
+    if(e.audio){
+      audio.textContent = e.audio.texto;
+      audio.className = 'tenue' + (e.audio.clave==='ok' ? '' : ' aviso');
     }
     const robot = e.robot || {clave:'sin_enlace', texto:'—'};
     document.getElementById('n-robot').textContent = robot.texto;

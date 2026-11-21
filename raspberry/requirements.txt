@@ -11,6 +11,11 @@
 #   opencv-python-headless + numpy
 #              solo robot_camera.py: comprimir cada foto a JPEG y leer una
 #              camara USB o un video. "headless" = sin ventanas, mas ligero.
+#              numpy tambien lo usa robot_audio.py (el cancelador de eco).
+#   sounddevice
+#              solo robot_audio.py: la tarjeta de sonido USB. Necesita la
+#              biblioteca PortAudio del sistema:
+#                sudo apt install libportaudio2
 #
 # La camara CSI de la Raspberry (--fuente picamera2) no se instala con pip:
 #   sudo apt install python3-picamera2
@@ -21,3 +26,4 @@ paho-mqtt==2.1.0
 opencv-python-headless==4.10.0.84
 numpy>=1.26
 dynamixel-sdk==4.1.0
+sounddevice==0.5.6

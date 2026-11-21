@@ -441,7 +441,7 @@ de siempre, en el 8000 y sin `?modo=narracion`, no cambia.
 
 ## Los programas de la Raspberry Pi del robot (P11)
 
-La carpeta `raspberry/` es **lo único que corre en el robot**. Son cuatro
+La carpeta `raspberry/` es **lo único que corre en el robot**. Son cinco
 programas sueltos, que no importan nada de `telmeow_teleop` ni entre ellos:
 
 | Programa | Qué hace | De dónde lo saca |
@@ -450,8 +450,9 @@ programas sueltos, que no importan nada de `telmeow_teleop` ni entre ellos:
 | `eye_display.py` | la expresión, en la pantalla de los ojos (DSI, 800×480) | el campo `emo` del mensaje de pose; las mismas seis imágenes y el mismo fundido de 350 ms que el visor |
 | `robot_camera.py` | la cámara de la frente, como video por HTTP (puerto 8002) | la cámara de la Raspberry (`picamera2`), una USB, un video o una imagen de prueba |
 | `motor_driver.py` | lleva la pose a los seis motores DYNAMIXEL, por la placa OpenRB-150 conectada por USB | los seis ángulos del mensaje de pose |
+| `robot_audio.py` | la voz del narrador al altavoz de la boca y lo que oye el micrófono del pecho a la PC, a la vez, quitando el eco | UDP con la PC (puerto 8003); una tarjeta de sonido USB con micrófono y altavoz |
 
-Los cuatro siguen la misma regla: **nunca enseñan un error ni se cierran solos**.
+Los cinco siguen la misma regla: **nunca enseñan un error ni se cierran solos**.
 Si el broker se cae, el cuento falta, llega una expresión que no existe o la
 cámara se desconecta, se quedan con lo último bueno, lo anotan y reintentan.
 
@@ -512,23 +513,28 @@ python3 -m venv --system-site-packages ~/telmeow/venv
   corre Mosquitto. La PC tiene que dejar entrar el puerto 1883 (cortafuegos).
 - `--display N` elige el monitor: el HDMI para el cuento, la DSI para los ojos.
 - **Al arranque**: `raspberry/telmeow-pantalla.service`, `telmeow-ojos.service`
-  `telmeow-camara.service` y `telmeow-motores.service` (systemd de usuario;
+  `telmeow-camara.service`, `telmeow-motores.service` y `telmeow-audio.service` (systemd de usuario;
   instrucciones dentro).
+- **La voz**: `sudo apt install libportaudio2`, `robot_audio.py --listar` para
+  ver la tarjeta y `--pc IP_DE_LA_PC`; en la PC, `control_panel --audio
+  IP_DEL_ROBOT`, con auriculares, y el cortafuegos dejando entrar el puerto UDP
+  8003. Para probarlo sin tarjeta: `python tools/probar_audio.py`.
 - **Los motores** necesitan antes su puesta en marcha, que está en
   [`raspberry/OPENRB.md`](raspberry/OPENRB.md): cargar en la OpenRB el programa
   puente de ROBOTIS, dar a cada motor su número y calibrar el cero y el sentido
   de cada articulación. `motor_driver.py --escanear` dice qué motores contestan.
 
 **La prueba en ARM.** `.github/workflows/raspberry-arm.yml` instala
-`raspberry/requirements.txt` y corre las pruebas y las tres herramientas de punta
+`raspberry/requirements.txt` y corre las pruebas y las cuatro herramientas de punta
 a punta (`tools/probar_pantalla.py`, `tools/probar_ojos_y_camara.py`,
-`tools/probar_motores.py`) en una
+`tools/probar_motores.py`, `tools/probar_audio.py`) en una
 máquina de GitHub con procesador ARM de 64 bits, dentro de Debian 12 y Debian
 13 (la base de Raspberry Pi OS), contra un Mosquitto de verdad. Corre sola cada
 vez que cambia algo de `raspberry/`. Demuestra que las dependencias existen
 para ARM y que el código funciona allí; **no** demuestra la salida por HDMI o
 DSI, una cámara real, unos motores reales (los de la prueba son simulados), el
-arranque con systemd ni la velocidad de una Raspberry.
+sonido real (el eco y los niños son fabricados), el arranque con systemd ni la
+velocidad de una Raspberry.
 
 ---
 
@@ -598,12 +604,13 @@ por segundo cuando solo le interesa uno cada varios segundos.
 │   ├── eye_display.py      # la pantalla de los ojos: `emo` → la expresión, con fundido
 │   ├── robot_camera.py     # la cámara de la frente, por HTTP, para «Lo que ve el robot»
 │   ├── motor_driver.py     # la pose → los seis DYNAMIXEL, por la OpenRB (USB)
+│   ├── robot_audio.py      # la voz en los dos sentidos, con cancelador de eco (P11.5)
 │   ├── OPENRB.md           # la puesta en marcha de la OpenRB y los motores
 │   ├── telmeow-*.service   # para lanzarlos al arranque (systemd)
-│   └── requirements.txt    # pygame, pypdfium2, paho-mqtt, opencv-python-headless
+│   └── requirements.txt    # pygame, pypdfium2, paho-mqtt, opencv-python-headless, sounddevice
 ├── .github/workflows/raspberry-arm.yml  # la prueba de raspberry/ en ARM de 64 bits
 ├── tools/
-│   ├── probar_pantalla.py, probar_ojos_y_camara.py, probar_motores.py  # raspberry/ de punta a punta (P11)
+│   ├── probar_pantalla.py, probar_ojos_y_camara.py, probar_motores.py, probar_audio.py  # raspberry/ de punta a punta (P11)
 │   ├── simulador_dynamixel.py  # motores DYNAMIXEL simulados, a nivel de bytes del cable (P11.4)
 │   ├── mqtt_monitor.py # suscriptor de diagnóstico a telmeow/# · --latencia (P7.3)
 │   ├── analizar_sesion.py, medir_latencia_camara.py  # tasas, costes y latencia (P7)

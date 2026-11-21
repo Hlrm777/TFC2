@@ -630,3 +630,23 @@ def test_la_pagina_solo_muestra_los_motores_si_el_estado_los_trae():
     html = (cp.CARPETA_VISOR / "telmeow_viewer.html").read_text(encoding="utf-8")
     assert '<div class="tenue" id="n-motores" hidden></div>' in html
     assert "motores.hidden = !e.motores;" in html
+
+
+# -- el audio con el robot (--audio) -------------------------------------------
+
+
+@pytest.mark.parametrize("pedido", [False, True])
+def test_el_estado_lleva_el_audio_solo_si_se_pide(tmp_path, pedido):
+    from telmeow_teleop.audio_operador import AudioDemo
+
+    servidor = cp.ServidorInterfaz(tmp_path, Biblioteca(tmp_path), puerto=0,
+                                   audio=AudioDemo() if pedido else None)
+    servidor.publicar_estado(cp.estado_interfaz(enlace=True))
+    servidor.parar()
+    assert ("audio" in servidor.estado) == pedido
+
+
+def test_la_pagina_solo_muestra_el_audio_si_el_estado_lo_trae():
+    html = (cp.CARPETA_VISOR / "telmeow_viewer.html").read_text(encoding="utf-8")
+    assert '<div class="tenue" id="n-audio" hidden></div>' in html
+    assert "audio.hidden = !e.audio;" in html

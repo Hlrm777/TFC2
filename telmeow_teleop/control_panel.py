@@ -610,6 +610,12 @@ class _MotoresDemo:
                                 "temperatura": {"1": 34}}, 0.0)
 
 
+def _audio_demo():
+    from .audio_operador import AudioDemo
+
+    return AudioDemo()
+
+
 class ServidorInterfaz:
     """El servidor de la interfaz: lo arranca ``main.py`` con ``--interfaz``.
 
@@ -622,9 +628,11 @@ class ServidorInterfaz:
     def __init__(self, carpeta_visor: Path, biblioteca: Biblioteca, *,
                  host: str = "127.0.0.1", puerto: int = PUERTO,
                  emisor: EmisorVideo | None = None, guia: dict | None = None,
-                 camara_robot: str | None = None, motores=None) -> None:
+                 camara_robot: str | None = None, motores=None, audio=None) -> None:
         #: Quien sabe cómo están los motores (``EscuchaMotores``), si se pidió.
         self.motores = motores
+        #: La voz con el robot (``audio_operador.AudioOperador``), si se pidió.
+        self.audio = audio
         self.carpeta_visor = Path(carpeta_visor)
         self.biblioteca = biblioteca
         self.guia = guia
@@ -655,6 +663,8 @@ class ServidorInterfaz:
         self.emisor.arrancar()
         if self.motores is not None:
             self.motores.arrancar()
+        if self.audio is not None:
+            self.audio.arrancar()
         self._hilo = threading.Thread(target=self._httpd.serve_forever, name="interfaz",
                                       daemon=True)
         self._hilo.start()
@@ -669,6 +679,8 @@ class ServidorInterfaz:
         self.emisor.parar()
         if self.motores is not None:
             self.motores.parar()
+        if self.audio is not None:
+            self.audio.parar()
 
     def pendientes(self) -> list[Orden]:
         """Las órdenes que llegaron desde la última vez. Las vacía el bucle."""
@@ -688,6 +700,8 @@ class ServidorInterfaz:
             estado = {**estado, "camara_robot": self.camara_robot}
         if self.motores is not None:
             estado = {**estado, "motores": self.motores.resumen()}
+        if self.audio is not None:
+            estado = {**estado, "audio": self.audio.resumen()}
         self.estado = estado
 
 
@@ -777,13 +791,15 @@ class _PipelineDemo:
 
 def ejecutar_demo(puerto: int = PUERTO, carpeta: Path | None = None, abrir: bool = True,
                   duracion_s: float | None = None, guia: dict | None = None,
-                  camara_robot: str | None = None, estado_motores: bool = False) -> int:
+                  camara_robot: str | None = None, estado_motores: bool = False,
+                  audio: bool = False) -> int:
     """El servidor con video sintético y un estado falso. Ctrl-C (o la orden
     salir) termina. Con ``guia``, el ensayo de una sesión de verificación."""
     carpeta = carpeta or AppConfig.from_env().paths.stories_dir
     servidor = ServidorInterfaz(CARPETA_VISOR, Biblioteca(carpeta), puerto=puerto, guia=guia,
                                 camara_robot=camara_robot,
-                                motores=_MotoresDemo() if estado_motores else None)
+                                motores=_MotoresDemo() if estado_motores else None,
+                                audio=_audio_demo() if audio else None)
     demo = _PipelineDemo(servidor)
     servidor.arrancar()
     print(f"DEMO de la interfaz en {servidor.url} (cuentos de {carpeta}). Ctrl-C para salir.")
@@ -838,6 +854,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="ensenar en la pagina como estan los motores del robot (lo cuenta "
                              "raspberry/motor_driver.py): para quien mantiene el robot, no "
                              "para quien narra")
+    parser.add_argument("--audio", nargs="?", const="", default=None, metavar="IP_DEL_ROBOT",
+                        help="hablar con los ninos por el robot (raspberry/robot_audio.py): abre "
+                             "tu microfono y tus auriculares. Con la IP del robot solo acepta su "
+                             "sonido")
     args, resto = parser.parse_known_args(argv)
     try:
         camara_robot = direccion_camara_robot(args.camara_robot)
@@ -854,7 +874,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
         return ejecutar_demo(args.puerto, args.stories_dir, abrir=not args.sin_navegador,
                              guia=guia, camara_robot=camara_robot,
-                             estado_motores=args.estado_motores)
+                             estado_motores=args.estado_motores,
+                             audio=args.audio is not None)
 
     from .broker import asegurar_broker
 
@@ -879,6 +900,8 @@ def main(argv: list[str] | None = None) -> int:
             argumentos += ["--camara-robot", camara_robot]
         if args.estado_motores:
             argumentos.append("--estado-motores")
+        if args.audio is not None:
+            argumentos += ["--audio"] + ([args.audio] if args.audio else [])
         return pipeline(argumentos + resto)
     finally:
         for proceso in arrancados:

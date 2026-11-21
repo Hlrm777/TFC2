@@ -11,8 +11,9 @@
 #
 # QUE NO DEMUESTRA: la salida por HDMI o DSI (aqui la pantalla es falsa), una
 # camara de verdad (aqui es un video o una imagen fabricada), los motores (aqui
-# son simulados, aunque hablan su mismo protocolo), el arranque con systemd, ni la velocidad de una Raspberry: los tiempos que salen aqui son de
-# esta maquina, no del robot.
+# son simulados, aunque hablan su mismo protocolo), el sonido (aqui el eco y los
+# ninos son fabricados), el arranque con systemd, ni la velocidad de una
+# Raspberry: los tiempos que salen aqui son de esta maquina, no del robot.
 name: Raspberry en ARM
 
 on:
@@ -23,6 +24,10 @@ on:
       - "tools/probar_ojos_y_camara.py"
       - "tools/probar_motores.py"
       - "tools/simulador_dynamixel.py"
+      - "tools/probar_audio.py"
+      - "tools/simulador_sala.py"
+      - "telmeow_teleop/audio_operador.py"
+      - "tests/test_raspberry_audio.py"
       - "tests/test_raspberry_motores.py"
       - "tests/test_story_display.py"
       - "tests/test_raspberry_ojos_y_camara.py"
@@ -52,7 +57,7 @@ jobs:
       - name: Instalar Python, git y Mosquitto
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends python3 python3-venv git ca-certificates mosquitto
+          apt-get install -y --no-install-recommends python3 python3-venv git ca-certificates mosquitto libportaudio2
 
       - uses: actions/checkout@v4
 
@@ -74,9 +79,11 @@ jobs:
           /venv/bin/pip install --only-binary=:all: -r raspberry/requirements.txt
           /venv/bin/pip install pytest==8.3.3 pypdf==6.21.4
           /venv/bin/pip check
+          # sounddevice encuentra PortAudio (no hay tarjeta: solo que la biblioteca carga)
+          /venv/bin/python -c "import sounddevice; print('PortAudio', sounddevice.get_portaudio_version()[1])"
 
-      - name: Pruebas de los cuatro programas
-        run: /venv/bin/python -m pytest tests/test_story_display.py tests/test_raspberry_ojos_y_camara.py tests/test_raspberry_motores.py -q -rs
+      - name: Pruebas de los cinco programas
+        run: /venv/bin/python -m pytest tests/test_story_display.py tests/test_raspberry_ojos_y_camara.py tests/test_raspberry_motores.py tests/test_raspberry_audio.py -q -rs
 
       - name: Levantar Mosquitto
         run: |
@@ -97,3 +104,8 @@ jobs:
         run: |
           set -o pipefail
           { echo '```'; /venv/bin/python tools/probar_motores.py 2>/dev/null; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: La voz, de punta a punta (eco y ninos simulados, por UDP)
+        run: |
+          set -o pipefail
+          { echo '```'; /venv/bin/python tools/probar_audio.py 2>/dev/null; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"

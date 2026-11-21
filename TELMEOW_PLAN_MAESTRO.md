@@ -172,7 +172,7 @@ cambia respecto al plan original.
 | **P8** — Entrenamiento FER-2013 | ✅ **hecho el 2026-10-20** · FER-2013 original verificado, partición oficial, reproducible bit a bit · **58.0 %** en la prueba oficial (cinco clases), por debajo del 60-70 % esperado: la red del legacy infraajusta · **P8.1 hecho el 2026-10-24**: la red mayor `vgg` llega al **73.6 %**, en archivo aparte | `675b9fe` |
 | P7 — Integración | ✅ **cerrado el 2026-11-08** · código hecho el 2026-10-26, sesión con el operador el 2026-11-02 · una cámara, los tres estimadores, panel al lado, cuatro CSV que leen las herramientas de siempre, publicación a 20 Hz en su propio hilo (H54), gesto de página en `j`/`l`, latencia desde la captura (P7.3) · medido: 19.9 Hz, latencia captura→mensaje 96 ms y pantalla+cámara 203 ms (a oscuras), emoción 7 de 9 · después de la sesión: emoción en su hilo (P7.1), pausa suave y cara tapada a neutral (H56) · P6.5 hecho · **sesión final el 2026-11-03**: tristeza 92-97 %, enojo 93 %, lectura 98 %, captura→mensaje 64 ms · de ella salen **la cabeza que no vibra (P7.4) y la mano a la cara (P7.5)**, verificadas el 2026-11-07 (p75) · de p75 sale **el P7.6**: la cabeza sigue con las manos en las mejillas, el enojo pide más con la cabeza baja, la zona muerta crece con el ruido y el robot se pausa con poca luz · p76, el 2026-11-07, y de ella **el P7.7**: la cabeza toma el neutro al calibrar (H66), sin cara va al frente y se pausa (H67), la mano perdida aguanta si la otra sigue · el reentrenamiento (p77) mejora el neutral 4 puntos y no llega al criterio; el enojo mirando abajo lo apaga la regla del cabeceo, que a 0.015 lo recupera (12 → 74 % reproducido) · confirmado en p78 (2026-11-08): el reentrenado no vale; **la regla del enojo pasa a 0.015** (enojo mirando abajo 3 → 46 %, sin enojo falso) · **P7.8**: zona muerta de 5° en los brazos y los vistazos de hasta 3 s conservan la expresión · **cerrado el 2026-11-08 por decisión del operador** con los límites declarados (latencia de la cámara, H65, H68, H60): ver «Los límites con que se cierra el P7»; el P7.8 se ve en vivo en la primera sesión del P10 | `1cbaa35`, `6ca0f01`, `b4cce10`, `78b3d50`, `de4827a`, `3bd2be8` |
 | P10 — Interfaz de narración | ✅ **cerrado el 2026-11-14** (código el 2026-11-08, sesiones del 2026-11-10 al 11-14) · la interfaz final, dentro del visor (`?modo=narracion`), servida por `main.py --interfaz` en el 8001: el robot y la cámara del operador a la izquierda, el libro a la derecha (pdf.js), los botones y TODAS las teclas en el navegador, sin cifras de diagnóstico · página y gesto en el mismo envío y retenidos para el P11; en pausa no se pasa de página · los 20 libros álbum con su número de páginas (pypdf) · un comando para la sesión (`python -m telmeow_teleop.control_panel`) y `--demo` sin cámara · H69 · **sesión p10 (2026-11-10)**: las teclas, la página con su gesto (21 de 21) y los brazos, bien; al operador la interfaz le pareció intuitiva y prefiere la vista de frente; los fps con la interfaz, 88 % de los de sin ella (se pedía 90); **H70** (la sonrisa con la cabeza baja) y **H71** (la cámara a 15 fps) · **P10.1**: el voto de un enojo descartado va a la segunda opción del modelo (feliz leyendo, 25 → 81 % reproducido) · **H71 corregido**: la compensación de contraluz de la cámara se apaga al abrirla (15 → 30 fps medidos) · **confirmación del 2026-11-12** (de noche, en otra habitación): feliz leyendo 77 % y neutral leyendo 92 % (P10.1 ✅), 18-21 fps sin tramos a 15 y 97 % de los fps de sin interfaz (H71 ✅) · **H72**: al mirar al pie de la pantalla el operador baja más de lo que el cuello del robot sigue (tope a 21° del operador) · **P10.2**: la ganancia hacia abajo se comprime lejos del frente y el tope llega a los 37° (15.8 → 0 s en el tope, reproducido) · **sesión del 2026-11-13**: P10.2 ✅ (0.0 s en el tope bajando hasta 37°), la compensación de contraluz apagada no mete temblor (0.91 veces el ruido de puesta), los dos brazos a la vista quietos (0.0°) y la vista de frente por defecto · **sesión de velocidad del 2026-11-14**: con la interfaz el bucle va al 81 % (robot de frente) y al 85 % (desde detrás) de sin ella, y no al 90; la publicación, en 20.0 Hz · **P10.3** (propuesto por el operador): la narración ya no abre la ventana de OpenCV (22.8 → 26.0 fps medidos, sin navegador) y el robot se dibuja con menos píxeles y a 30 cuadros; repetida la sesión de velocidad, **92 % con las dos vistas** (criterio 90) · límites declarados en «Con qué se cierra el P10» · la sesión se lleva con `tools/sesion_verificacion.py --narracion`, que enseña la tabla de cada grabación antes de lanzarla (protocolo p10, que comprueba también el P7.8 en vivo) | `7ad590a`, `e9c7010`, `741ac4d`, `7e8f119`, `9f59c41`, `9e2eb2a` |
-| P11 — Los programas de la Raspberry | ✅ **código hecho y probado sin hardware el 2026-11-15** (el robot no se fabrica: decisión del operador) · `raspberry/story_display.py` (el cuento), `eye_display.py` (los ojos), `robot_camera.py` (la cámara de la frente) y `motor_driver.py` (los seis DYNAMIXEL, por la OpenRB como puente USB), los cuatro con la regla de no enseñar errores ni cerrarse · la interfaz gana «Lo que ve el robot» (`--camara-robot`), con aviso de «sin señal» · los motores, probados con la biblioteca oficial de ROBOTIS contra un simulador a nivel de bytes del cable · **probado en ARM de 64 bits** (GitHub, Debian 12 y 13, Mosquitto de verdad): 123 pruebas y las tres de punta a punta en verde · en la PC, con libros reales: cambio de página 24-35 ms, expresión nueva 35 ms + 350 de fundido, video a 15 fotos por segundo, orden al motor 12 ms · desviación avisada: `pypdfium2` en lugar de `pdf2image` · **límites declarados**: nunca ejecutado en una Raspberry; sin probar HDMI/DSI, la cámara real (`picamera2`), motores reales (cero y sentido de cada articulación sin calibrar), systemd ni la velocidad allí; el audio, sin código | `634c0fd`, `189793a`, `35e04a4` |
+| P11 — Los programas de la Raspberry | ✅ **código hecho y probado sin hardware el 2026-11-15** (el robot no se fabrica: decisión del operador) · `raspberry/story_display.py` (el cuento), `eye_display.py` (los ojos), `robot_camera.py` (la cámara de la frente) y `motor_driver.py` (los seis DYNAMIXEL, por la OpenRB como puente USB), los cuatro con la regla de no enseñar errores ni cerrarse · la interfaz gana «Lo que ve el robot» (`--camara-robot`), con aviso de «sin señal» · los motores, probados con la biblioteca oficial de ROBOTIS contra un simulador a nivel de bytes del cable · **probado en ARM de 64 bits** (GitHub, Debian 12 y 13, Mosquitto de verdad): 123 pruebas y las tres de punta a punta en verde · en la PC, con libros reales: cambio de página 24-35 ms, expresión nueva 35 ms + 350 de fundido, video a 15 fotos por segundo, orden al motor 12 ms · desviación avisada: `pypdfium2` en lugar de `pdf2image` · **límites declarados**: nunca ejecutado en una Raspberry; sin probar HDMI/DSI, la cámara real (`picamera2`), motores reales (cero y sentido de cada articulación sin calibrar), systemd ni la velocidad allí · **la voz en los dos sentidos (P11.5, 2026-11-21)**, sin turnos, con cancelador de eco propio: 27 dB de eco quitado y el niño intacto, con eco y voces simulados; nunca con tarjeta de sonido | `634c0fd`, `189793a`, `35e04a4` |
 | P9 — Evaluación comparativa | ⬜ | |
 
 **1684 pruebas en verde** (desde el 2026-11-14, P10.3: 1679 + 5 de la sesión sin ventana y el robot más ligero; desde el 2026-11-13, P10.2: 1629 + 21 de la compresión del cabeceo hacia abajo + 18 de la sesión que la confirma + 11 de la sesión corta de velocidad —la medición de la cámara, el brazo a la vista y el tope en el informe, la vista de frente—; desde el 2026-11-10, P10.1 y H71: 1610 + 16 de la segunda opción tras un enojo descartado + 3 de la compensación de contraluz; desde el 2026-11-08, P10: 1449 + 117 —el envío de página y gesto, los cuentos, las órdenes del navegador frente a sus teclas, el servidor de la interfaz, el broker, el comando de la sesión y el HTML del modo narración— + 44 de la guía de la sesión del P10; antes, 1437 + 12 del P7.8 —la zona de los brazos y los vistazos—; 1429 + 8 de la confirmación del reentrenamiento y la regla suave; desde el 2026-11-07: 1404 + 25 del P7.7 —el neutro de la cabeza al calibrar, sin cara, la mano perdida y el reentrenamiento—; antes, 1363 + 41 del P7.6 —la guarda con la malla, el enojo con el cabeceo, el ruido de la malla y la pausa por poca luz, y la sesión de los ajustes—; desde el 2026-11-06: 1303 + 60 del P7.4 y el P7.5 —la zona muerta y la reproducción del filtro, la mano a la cara con sus grabaciones y la geometría del visor, y la sesión de los gestos—; desde el 2026-11-03: 1257 + 15 del análisis del P6.5 + 19 de lo que salió de sus sesiones —la marca de inicio de calibración, la regla de las cejas y la guarda de la cabeza— + 12 del script de la sesión de verificación; desde el 2026-11-02: 1238 + 19 de lo que salió de la sesión del P7 —el hilo de emoción, la pausa suave, la cara tapada y los dos instrumentos corregidos—; desde el 2026-10-26: 1174 + 64 del P7; antes: 600 + 141 del P5.3 + 49 del P5.4 + 41 del P5.5 + 13 del P5.6 + 86 del P5.7 + 30 de las herramientas de reproducción y de medida + 93 del P6 + 24 del analizador del registro de emoción + 35 del P8 + 3 de la aclaración del protocolo del P6.1 + 20 del 2026-10-24: manos, retorno a neutral, recortes y evaluador offline + 7 del P8.1 + 27 del 2026-10-25: los backends del P6.4 y su combinación, la calibración de la cara neutra y su reproducción offline, los criterios del evaluador, la descarga de modelos, la etiqueta 7 y la carpeta de recortes apartada + 5 del 2026-10-26: neutral sin apoyo), más 2 del P6 que solo corren donde están DeepFace y HSEmotion (§4.0.8) y en `.venv` se saltan. Entorno: CPython 3.12.1 x64, `.venv` en el repositorio.
@@ -237,9 +237,10 @@ Los 14 originales, más dos encontrados al ejecutar los prompts (marcados
 │   ├── eye_display.py        ✅ P11.1 · los ojos · ídem
 │   ├── robot_camera.py       ✅ P11.2 · la cámara de la frente · ídem (picamera2 sin probar)
 │   ├── motor_driver.py       ✅ P11.4 · los seis motores · contra DYNAMIXEL simulados, nunca reales
+│   ├── robot_audio.py        ✅ P11.5 · la voz, en los dos sentidos · eco y niños simulados, nunca con tarjeta
 │   ├── OPENRB.md             la puesta en marcha de la OpenRB y los motores (sin seguir nunca)
 │   ├── telmeow-*.service     el arranque con systemd (sin probar)
-│   └── requirements.txt      pygame, pypdfium2, paho-mqtt, opencv-python-headless
+│   └── requirements.txt      pygame, pypdfium2, paho-mqtt, opencv-python-headless, dynamixel-sdk, sounddevice
 ├── telmeow_viewer/           ✅ el visor 3D y sus 40 STL · en git desde el 2026-09-06
 │   ├── telmeow_viewer.html   la autoridad sobre el rig y los límites
 │   └── *.stl, *.png          mallas de Fusion y texturas de los ojos
@@ -5317,7 +5318,7 @@ El hardware del diseño, del esquema de conexiones del operador:
 | Pantalla de los ojos | 5", 800×480, DSI (cable FPC) | `eye_display.py` |
 | Cámara de la frente | Raspberry Pi Camera Module 3 (cable FPC) | `robot_camera.py --fuente picamera2` |
 | Motores | 6 DYNAMIXEL XL430-W250-T, por una placa OpenRB-150 | `motor_driver.py` (P11.4) |
-| Altavoz y micrófono | módulos Gravity, por GPIO | **ninguno** (abajo) |
+| Altavoz y micrófono | ~~módulos Gravity, por GPIO~~ → una tarjeta de sonido USB con micrófono y salida de altavoz (propuesta: Waveshare «USB TO AUDIO»), decisión del 2026-11-21 | `robot_audio.py` (P11.5) |
 
 Con 4 GB, guardar en memoria las páginas del libro más largo (~370 MB) cabe:
 la caché en disco no hace falta.
@@ -5471,6 +5472,72 @@ del protocolo. **El `cero` y el `signo` de cada articulación son de partida**:
 solo se pueden fijar con el robot montado, y hasta entonces no se sabe si un
 motor giraría al revés.
 
+### P11.5 — La voz del robot, en los dos sentidos ✅ 2026-11-21
+
+**Lo pidió el operador** (2026-11-15 y 2026-11-21): sin la voz del narrador la
+teleoperación queda muda, y **sin turnos**: si un niño habla mientras el
+narrador lee, su voz tiene que llegar igual. Antes se cambió el hardware del
+esquema (abajo, «El audio»): una sola tarjeta de sonido USB con micrófono y
+salida de altavoz (propuesta: Waveshare «USB TO AUDIO»), el micrófono tras la
+espiral del pecho y el altavoz, con su cable, tras el orificio de la boca.
+
+| Dónde | Qué | Cómo |
+|---|---|---|
+| Raspberry | `raspberry/robot_audio.py` | abre la tarjeta (entrada y salida en un solo flujo, con un solo reloj), suena lo que llega de la PC, quita del micrófono el eco de lo que sonó y manda el resto a la PC |
+| PC | `telmeow_teleop/audio_operador.py` | `--audio [IP_DEL_ROBOT]` en el comando de la sesión: abre el micrófono y los auriculares del narrador, con el mismo núcleo |
+| Interfaz | `#n-audio` | una línea en la franja de estado, solo con `--audio`: «hablando con el robot», «sin sonido del robot hace N s» o «no puedo abrir tu micrófono» |
+
+**Por la red**: paquetes UDP de 20 ms (16 000 muestras/s, 16 bits, una voz;
+256 kbit/s por sentido). Cada uno lleva su número de orden; un colchón de 60 ms
+los ordena, rellena con silencio los perdidos y tira los que llegan tarde o
+sobran: nunca se atasca ni acumula retraso. El robot manda a la PC del broker;
+la PC responde a la dirección de la que le llega el robot, y con la IP del robot
+no acepta a nadie más (para que nadie de la red se lleve la voz del narrador).
+La PC escucha en el puerto UDP 8003: el cortafuegos de Windows tiene que
+dejarlo entrar.
+
+**El eco** (`Cancelador`): un filtro adaptativo por bloques en frecuencia
+(PBFDAF, NLMS) que aprende el camino altavoz → aire → micrófono, con hasta
+400 ms de cola, y lo resta. Deja de aprender cuando lo que queda tras restar
+supera en 6 dB lo que debería quedar si solo hubiera eco (alguien habla cerca
+del robot); si eso dura más de 4 s, el camino cambió y vuelve a aprender; un
+bloque que saldría más fuerte que lo grabado se manda sin tocar. Tres errores
+de diseño salieron al medir, no al escribir: el paso normalizado solo por el
+último bloque (no convergía), un detector de habla que comparaba con el eco
+del bloque en vez del suavizado (se congelaba solo) y una puerta que no dejaba
+aprender entre sílaba y sílaba, justo cuando llega el eco de la anterior (con
+150 ms de retraso apenas pasaba de 10 dB en 30 s).
+
+**Comprobado sin tarjeta** (`tools/simulador_sala.py` fabrica el eco —60 ms de
+retraso, una cola de rebotes, casi la misma fuerza que lo sonado— y un niño
+que habla de los 10 a los 16 s a la vez que el narrador; las voces son
+sintéticas, con el espectro y el ritmo de la voz). 29 pruebas
+(`tests/test_raspberry_audio.py`) y de punta a punta por UDP
+(`tools/probar_audio.py`, 24 s):
+
+| | PC |
+|---|---|
+| Paquetes en cada sentido / perdidos | 1203-1204 / 0 |
+| Del micrófono de la PC al altavoz del robot | mediana 47 ms (sin las tarjetas de verdad, ~10-40 ms cada una) |
+| Del micrófono del robot a la PC | mediana 62 ms |
+| Eco quitado, solo el narrador (de los 4 a los 10 s) | 27 dB |
+| Eco quitado, hablando el niño a la vez | 33 dB |
+| El niño tras quitar el eco (correlación, 1 = intacto) | 0.999 |
+| Eco quitado tras 6-30 s, con retrasos de 20 a 300 ms | 35-48 dB |
+| Coste por bloque de 20 ms | ~0.1 ms |
+
+**Lo que esto no dice** (límites): cómo suena. El eco simulado es lineal y sin
+ruido de sala; un altavoz pequeño a mucho volumen distorsiona, y esa parte un
+cancelador lineal no la quita: se baja el volumen o se aparta el altavoz. Las
+voces sintéticas no son niños de verdad. La tarjeta real (`sounddevice` con
+PortAudio) no se ha abierto nunca en la Raspberry, ni la de la PC desde este
+programa (las pruebas no abren el micrófono del operador). Si el cancelador de
+aquí no bastara, Raspberry Pi OS trae el de WebRTC como módulo de PipeWire: se
+lanza el programa con `--sin-cancelar` y el dispositivo «echo-cancel» del
+sistema. El narrador tiene que usar **auriculares**: por los altavoces de la PC
+los niños se oirían a sí mismos con retraso (el cancelador también corre en la
+PC, pero con micrófono y altavoz de tarjetas distintas no lo quita del todo).
+
 ### Con qué se cierra el P11
 
 **Hecho y comprobado sin hardware:** los cuatro programas, sus 123 pruebas, la
@@ -5503,8 +5570,7 @@ en el navegador.
   «Robot conectado» sigue queriendo decir solo que hay enlace con el broker.
   Comprobado con `motor_driver.py` contra los motores simulados (seis bien; uno
   averiado y otro desenchufado; el programa parado) y en la página con la demo.
-- **El audio no tiene código**: ni la voz del narrador hacia el altavoz del
-  robot ni el micrófono hacia el narrador. El operador lo reabrió el 2026-11-15:
+- **El audio** (P11.5, hecho el 2026-11-21; esto es cómo se llegó). El operador lo reabrió el 2026-11-15:
   sin la voz del narrador la teleoperación queda muda. Los dos módulos del
   esquema no sirven para voz con una Raspberry: el micrófono es analógico (la
   Raspberry no tiene entradas analógicas) y el altavoz Gravity es un zumbador
@@ -5546,7 +5612,8 @@ en el navegador.
 | ~~El programa de los motores~~ | ✅ hecho en el P11.4 (2026-11-15) | | |
 | ~~Enseñar en la interfaz el estado de los motores~~ | ✅ hecho como opción, `--estado-motores` (2026-11-15) | | |
 | Calibrar el cero y el sentido de cada articulación, y afinar velocidades | quien construya el robot | que exista el robot | `raspberry/OPENRB.md`, apartado 4 |
-| El audio: la voz del narrador al altavoz del robot (y, si se quiere, el micrófono del robot al narrador) | Claude | que el operador elija la pieza de audio USB (candidatos arriba) y diga si quiere el programa. Reabierto el 2026-11-15: el 2026-11-14 quedó a criterio de Claude y no se hizo | el programa de la voz, con una salida de sonido de prueba como las de la cámara: uno o dos días; sin hardware solo se prueba que el sonido llega entero y con qué retraso, no cómo suena |
+| ~~El programa de la voz, en los dos sentidos~~ | ✅ hecho en el P11.5 (2026-11-21) | | |
+| Probar la voz con la tarjeta y el altavoz de verdad (volumen, distorsión, si basta el cancelador de aquí o hace falta el de PipeWire) | quien construya el robot | que exista el hardware | `robot_audio.py --listar` y una sesión de prueba |
 | Añadir a la figura de conexiones el USB-C de datos Raspberry–OpenRB | el operador (lo asumió el 2026-11-15) | al redactar el capítulo de electrónica | un dibujo |
 | Cambiar en la figura y en la tabla de componentes el altavoz y el micrófono | el operador | la decisión del audio | un dibujo y dos filas |
 | Elegir si el sonido del cuento sale por el monitor (HDMI) o solo por el robot | el operador | saber si su monitor trae altavoces (lo sabe por su ficha) | una respuesta |

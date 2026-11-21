@@ -170,7 +170,8 @@ def main(argv: list[str] | None = None) -> int:
         f = correr(args.segundos, red=red, adaptable=False)
         print()
         imprimir(f, "Lo mismo con el colchon FIJO de 60 ms:")
-    margen = 20 if red is None else 50
+    # Por internet, como mucho un 5 % de los paquetes tarde (los dos sentidos).
+    margen = 20 if red is None else 0.05 * 2 * r["bloques_robot"]
     bien = (r["suena_en_el_robot"] and r["llega_a_la_pc"]
             and r["eco_quitado_solo_narrador_db"] >= 20 and r["nino_intacto_correlacion"] >= 0.95
             and r["tarde"] <= margen)

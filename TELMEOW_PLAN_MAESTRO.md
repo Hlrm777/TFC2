@@ -5642,7 +5642,12 @@ retrasa, desordena y pierde paquetes; `tools/probar_audio.py --internet
 | Eco quitado | 27 dB | 28 dB |
 
 Con 10 ms de irregularidad: 49 cortes, colchón de 80 ms, 141 ms de la PC al
-altavoz. En el wifi (sin red simulada): 0 cortes, colchón de 60 ms, 47 ms;
+altavoz. En ARM (GitHub, Debian 12 y 13), con la misma red simulada: 188-204
+cortes con el colchón que se ajusta solo frente a 386-401 con el fijo, colchón
+de 120-140 ms y 161 ms de la PC al altavoz; esa máquina compartida añade su
+propia irregularidad a la simulada, y por eso salen más cortes que en la PC.
+El criterio de aprobado de la herramienta es el de las pruebas: como mucho un
+5 % de los paquetes tarde (el primero, «50», no lo cumplía en ARM). En el wifi (sin red simulada): 0 cortes, colchón de 60 ms, 47 ms;
 nada cambia respecto al P11.5.
 
 **Los movimientos, también suaves** (lo pidió el operador el 2026-11-21: los
